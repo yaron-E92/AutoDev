@@ -456,6 +456,20 @@ Read `.codex-run/current/implementer.md`.
 
 Implement the issue directly in the workspace.
 
+After implementing the issue, write a concise Git commit message to:
+
+.codex-run/current/commit-message.txt
+
+Rules for the commit message:
+- One short first line.
+- Prefer imperative mood.
+- Mention the affected area or behavior.
+- Do not include markdown.
+- Do not include quotes around the message.
+
+Example:
+Show item names in expiring entry lists
+
 Step 5 — Local check
 
 Run:
