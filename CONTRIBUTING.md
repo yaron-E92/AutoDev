@@ -132,7 +132,10 @@ stay common at the root. OS-specific source scripts belong under:
 
 ```text
 windows/scripts/
+linux/run-once.sh
 linux/scripts/
+linux/systemd/
+linux/config.example.env
 ```
 
 ---

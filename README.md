@@ -207,7 +207,10 @@ promptTemplates/     common automation prompt templates
 skill/               common issue-to-PR skill
 codex-profiles.json  common verification profile defaults
 windows/scripts/     Windows PowerShell source scripts
-linux/scripts/       Linux-specific script area
+linux/run-once.sh    Linux one-shot automation runner
+linux/scripts/       Linux shell source scripts
+linux/systemd/       Linux systemd unit templates
+linux/config.example.env  Linux project env template
 ```
 
 Keep common files at the root so Windows and Linux automation can use the same prompts, profiles, and skill instructions without duplication.
