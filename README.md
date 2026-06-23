@@ -239,6 +239,34 @@ Recreate the local aliases from the repository root:
 ./ollama-aliases/scripts/recreate-aliases.sh
 ```
 
+## Simple reader-coder benchmark
+
+This repository includes a simple baseline benchmark that sends a repository context bundle to one local Ollama model as a reader, then sends the reader's handoff brief to a second local Ollama model as a coder. The script writes prompts, raw Ollama responses, extracted thinking files, metrics, and a summary under `./.benchmark-results/...`.
+
+This is intentionally a broad baseline benchmark. It can miss smaller app surfaces when one large area dominates the input bundle, so area-based benchmarking is preferred for complex polyglot repositories. Benchmark outputs are intentionally gitignored.
+
+Run from this repository root:
+
+```bash
+mkdir -p ./.benchmark-results/phoodab-qwen35-devstral12
+
+./benchmarks/local-llm/reader_coder_bench.py \
+  --repo ../PHOODAB \
+  --reader qwen35-9b-32k \
+  --coder devstral-small2-12k \
+  --issue "Analyze the repository structure and propose the safest local verification approach for a small issue-to-PR automation run. Do not edit files." \
+  --max-chars 70000 \
+  --out ./.benchmark-results/phoodab-qwen35-devstral12
+```
+
+Inspect outputs from this repository root:
+
+```bash
+cat ./.benchmark-results/phoodab-qwen35-devstral12/summary.json | jq
+less ./.benchmark-results/phoodab-qwen35-devstral12/reader-brief.md
+less ./.benchmark-results/phoodab-qwen35-devstral12/coder-plan.md
+```
+
 Example area labels:
 
 ```text
