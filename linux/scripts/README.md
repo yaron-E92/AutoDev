@@ -11,6 +11,13 @@ Common files remain at the repository root:
 
 Do not duplicate common prompt, profile, or skill files under this directory.
 
+The Linux automation files checked into this repository are:
+
+- `linux/run-once.sh` for a timer-friendly one-shot automation run.
+- `linux/scripts/*.sh` for reusable Linux workflow scripts.
+- `linux/systemd/` for optional systemd unit templates.
+- `linux/config.example.env` as a sanitized project environment template.
+
 ## Automation Prompt
 
 Use this as the Linux automation task, adjusting repo names and paths.

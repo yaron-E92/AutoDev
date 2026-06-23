@@ -1,0 +1,13 @@
+[Unit]
+Description=Codex issue-to-PR automation run for %i
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+Environment=AUTOMATION_ROOT=~/automation
+EnvironmentFile=~/automation/state/%i.env
+WorkingDirectory=~/repos
+ExecStart=~/automation/run-once.sh ~/automation/state/%i.env
+TimeoutStartSec=3h
+Nice=5
