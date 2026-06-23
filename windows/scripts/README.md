@@ -1,6 +1,6 @@
-# Linux Scripts
+# Windows Scripts
 
-Linux-specific automation scripts belong here.
+Windows PowerShell automation scripts belong here.
 
 Common files remain at the repository root:
 
@@ -13,9 +13,7 @@ Do not duplicate common prompt, profile, or skill files under this directory.
 
 ## Codex Desktop Automation Prompt
 
-Use this as the Linux automation task, adjusting repo names and paths.
-
-This prompt assumes PowerShell 7 is available as `pwsh`, the automation scripts are installed under `$HOME/codex-tools`, and GitHub authentication is available through `GH_TOKEN` or the GitHub CLI.
+Use this as the Windows automation task, adjusting repo names and paths.
 
 ```text
 Use the issue-to-pr-automation skill.
@@ -34,7 +32,7 @@ Step 1 — Prepare
 
 Run:
 
-pwsh -File "$HOME/codex-tools/codex-prepare-next-ready-issue.ps1" -Username "OWNER" -Repo "REPO" -Base main -Remote origin -GhConfigDir ".codex-run/gh-config"
+pwsh -File "C:\Users\yaref92\codex-tools\codex-prepare-next-ready-issue.ps1" -Username "yaron-E92" -Repo "PHOODAB" -Base main -Remote origin -KeePassCliPath "C:\Program Files\KeePassXC\keepassxc-cli.exe" -KeePassDatabasePath "C:\Users\yaref92\Documents\CodexSecrets\codex-automation.kdbx" -KeePassKeyFilePath "C:\Users\yaref92\Documents\CodexSecretsKey\codex-automation.keyx" -KeePassEntryPath "PHOODAB_CODEX_EXPIRES28MAY2027" -KeePassNoPassword -GhConfigDir ".codex-run\gh-config"
 
 If it prints NO_READY_ISSUE, stop.
 
@@ -50,7 +48,7 @@ Step 3 — Render implementer prompt
 
 Run:
 
-pwsh -File "$HOME/codex-tools/codex-finalize-current-issue.ps1" -Mode RenderImplementerPrompt
+pwsh -File "C:\Users\yaref92\codex-tools\codex-finalize-current-issue.ps1" -Mode RenderImplementerPrompt
 
 Step 4 — Implement
 
@@ -76,7 +74,7 @@ Step 5 — Local check
 
 Run:
 
-pwsh -File "$HOME/codex-tools/codex-finalize-current-issue.ps1" -Mode LocalCheck
+pwsh -File "C:\Users\yaref92\codex-tools\codex-finalize-current-issue.ps1" -Mode LocalCheck
 
 If it prints LOCAL_CHECK_FAILED:
 - Read `.codex-run/current/local-repair.md`.
@@ -88,7 +86,7 @@ Step 6 — PR and CI
 
 Run:
 
-pwsh -File "$HOME/codex-tools/codex-finalize-current-issue.ps1" -Mode PrAndCi
+pwsh -File "C:\Users\yaref92\codex-tools\codex-finalize-current-issue.ps1" -Mode PrAndCi
 
 If it prints CI_FAILED:
 - Read `.codex-run/current/ci-repair.md`.
@@ -108,7 +106,7 @@ When PrAndCi prints CI_PASSED:
 If verification fails:
 - Run:
 
-pwsh -File "$HOME/codex-tools/codex-finalize-current-issue.ps1" -Mode RenderVerificationRepair
+pwsh -File "C:\Users\yaref92\codex-tools\codex-finalize-current-issue.ps1" -Mode RenderVerificationRepair
 
 - Read `.codex-run/current/verification-repair.md`.
 - Fix only the verifier gaps.
@@ -120,11 +118,11 @@ Step 8 — Mark ready
 
 When verification passes, run:
 
-pwsh -File "$HOME/codex-tools/codex-mark-current-issue.ps1" -Status ReadyForReview
+pwsh -File "C:\Users\yaref92\codex-tools\codex-mark-current-issue.ps1" -Status ReadyForReview
 
 If you must give up, run:
 
-pwsh -File "$HOME/codex-tools/codex-mark-current-issue.ps1" -Status Blocked -Message "Automation could not complete after repair attempts."
+pwsh -File "C:\Users\yaref92\codex-tools\codex-mark-current-issue.ps1" -Status Blocked -Message "Automation could not complete after repair attempts."
 
 Rules:
 - Never merge to main.
