@@ -15,12 +15,12 @@ Do not duplicate common prompt, profile, or skill files under this directory.
 
 Use this as the Linux automation task, adjusting repo names and paths.
 
-This prompt assumes the remote VM automation scripts are installed under `/home/codex-auto/automation/scripts`, and the target project has an environment file under `/home/codex-auto/automation/state`.
+This prompt assumes the Linux automation scripts are installed under `~/automation/scripts`, and the target project has an environment file under `~/automation/state`.
 
 ```text
 Use the issue-to-pr-automation skill.
 
-Run exactly one issue-to-PR cycle in this remote VM project.
+Run exactly one issue-to-PR cycle in this Linux project.
 
 Important:
 - Do not call `codex exec`.
@@ -34,13 +34,13 @@ Important:
 
 Environment file:
 
-/home/codex-auto/automation/state/PROJECT.env
+~/automation/state/PROJECT.env
 
 Step 1 — Prepare
 
 Run:
 
-/home/codex-auto/automation/scripts/with-env.sh /home/codex-auto/automation/state/PROJECT.env /home/codex-auto/automation/scripts/prepare-next-ready-issue.sh --owner OWNER --repo REPO --base main --remote origin
+~/automation/scripts/with-env.sh ~/automation/state/PROJECT.env ~/automation/scripts/prepare-next-ready-issue.sh --owner OWNER --repo REPO --base main --remote origin
 
 If it prints NO_READY_ISSUE, stop.
 
@@ -58,7 +58,7 @@ Step 3 — Render implementer prompt
 
 Run:
 
-/home/codex-auto/automation/scripts/with-env.sh /home/codex-auto/automation/state/PROJECT.env /home/codex-auto/automation/scripts/finalize-current-issue.sh --mode RenderImplementerPrompt
+~/automation/scripts/with-env.sh ~/automation/state/PROJECT.env ~/automation/scripts/finalize-current-issue.sh --mode RenderImplementerPrompt
 
 Step 4 — Implement
 
@@ -83,7 +83,7 @@ Step 5 — Local check
 
 Run:
 
-/home/codex-auto/automation/scripts/with-env.sh /home/codex-auto/automation/state/PROJECT.env /home/codex-auto/automation/scripts/finalize-current-issue.sh --mode LocalCheck
+~/automation/scripts/with-env.sh ~/automation/state/PROJECT.env ~/automation/scripts/finalize-current-issue.sh --mode LocalCheck
 
 If it prints LOCAL_CHECK_FAILED:
 - Read `.codex-run/current/local-repair.md`.
@@ -95,7 +95,7 @@ Step 6 — PR and CI
 
 Run:
 
-/home/codex-auto/automation/scripts/with-env.sh /home/codex-auto/automation/state/PROJECT.env /home/codex-auto/automation/scripts/finalize-current-issue.sh --mode PrAndCi
+~/automation/scripts/with-env.sh ~/automation/state/PROJECT.env ~/automation/scripts/finalize-current-issue.sh --mode PrAndCi
 
 If it prints CI_FAILED:
 - Read `.codex-run/current/ci-repair.md`.
@@ -115,7 +115,7 @@ When PrAndCi prints CI_PASSED:
 If verification fails:
 - Run:
 
-/home/codex-auto/automation/scripts/with-env.sh /home/codex-auto/automation/state/PROJECT.env /home/codex-auto/automation/scripts/finalize-current-issue.sh --mode RenderVerificationRepair
+~/automation/scripts/with-env.sh ~/automation/state/PROJECT.env ~/automation/scripts/finalize-current-issue.sh --mode RenderVerificationRepair
 
 - Read `.codex-run/current/verification-repair.md`.
 - Fix only the verifier gaps.
@@ -127,11 +127,11 @@ Step 8 — Mark ready
 
 When verification passes, run:
 
-/home/codex-auto/automation/scripts/with-env.sh /home/codex-auto/automation/state/PROJECT.env /home/codex-auto/automation/scripts/mark-current-issue.sh --status ReadyForReview
+~/automation/scripts/with-env.sh ~/automation/state/PROJECT.env ~/automation/scripts/mark-current-issue.sh --status ReadyForReview
 
 If you must give up, run:
 
-/home/codex-auto/automation/scripts/with-env.sh /home/codex-auto/automation/state/PROJECT.env /home/codex-auto/automation/scripts/mark-current-issue.sh --status Blocked --message "Automation could not complete after repair attempts."
+~/automation/scripts/with-env.sh ~/automation/state/PROJECT.env ~/automation/scripts/mark-current-issue.sh --status Blocked --message "Automation could not complete after repair attempts."
 
 Rules:
 - Never merge to main.
