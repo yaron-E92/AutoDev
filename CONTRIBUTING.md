@@ -119,6 +119,22 @@ Global reusable tooling belongs under:
 C:\Users\<you>\codex-tools
 ```
 
+Repository source files are split by portability:
+
+```text
+agentFiles/
+promptTemplates/
+skill/
+codex-profiles.json
+```
+
+stay common at the root. OS-specific source scripts belong under:
+
+```text
+windows/scripts/
+linux/scripts/
+```
+
 ---
 
 ## Labels

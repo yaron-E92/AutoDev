@@ -199,6 +199,19 @@ AGENTS.md
 
 That file explains the repo structure, architecture boundaries, and area label meaning.
 
+This repository keeps shared automation assets at the root and puts OS-specific files under OS folders:
+
+```text
+agentFiles/          common AGENTS.md templates
+promptTemplates/     common automation prompt templates
+skill/               common issue-to-PR skill
+codex-profiles.json  common verification profile defaults
+windows/scripts/     Windows PowerShell source scripts
+linux/scripts/       Linux-specific script area
+```
+
+Keep common files at the root so Windows and Linux automation can use the same prompts, profiles, and skill instructions without duplication.
+
 Example area labels:
 
 ```text
@@ -345,6 +358,12 @@ codex-finalize-current-issue.ps1
 codex-mark-current-issue.ps1
 ```
 
+In this repository, the Windows PowerShell source copies live under:
+
+```text
+windows/scripts/
+```
+
 ### 9.1 Prepare script
 
 The prepare script:
@@ -455,20 +474,6 @@ Step 4 — Implement
 Read `.codex-run/current/implementer.md`.
 
 Implement the issue directly in the workspace.
-
-After implementing the issue, write a concise Git commit message to:
-
-.codex-run/current/commit-message.txt
-
-Rules for the commit message:
-- One short first line.
-- Prefer imperative mood.
-- Mention the affected area or behavior.
-- Do not include markdown.
-- Do not include quotes around the message.
-
-Example:
-Show item names in expiring entry lists
 
 Step 5 — Local check
 

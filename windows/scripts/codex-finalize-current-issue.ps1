@@ -175,43 +175,13 @@ function Convert-RepoPathToFullPath {
     return [System.IO.Path]::GetFullPath((Join-Path "." $localPath))
 }
 
-function Get-CodexCommitMessage {
-    param(
-        [Parameter(Mandatory = $true)]
-        $State
-    )
-
-    $commitMessagePath = ".codex-run/current/commit-message.txt"
-
-    if (Test-Path $commitMessagePath) {
-        $message = Get-Content $commitMessagePath -Raw -Encoding UTF8
-        $message = $message.Trim()
-
-        if (-not [string]::IsNullOrWhiteSpace($message)) {
-            return $message
-        }
-    }
-
-    $issueNumber = [int]$State.IssueNumber
-    $issueTitle = [string]$State.IssueTitle
-
-    if (-not [string]::IsNullOrWhiteSpace($issueTitle)) {
-        return "Implement issue-$issueNumber`: $issueTitle"
-    }
-
-    return "Implement issue-$issueNumber via Codex"
-}
-
 function New-GitHubApiCommit {
     param(
         [Parameter(Mandatory = $true)]
         $State,
 
         [Parameter(Mandatory = $true)]
-        [array]$Changes,
-
-        [Parameter(Mandatory = $true)]
-        [string]$CommitMessage
+        [array]$Changes
     )
 
     $repoFullName = [string]$State.RepoFullName
@@ -234,6 +204,8 @@ function New-GitHubApiCommit {
         if ($status -eq "deleted") {
             $treeItems += @{
                 path = $path
+                mode = "100644"
+                type = "blob"
                 sha = $null
             }
 
@@ -288,7 +260,7 @@ function New-GitHubApiCommit {
     }
 
     $commitBody = @{
-        message = $CommitMessage
+        message = "Implement issue-$($State.IssueNumber) via Codex"
         tree = [string]$tree.sha
         parents = @($parentSha)
     } | ConvertTo-Json -Depth 30
@@ -682,15 +654,9 @@ switch ($Mode) {
                 Write-Host ("- {0}: {1}" -f $change.Status, $change.Path)
             }
 
-            $commitMessage = Get-CodexCommitMessage -State $state
-
-            Write-Host "Using commit message:"
-            Write-Host $commitMessage
-
             $newCommitSha = New-GitHubApiCommit `
                 -State $state `
-                -Changes $changes `
-                -CommitMessage $commitMessage
+                -Changes $changes
 
             $state.LastCommitSha = $newCommitSha
             $state.Status = "CommittedViaGitHubApi"
