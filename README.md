@@ -215,6 +215,30 @@ linux/config.example.env  Linux project env template
 
 Keep common files at the root so Windows and Linux automation can use the same prompts, profiles, and skill instructions without duplication.
 
+## Local LLM model aliases
+
+This repository includes reproducible Ollama aliases for local LLM benchmarking. Ollama must already be installed, and the base models must be pulled manually before recreating aliases.
+
+The aliases are pinned to explicit model tags for reproducibility:
+
+- `qwen35-9b-32k`
+- `qwen35-9b-64k`
+- `devstral-small2-12k`
+- `devstral-small2-16k`
+
+Pull the base models from the repository root:
+
+```bash
+ollama pull qwen3.5:9b-q4_K_M
+ollama pull devstral-small-2:24b-instruct-2512-q4_K_M
+```
+
+Recreate the local aliases from the repository root:
+
+```bash
+./ollama-aliases/scripts/recreate-aliases.sh
+```
+
 Example area labels:
 
 ```text
