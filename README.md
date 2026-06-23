@@ -267,6 +267,58 @@ less ./.benchmark-results/phoodab-qwen35-devstral12/reader-brief.md
 less ./.benchmark-results/phoodab-qwen35-devstral12/coder-plan.md
 ```
 
+## Area-based reader benchmark
+
+The area-based benchmark is the preferred shape for polyglot repositories. A single-reader benchmark can miss smaller app surfaces when backend or documentation context dominates the input bundle. Area readers keep backend, web, MAUI/mobile/desktop, CI, tests, docs, and API-client context separated long enough to prevent one large surface from drowning out the others.
+
+The script writes repo maps, routed area bundles, prompts, model outputs, metrics, and summaries under `./.benchmark-results/...`. Those outputs are intentionally gitignored. Model-generated verification commands still need human review and may later be replaced with deterministic script logic.
+
+Run a 32K reader comparison from this repository root:
+
+```bash
+mkdir -p ./.benchmark-results/phoodab-area-qwen35-32k-devstral12
+
+./benchmarks/local-llm/area_reader_bench.py \
+  --repo ../PHOODAB \
+  --reader qwen35-9b-32k \
+  --coder devstral-small2-12k \
+  --areas backend,web,maui,ci \
+  --issue "Analyze the complete repository structure, including backend, web, MAUI/mobile/desktop if present, tests, and CI. Propose the safest local verification approach for a small issue-to-PR automation run. Do not edit files." \
+  --max-chars-per-area 50000 \
+  --out ./.benchmark-results/phoodab-area-qwen35-32k-devstral12
+```
+
+Run a 64K reader comparison from this repository root:
+
+```bash
+mkdir -p ./.benchmark-results/phoodab-area-qwen35-64k-devstral12
+
+./benchmarks/local-llm/area_reader_bench.py \
+  --repo ../PHOODAB \
+  --reader qwen35-9b-64k \
+  --coder devstral-small2-12k \
+  --areas backend,web,maui,ci \
+  --issue "Analyze the complete repository structure, including backend, web, MAUI/mobile/desktop if present, tests, and CI. Propose the safest local verification approach for a small issue-to-PR automation run. Do not edit files." \
+  --max-chars-per-area 100000 \
+  --out ./.benchmark-results/phoodab-area-qwen35-64k-devstral12
+```
+
+Compare summaries from this repository root:
+
+```bash
+jq '{
+  reader,
+  coder,
+  max_chars_per_area,
+  areas,
+  area_metrics,
+  synthesis_metrics,
+  coder_metrics
+}' \
+  ./.benchmark-results/phoodab-area-qwen35-32k-devstral12/summary.json \
+  ./.benchmark-results/phoodab-area-qwen35-64k-devstral12/summary.json
+```
+
 Example area labels:
 
 ```text
