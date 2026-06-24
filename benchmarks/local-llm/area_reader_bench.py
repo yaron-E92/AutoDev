@@ -6,9 +6,11 @@ import fnmatch
 import json
 import os
 from pathlib import Path
+import shlex
 import sys
 import time
 from urllib import error, request
+import xml.etree.ElementTree as ET
 
 
 OLLAMA_CHAT_URL = "http://localhost:11434/api/chat"
@@ -262,6 +264,11 @@ def write_json(path, value):
     write_text(path, json.dumps(value, indent=2, sort_keys=True) + "\n")
 
 
+def write_executable_text(path, text):
+    write_text(path, text)
+    path.chmod(path.stat().st_mode | 0o755)
+
+
 def is_included_file(path):
     return path.name in INCLUDED_FILENAMES or path.suffix in INCLUDED_SUFFIXES
 
@@ -348,6 +355,522 @@ def build_repo_map(repo, files, skipped_large_files, skipped_unreadable_files):
             lines.append(f"- {item['path']}: {item['reason']}")
 
     return "\n".join(lines) + "\n"
+
+
+def read_json_object(path):
+    try:
+        value = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def xml_local_name(tag):
+    return tag.rsplit("}", 1)[-1]
+
+
+def read_csproj_facts(path):
+    facts = {
+        "use_maui": False,
+        "target_frameworks": [],
+        "android_target_frameworks": [],
+    }
+    try:
+        root = ET.fromstring(path.read_text(encoding="utf-8", errors="replace"))
+    except (OSError, ET.ParseError):
+        return facts
+
+    frameworks = []
+    for element in root.iter():
+        name = xml_local_name(element.tag)
+        text = (element.text or "").strip()
+        if name == "UseMaui" and text.lower() == "true":
+            facts["use_maui"] = True
+        elif name == "TargetFramework" and text:
+            frameworks.append(text)
+        elif name == "TargetFrameworks" and text:
+            frameworks.extend(part.strip() for part in text.split(";") if part.strip())
+
+    facts["target_frameworks"] = sorted(set(frameworks))
+    facts["android_target_frameworks"] = [
+        framework for framework in facts["target_frameworks"] if "android" in framework.lower()
+    ]
+    return facts
+
+
+def package_root(package_json_path):
+    parent = Path(package_json_path).parent.as_posix()
+    return "." if parent == "." else parent
+
+
+def package_manager_for_root(file_paths, root):
+    prefix = "" if root == "." else f"{root}/"
+    lockfiles = {
+        "package-lock.json": ("npm", ["npm", "ci"]),
+        "pnpm-lock.yaml": ("pnpm", ["pnpm", "install", "--frozen-lockfile"]),
+        "yarn.lock": ("yarn", ["yarn", "install", "--frozen-lockfile"]),
+        "bun.lockb": ("bun", ["bun", "install", "--frozen-lockfile"]),
+        "bun.lock": ("bun", ["bun", "install", "--frozen-lockfile"]),
+    }
+    for lockfile, value in lockfiles.items():
+        if f"{prefix}{lockfile}" in file_paths:
+            return value
+    return "npm", ["npm", "install"]
+
+
+def detect_repo_facts(repo, files, areas, routing):
+    file_paths = [item["path"] for item in files]
+    file_path_set = set(file_paths)
+
+    solutions = sorted(path for path in file_paths if path.endswith(".sln"))
+    dotnet_projects = sorted(path for path in file_paths if path.endswith(".csproj"))
+    workflows = sorted(
+        path
+        for path in file_paths
+        if path.startswith(".github/workflows/")
+        and (path.endswith(".yml") or path.endswith(".yaml"))
+    )
+    markdown_files = sorted(path for path in file_paths if path.endswith(".md"))
+
+    csproj_facts = {}
+    maui_projects = []
+    for relative_path in dotnet_projects:
+        facts = read_csproj_facts(repo / relative_path)
+        csproj_facts[relative_path] = facts
+        if facts["use_maui"] or facts["android_target_frameworks"]:
+            maui_projects.append(
+                {
+                    "path": relative_path,
+                    "target_frameworks": facts["target_frameworks"],
+                    "android_target_frameworks": facts["android_target_frameworks"],
+                }
+            )
+
+    package_roots = []
+    for relative_path in sorted(path for path in file_paths if path.endswith("package.json")):
+        root = package_root(relative_path)
+        package_json = read_json_object(repo / relative_path)
+        scripts = package_json.get("scripts", {})
+        dependencies = package_json.get("dependencies", {})
+        dev_dependencies = package_json.get("devDependencies", {})
+        if not isinstance(scripts, dict):
+            scripts = {}
+        if not isinstance(dependencies, dict):
+            dependencies = {}
+        if not isinstance(dev_dependencies, dict):
+            dev_dependencies = {}
+
+        package_manager, install_command = package_manager_for_root(file_path_set, root)
+        root_lower = root.lower()
+        dependency_names = set(dependencies) | set(dev_dependencies)
+        script_names = sorted(str(name) for name in scripts)
+        is_web = (
+            root_lower in {".", "web", "frontend"}
+            or "web" in root_lower
+            or "frontend" in root_lower
+            or "vite" in dependency_names
+            or "react" in dependency_names
+        )
+        has_api_client_generate = any("generate" in name.lower() for name in script_names) and (
+            "client" in root_lower
+            or "api" in root_lower
+            or any("openapi" in dependency.lower() or "swagger" in dependency.lower() for dependency in dependency_names)
+            or any("client" in name.lower() or "api" in name.lower() for name in script_names)
+        )
+        package_roots.append(
+            {
+                "path": relative_path,
+                "root": root,
+                "package_manager": package_manager,
+                "install_command": install_command,
+                "scripts": script_names,
+                "is_web": is_web,
+                "has_api_client_generate": has_api_client_generate,
+            }
+        )
+
+    api_client_hints = sorted(
+        path
+        for path in file_paths
+        if any(token in path.lower() for token in ("api-client", "apiclient", "openapi", "swagger"))
+    )
+
+    area_file_counts = {
+        area: sum(1 for item in files if area in item["areas"])
+        for area in SUPPORTED_AREAS
+    }
+
+    return {
+        "repo": str(repo),
+        "routed_areas": areas,
+        "routing": routing,
+        "file_count": len(files),
+        "area_file_counts": area_file_counts,
+        "solutions": solutions,
+        "dotnet_projects": dotnet_projects,
+        "csproj_facts": csproj_facts,
+        "maui_projects": maui_projects,
+        "package_roots": package_roots,
+        "web_package_roots": [item for item in package_roots if item["is_web"]],
+        "api_client_package_roots": [
+            item for item in package_roots if item["has_api_client_generate"]
+        ],
+        "api_client_hints": api_client_hints,
+        "workflow_files": workflows,
+        "markdown_file_count": len(markdown_files),
+        "markdown_files": markdown_files,
+    }
+
+
+def command(label, cwd, argv, optional=False):
+    return {
+        "label": label,
+        "cwd": cwd,
+        "argv": argv,
+        "optional": optional,
+    }
+
+
+def command_group(name, description, commands, recommended=False, reason="", manual=False):
+    return {
+        "name": name,
+        "description": description,
+        "recommended": recommended,
+        "reason": reason,
+        "manual": manual,
+        "commands": commands,
+    }
+
+
+def script_command_for_package(package_info, script_name):
+    manager = package_info["package_manager"]
+    if manager == "yarn":
+        return ["yarn", script_name]
+    if manager == "bun":
+        return ["bun", "run", script_name]
+    return [manager, "run", script_name]
+
+
+def build_verification_command_groups(facts, areas):
+    area_set = set(areas)
+    groups = []
+
+    groups.append(
+        command_group(
+            "env",
+            "Print local tool versions useful for interpreting benchmark verification.",
+            [
+                command("Show working directory", ".", ["pwd"]),
+                command("Show Python version", ".", ["python3", "--version"], optional=True),
+                command("Show dotnet SDK info", ".", ["dotnet", "--info"], optional=True),
+                command("Show Node version", ".", ["node", "--version"], optional=True),
+                command("Show npm version", ".", ["npm", "--version"], optional=True),
+            ],
+            recommended=True,
+            reason="Always useful for local environment diagnostics.",
+        )
+    )
+
+    dotnet_commands = []
+    for solution in facts["solutions"]:
+        dotnet_commands.append(command(f"Restore {solution}", ".", ["dotnet", "restore", solution]))
+        dotnet_commands.append(
+            command(
+                f"Build {solution}",
+                ".",
+                ["dotnet", "build", solution, "--no-restore", "--verbosity", "minimal"],
+            )
+        )
+    groups.append(
+        command_group(
+            "dotnet-solution",
+            "Restore and build detected .NET solution files from the repository root.",
+            dotnet_commands,
+            recommended=bool(dotnet_commands and area_set & {"backend", "maui", "tests"}),
+            reason="Detected .NET solution files." if dotnet_commands else "No .NET solution files detected.",
+        )
+    )
+
+    node_commands = []
+    for package_info in facts["package_roots"]:
+        install = package_info["install_command"]
+        node_commands.append(
+            command(
+                f"Install dependencies in {package_info['root']}",
+                package_info["root"],
+                install,
+                optional=install == ["npm", "install"],
+            )
+        )
+    groups.append(
+        command_group(
+            "node-root",
+            "Install dependencies for detected JavaScript package roots.",
+            node_commands,
+            recommended=bool(node_commands and area_set & {"web", "api-client", "tests"}),
+            reason="Detected package.json files." if node_commands else "No package.json files detected.",
+        )
+    )
+
+    api_commands = []
+    for package_info in facts["api_client_package_roots"]:
+        for script_name in package_info["scripts"]:
+            if "generate" in script_name.lower():
+                api_commands.append(
+                    command(
+                        f"Run {script_name} in {package_info['root']}",
+                        package_info["root"],
+                        script_command_for_package(package_info, script_name),
+                    )
+                )
+    groups.append(
+        command_group(
+            "api-client-generate",
+            "Run detected API client generation scripts.",
+            api_commands,
+            recommended=bool(api_commands and area_set & {"api-client", "web"}),
+            reason=(
+                "Detected package scripts that look like API client generation."
+                if api_commands
+                else "No API client generation scripts detected."
+            ),
+        )
+    )
+
+    web_commands = []
+    for package_info in facts["web_package_roots"]:
+        for script_name in ("lint", "test", "build"):
+            if script_name in package_info["scripts"]:
+                web_commands.append(
+                    command(
+                        f"Run {script_name} in {package_info['root']}",
+                        package_info["root"],
+                        script_command_for_package(package_info, script_name),
+                    )
+                )
+    groups.append(
+        command_group(
+            "web-app",
+            "Run detected web app lint, test, and build scripts.",
+            web_commands,
+            recommended=bool(web_commands and area_set & {"web", "tests"}),
+            reason="Detected web package scripts." if web_commands else "No web lint/test/build scripts detected.",
+        )
+    )
+
+    groups.append(
+        command_group(
+            "maui-android-doctor",
+            "Inspect .NET MAUI Android workload availability without invoking remote CI.",
+            [
+                command("Show dotnet workloads", ".", ["dotnet", "workload", "list"]),
+                command("Show dotnet SDK info", ".", ["dotnet", "--info"]),
+            ]
+            if facts["maui_projects"]
+            else [],
+            recommended=bool(facts["maui_projects"] and "maui" in area_set),
+            reason="Detected MAUI project files." if facts["maui_projects"] else "No MAUI projects detected.",
+        )
+    )
+
+    maui_build_commands = []
+    for project in facts["maui_projects"]:
+        android_frameworks = project["android_target_frameworks"]
+        if android_frameworks:
+            for framework in android_frameworks:
+                maui_build_commands.append(
+                    command(
+                        f"Build {project['path']} for {framework}",
+                        ".",
+                        [
+                            "dotnet",
+                            "build",
+                            project["path"],
+                            "-f",
+                            framework,
+                            "--no-restore",
+                            "--verbosity",
+                            "minimal",
+                        ],
+                    )
+                )
+        else:
+            maui_build_commands.append(
+                command(
+                    f"Build {project['path']}",
+                    ".",
+                    ["dotnet", "build", project["path"], "--verbosity", "minimal"],
+                )
+            )
+    groups.append(
+        command_group(
+            "maui-android-build",
+            "Build detected MAUI Android target frameworks locally.",
+            maui_build_commands,
+            recommended=bool(maui_build_commands and "maui" in area_set),
+            reason="Detected MAUI Android build targets." if maui_build_commands else "No MAUI Android targets detected.",
+        )
+    )
+
+    groups.append(
+        command_group(
+            "markdown-smoke",
+            "List markdown files to verify documentation-only changes stay visible and local.",
+            [command("List markdown files", ".", ["find", ".", "-name", "*.md", "-not", "-path", "./.git/*", "-print"])]
+            if facts["markdown_file_count"]
+            else [],
+            recommended=bool(facts["markdown_file_count"] and area_set & {"docs", "ci"}),
+            reason="Detected markdown files." if facts["markdown_file_count"] else "No markdown files detected.",
+        )
+    )
+
+    groups.append(
+        command_group(
+            "ci-manual-reference",
+            "Manual reference for detected workflow files; this group intentionally does not run remote CI.",
+            [],
+            recommended=False,
+            reason=(
+                "Detected workflow files: " + ", ".join(facts["workflow_files"])
+                if facts["workflow_files"]
+                else "No workflow files detected."
+            ),
+            manual=True,
+        )
+    )
+
+    return groups
+
+
+def recommended_command_groups(command_groups):
+    recommended = []
+    for group in command_groups:
+        if group["recommended"]:
+            recommended.append(
+                {
+                    "name": group["name"],
+                    "reason": group["reason"],
+                    "command_count": len(group["commands"]),
+                }
+            )
+    if not any(group["name"] == "env" for group in recommended):
+        recommended.insert(
+            0,
+            {
+                "name": "env",
+                "reason": "Always useful for local environment diagnostics.",
+                "command_count": 0,
+            },
+        )
+    return recommended
+
+
+def shell_function_name(group_name):
+    return "group_" + group_name.replace("-", "_")
+
+
+def render_verification_script(repo, command_groups):
+    lines = [
+        "#!/usr/bin/env bash",
+        "set -Eeuo pipefail",
+        "",
+        f"REPO_ROOT={shlex.quote(str(repo))}",
+        'cd "$REPO_ROOT"',
+        "",
+        "run_in() {",
+        '  local dir="$1"',
+        "  shift",
+        '  echo "+ (${dir}) $*"',
+        '  (cd "$REPO_ROOT/$dir" && "$@")',
+        "}",
+        "",
+        "run_optional_in() {",
+        '  local dir="$1"',
+        "  shift",
+        '  if ! run_in "$dir" "$@"; then',
+        '    echo "optional command failed: $*" >&2',
+        "  fi",
+        "}",
+        "",
+    ]
+
+    group_names = []
+    for group in command_groups:
+        group_names.append(group["name"])
+        lines.append(f"{shell_function_name(group['name'])}() {{")
+        lines.append(f"  echo {shlex.quote('== ' + group['name'] + ' ==')}")
+        if group["manual"]:
+            lines.append(
+                "  echo "
+                + shlex.quote(
+                    "Manual reference only. Remote CI is not executed by this generated script."
+                )
+            )
+            lines.append("  echo " + shlex.quote(group["reason"]))
+        elif not group["commands"]:
+            lines.append("  echo " + shlex.quote(group["reason"]))
+        else:
+            for item in group["commands"]:
+                runner = "run_optional_in" if item["optional"] else "run_in"
+                lines.append(
+                    f"  {runner} {shlex.quote(item['cwd'])} {shlex.join(item['argv'])}"
+                )
+        lines.append("}")
+        lines.append("")
+
+    lines.extend(
+        [
+            "usage() {",
+            '  echo "Usage: $0 <group|recommended|all>"',
+            "  echo",
+            '  echo "Groups:"',
+            *[f"  echo {shlex.quote('  ' + name)}" for name in group_names],
+            "}",
+            "",
+            "run_group() {",
+            '  case "$1" in',
+        ]
+    )
+
+    for group in command_groups:
+        lines.append(f"    {shlex.quote(group['name'])}) {shell_function_name(group['name'])} ;;")
+
+    lines.extend(
+        [
+            "    recommended)",
+        ]
+    )
+    for group in command_groups:
+        if group["recommended"]:
+            lines.append(f"      {shell_function_name(group['name'])}")
+    lines.extend(
+        [
+            "      ;;",
+            "    all)",
+        ]
+    )
+    for group in command_groups:
+        if not group["manual"]:
+            lines.append(f"      {shell_function_name(group['name'])}")
+    lines.extend(
+        [
+            "      ;;",
+            '    ""|-h|--help|help)',
+            "      usage",
+            "      ;;",
+            "    *)",
+            '      echo "Unknown command group: $1" >&2',
+            "      usage >&2",
+            "      return 2",
+            "      ;;",
+            "  esac",
+            "}",
+            "",
+            'run_group "${1:-help}"',
+            "",
+        ]
+    )
+    return "\n".join(lines)
 
 
 def route_areas(issue, areas_arg):
@@ -498,8 +1021,8 @@ You are not the coder. Do not edit files. Do not design a patch. Read only the p
 Your brief must:
 - Include exact file paths for every repository fact you mention.
 - Distinguish visible facts from inference.
-- Include verification commands for this area only.
-- Make commands runnable from the repository root unless you explicitly state a required cd.
+- Stay factual; do not invent shell commands or implementation steps.
+- Name local verification needs for this area conceptually, not as freehand command lines.
 - Identify uncertainties and missing files.
 - If this area is placeholder-only or not actually present, say so clearly.
 
@@ -514,7 +1037,7 @@ Area input bundle:
 """
 
 
-def build_synthesis_prompt(issue, areas, area_results):
+def build_synthesis_prompt(issue, areas, area_results, detected_facts, command_groups):
     brief_blocks = []
     for result in area_results:
         brief_blocks.append(
@@ -537,7 +1060,8 @@ Your handoff must:
 - List routed areas.
 - List repo/application surfaces.
 - List relevant files by area.
-- Include repo-root verification commands.
+- Use the deterministic facts below as the source of truth for repository structure.
+- Refer to named verification command groups instead of inventing shell commands.
 - Include cross-area risks.
 - Include constraints and uncertainties.
 - Do not invent files or commands.
@@ -548,12 +1072,18 @@ Original issue:
 Routed areas:
 {", ".join(areas)}
 
+Deterministic repository facts:
+{json.dumps(detected_facts, indent=2, sort_keys=True)}
+
+Available verification command groups:
+{json.dumps(command_groups, indent=2, sort_keys=True)}
+
 Area reader briefs:
 {"".join(brief_blocks)}
 """
 
 
-def build_coder_prompt(issue, synthesis_brief):
+def build_coder_prompt(issue, synthesis_brief, detected_facts, recommended_groups, command_groups):
     return f"""You are the coder model in an area-based local LLM benchmark.
 
 Consume the original issue and the synthesized handoff. Produce a minimal issue-scoped implementation or verification plan.
@@ -561,7 +1091,8 @@ Consume the original issue and the synthesized handoff. Produce a minimal issue-
 Rules:
 - For verification-only issues, list "files to inspect," not "files likely needing changes."
 - Name exact files only when supported by the handoff.
-- Commands must be runnable from the repository root unless an explicit cd command is included.
+- Select verification by named command group from the deterministic command group list.
+- Do not write freehand shell commands.
 - Do not use placeholder commands.
 - Do not invent test projects or paths.
 - Do not refactor unrelated code.
@@ -572,6 +1103,15 @@ Original issue:
 
 Synthesized handoff:
 {synthesis_brief}
+
+Deterministic repository facts:
+{json.dumps(detected_facts, indent=2, sort_keys=True)}
+
+Recommended verification command groups:
+{json.dumps(recommended_groups, indent=2, sort_keys=True)}
+
+All available verification command groups:
+{json.dumps(command_groups, indent=2, sort_keys=True)}
 """
 
 
@@ -741,6 +1281,17 @@ def main():
     }
     write_json(out / "routing.json", routing)
 
+    detected_facts = detect_repo_facts(repo, files, areas, routing)
+    command_groups = build_verification_command_groups(detected_facts, areas)
+    recommended_groups = recommended_command_groups(command_groups)
+    write_json(out / "detected-facts.json", detected_facts)
+    write_json(out / "verification-command-groups.json", command_groups)
+    write_json(out / "recommended-command-groups.json", recommended_groups)
+    write_executable_text(
+        out / "verification-commands.sh",
+        render_verification_script(repo, command_groups),
+    )
+
     area_results = []
     for area in areas:
         try:
@@ -749,7 +1300,13 @@ def main():
             print(str(exc), file=sys.stderr)
             return 1
 
-    synthesis_prompt = build_synthesis_prompt(args.issue, areas, area_results)
+    synthesis_prompt = build_synthesis_prompt(
+        args.issue,
+        areas,
+        area_results,
+        detected_facts,
+        command_groups,
+    )
     write_text(out / "synthesis-prompt.txt", synthesis_prompt)
     try:
         synthesis_raw, synthesis_wall_seconds = call_ollama(
@@ -768,7 +1325,13 @@ def main():
     write_text(out / "synthesis-thinking.md", synthesis_thinking)
     write_json(out / "synthesis-metrics.json", synthesis_metrics)
 
-    coder_prompt = build_coder_prompt(args.issue, synthesis_brief)
+    coder_prompt = build_coder_prompt(
+        args.issue,
+        synthesis_brief,
+        detected_facts,
+        recommended_groups,
+        command_groups,
+    )
     write_text(out / "coder-prompt.txt", coder_prompt)
     try:
         coder_raw, coder_wall_seconds = call_ollama(
@@ -800,6 +1363,9 @@ def main():
         "repo_file_count": len(files),
         "skipped_large_files": skipped_large_files,
         "skipped_unreadable_files": skipped_unreadable_files,
+        "detected_facts": detected_facts,
+        "recommended_command_groups": recommended_groups,
+        "verification_command_groups": command_groups,
         "area_metadata": {result["area"]: result["metadata"] for result in area_results},
         "area_metrics": area_metrics,
         "area_errors": {
@@ -813,6 +1379,10 @@ def main():
             "issue.txt",
             "repo-map.txt",
             "routing.json",
+            "detected-facts.json",
+            "recommended-command-groups.json",
+            "verification-command-groups.json",
+            "verification-commands.sh",
             *[
                 f"area-{area}/{name}"
                 for area in areas
