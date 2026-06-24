@@ -12,6 +12,12 @@ import time
 from urllib import error, request
 import xml.etree.ElementTree as ET
 
+REPO_TOOL_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_TOOL_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_TOOL_ROOT))
+
+from area_reader_v2.command_group_recommendations import recommend_command_groups as recommend_area_reader_command_groups
+
 
 OLLAMA_CHAT_URL = "http://localhost:11434/api/chat"
 DEFAULT_MAX_CHARS_PER_AREA = 50000
@@ -742,27 +748,32 @@ def build_verification_command_groups(facts, areas):
     return groups
 
 
-def recommended_command_groups(command_groups):
-    recommended = []
+def detect_android_sdk_available():
+    return bool(os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT"))
+
+
+def recommended_command_groups(
+    command_groups,
+    *,
+    issue_text,
+    changed_paths=(),
+    android_sdk_available=None,
+):
+    if android_sdk_available is None:
+        android_sdk_available = detect_android_sdk_available()
+
+    return recommend_area_reader_command_groups(
+        issue_text=issue_text,
+        changed_paths=changed_paths,
+        android_sdk_available=android_sdk_available,
+        available_command_groups=[group["name"] for group in command_groups],
+    )
+
+
+def apply_recommended_command_groups(command_groups, recommendation_metadata):
+    recommended = set(recommendation_metadata["recommended_command_groups"])
     for group in command_groups:
-        if group["recommended"]:
-            recommended.append(
-                {
-                    "name": group["name"],
-                    "reason": group["reason"],
-                    "command_count": len(group["commands"]),
-                }
-            )
-    if not any(group["name"] == "env" for group in recommended):
-        recommended.insert(
-            0,
-            {
-                "name": "env",
-                "reason": "Always useful for local environment diagnostics.",
-                "command_count": 0,
-            },
-        )
-    return recommended
+        group["recommended"] = group["name"] in recommended
 
 
 def shell_function_name(group_name):
@@ -1283,7 +1294,12 @@ def main():
 
     detected_facts = detect_repo_facts(repo, files, areas, routing)
     command_groups = build_verification_command_groups(detected_facts, areas)
-    recommended_groups = recommended_command_groups(command_groups)
+    recommended_groups = recommended_command_groups(
+        command_groups,
+        issue_text=args.issue,
+        changed_paths=[],
+    )
+    apply_recommended_command_groups(command_groups, recommended_groups)
     write_json(out / "detected-facts.json", detected_facts)
     write_json(out / "verification-command-groups.json", command_groups)
     write_json(out / "recommended-command-groups.json", recommended_groups)

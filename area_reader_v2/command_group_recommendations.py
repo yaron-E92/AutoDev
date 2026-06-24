@@ -35,29 +35,38 @@ API_CLIENT_TERMS = (
 WEB_TERMS = (
     "react",
     "vite",
-    "ui",
     "frontend",
     "browser",
     "component",
     "web shell",
 )
 
-MAUI_TERMS = (
+MAUI_SPECIFIC_TERMS = (
     "maui",
     "android",
-    "mobile",
-    "emulator",
-    "device",
     "xaml",
+    "mobile ui",
     "mobile build",
+    "mobile verification",
+    "mobile tooling",
+    "mobile run",
+    "mobile app",
+    "mobile device",
+    "android device",
+    "emulator",
+)
+
+MAUI_INVENTORY_PHRASES = (
+    "including backend, web, maui/mobile/desktop if present",
+    "backend, web, maui/mobile/desktop if present",
+    "maui/mobile/desktop if present",
 )
 
 API_CONTRACT_PATH_MARKERS = (
+    "api-client",
+    "apiclient",
     "openapi",
     "swagger",
-    "api-contract",
-    "api_contract",
-    "contracts",
     "generated",
 )
 
@@ -70,14 +79,21 @@ def recommend_command_groups(
     root_node_scripts_sufficient: bool = True,
     android_sdk_available: bool = False,
     user_requested_mobile_verification: bool = False,
+    available_command_groups: Iterable[str] | None = None,
 ) -> dict[str, object]:
     """Return JSON-ready command-group metadata for area-reader v2 output."""
 
     normalized_issue = issue_text.casefold()
     normalized_web_errors = web_build_errors.casefold()
     normalized_paths = tuple(path.replace("\\", "/").casefold() for path in changed_paths)
+    available = list(available_command_groups) if available_command_groups is not None else list(ALL_COMMAND_GROUPS)
+    available_set = set(available)
 
-    recommended = list(DEFAULT_RECOMMENDED_COMMAND_GROUPS)
+    recommended = [
+        group
+        for group in DEFAULT_RECOMMENDED_COMMAND_GROUPS
+        if group in available_set
+    ]
 
     if _api_client_relevant(normalized_issue, normalized_web_errors, normalized_paths):
         recommended.append("api-client-generate")
@@ -97,9 +113,13 @@ def recommend_command_groups(
         recommended.append("maui-android-build")
 
     return {
-        "available_command_groups": list(ALL_COMMAND_GROUPS),
-        "recommended_command_groups": recommended,
-        "conditional_command_groups": dict(CONDITIONAL_COMMAND_GROUPS),
+        "available_command_groups": available,
+        "recommended_command_groups": _filter_unique(recommended, available_set),
+        "conditional_command_groups": {
+            name: reason
+            for name, reason in CONDITIONAL_COMMAND_GROUPS.items()
+            if name in available_set
+        },
     }
 
 
@@ -146,19 +166,36 @@ def _maui_relevant(
     ):
         return True
 
-    return _contains_any(issue_text, MAUI_TERMS)
+    scoped_issue_text = _remove_maui_inventory_mentions(issue_text)
+    if "phoodab/apps/mobile" in scoped_issue_text or "phoodab/apps/mobile-shared" in scoped_issue_text:
+        return True
+
+    return _contains_any(scoped_issue_text, MAUI_SPECIFIC_TERMS)
 
 
 def _is_api_contract_path(path: str) -> bool:
-    if not (
-        path.startswith("phoodab/apps/api/")
-        or path.startswith("phoodab/packages/api-client/")
-        or "/api/" in path
-    ):
-        return False
+    if path.startswith("phoodab/packages/api-client/"):
+        return True
 
     return _contains_any(path, API_CONTRACT_PATH_MARKERS)
 
 
+def _remove_maui_inventory_mentions(value: str) -> str:
+    result = value
+    for phrase in MAUI_INVENTORY_PHRASES:
+        result = result.replace(phrase, "")
+    return result
+
+
 def _contains_any(value: str, terms: Iterable[str]) -> bool:
     return any(term in value for term in terms)
+
+
+def _filter_unique(values: Iterable[str], allowed: set[str]) -> list[str]:
+    filtered = []
+    seen = set()
+    for value in values:
+        if value in allowed and value not in seen:
+            filtered.append(value)
+            seen.add(value)
+    return filtered
