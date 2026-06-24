@@ -26,6 +26,17 @@ DEFAULT_SYNTH_NUM_PREDICT = 2200
 DEFAULT_CODER_NUM_PREDICT = 2200
 MAX_FILE_BYTES = 250000
 
+MARKDOWN_SMOKE_SCRIPT = """mapfile -t markdown_files < <(git ls-files '*.md')
+if ((${#markdown_files[@]} == 0)); then
+  echo "No markdown files tracked; skipping markdown smoke check."
+  exit 0
+fi
+
+if grep -nE $'\t|[ \t]+$' "${markdown_files[@]}"; then
+  echo "Markdown smoke check failed: tabs or trailing whitespace found." >&2
+  exit 1
+fi"""
+
 SUPPORTED_AREAS = ("backend", "web", "maui", "ci", "tests", "docs", "api-client")
 DEFAULT_AUTO_AREAS = ("backend", "web", "maui", "ci")
 
@@ -200,13 +211,13 @@ AREA_HINTS = {
     "api-client": {
         "keywords": ("api client", "client", "sdk", "http client", "openapi"),
         "path_patterns": (
+            "*api-client*",
+            "*apiclient*",
             "*client*",
             "*sdk*",
             "*openapi*",
             "*swagger*",
-            "*.ts",
-            "*.tsx",
-            "*.cs",
+            "*generated*",
         ),
     },
 }
@@ -437,6 +448,11 @@ def detect_repo_facts(repo, files, areas, routing):
         and (path.endswith(".yml") or path.endswith(".yaml"))
     )
     markdown_files = sorted(path for path in file_paths if path.endswith(".md"))
+    maui_helper_scripts = sorted(
+        path
+        for path in file_paths
+        if path.endswith(".sh") and "maui" in path.lower() and "android" in path.lower()
+    )
 
     csproj_facts = {}
     maui_projects = []
@@ -516,6 +532,7 @@ def detect_repo_facts(repo, files, areas, routing):
         "dotnet_projects": dotnet_projects,
         "csproj_facts": csproj_facts,
         "maui_projects": maui_projects,
+        "maui_helper_scripts": maui_helper_scripts,
         "package_roots": package_roots,
         "web_package_roots": [item for item in package_roots if item["is_web"]],
         "api_client_package_roots": [
@@ -587,10 +604,17 @@ def build_verification_command_groups(facts, areas):
                 ["dotnet", "build", solution, "--no-restore", "--verbosity", "minimal"],
             )
         )
+        dotnet_commands.append(
+            command(
+                f"Test {solution}",
+                ".",
+                ["dotnet", "test", solution, "--no-build", "--verbosity", "minimal"],
+            )
+        )
     groups.append(
         command_group(
             "dotnet-solution",
-            "Restore and build detected .NET solution files from the repository root.",
+            "Restore, build, and test detected .NET solution files from the repository root.",
             dotnet_commands,
             recommended=bool(dotnet_commands and area_set & {"backend", "maui", "tests"}),
             reason="Detected .NET solution files." if dotnet_commands else "No .NET solution files detected.",
@@ -664,50 +688,72 @@ def build_verification_command_groups(facts, areas):
         )
     )
 
+    maui_helper_script = next(iter(facts.get("maui_helper_scripts", [])), None)
+    maui_doctor_commands = []
+    if facts["maui_projects"]:
+        if maui_helper_script:
+            maui_doctor_commands.append(
+                command(
+                    f"Run {maui_helper_script} doctor",
+                    ".",
+                    ["bash", maui_helper_script, "doctor"],
+                )
+            )
+        else:
+            maui_doctor_commands.extend(
+                [
+                    command("Show dotnet workloads", ".", ["dotnet", "workload", "list"]),
+                    command("Show dotnet SDK info", ".", ["dotnet", "--info"]),
+                ]
+            )
     groups.append(
         command_group(
             "maui-android-doctor",
             "Inspect .NET MAUI Android workload availability without invoking remote CI.",
-            [
-                command("Show dotnet workloads", ".", ["dotnet", "workload", "list"]),
-                command("Show dotnet SDK info", ".", ["dotnet", "--info"]),
-            ]
-            if facts["maui_projects"]
-            else [],
+            maui_doctor_commands,
             recommended=bool(facts["maui_projects"] and "maui" in area_set),
             reason="Detected MAUI project files." if facts["maui_projects"] else "No MAUI projects detected.",
         )
     )
 
     maui_build_commands = []
-    for project in facts["maui_projects"]:
-        android_frameworks = project["android_target_frameworks"]
-        if android_frameworks:
-            for framework in android_frameworks:
+    if maui_helper_script and facts["maui_projects"]:
+        maui_build_commands.append(
+            command(
+                f"Run {maui_helper_script} build -c Debug",
+                ".",
+                ["bash", maui_helper_script, "build", "-c", "Debug"],
+            )
+        )
+    else:
+        for project in facts["maui_projects"]:
+            android_frameworks = project["android_target_frameworks"]
+            if android_frameworks:
+                for framework in android_frameworks:
+                    maui_build_commands.append(
+                        command(
+                            f"Build {project['path']} for {framework}",
+                            ".",
+                            [
+                                "dotnet",
+                                "build",
+                                project["path"],
+                                "-f",
+                                framework,
+                                "--no-restore",
+                                "--verbosity",
+                                "minimal",
+                            ],
+                        )
+                    )
+            else:
                 maui_build_commands.append(
                     command(
-                        f"Build {project['path']} for {framework}",
+                        f"Build {project['path']}",
                         ".",
-                        [
-                            "dotnet",
-                            "build",
-                            project["path"],
-                            "-f",
-                            framework,
-                            "--no-restore",
-                            "--verbosity",
-                            "minimal",
-                        ],
+                        ["dotnet", "build", project["path"], "--verbosity", "minimal"],
                     )
                 )
-        else:
-            maui_build_commands.append(
-                command(
-                    f"Build {project['path']}",
-                    ".",
-                    ["dotnet", "build", project["path"], "--verbosity", "minimal"],
-                )
-            )
     groups.append(
         command_group(
             "maui-android-build",
@@ -721,8 +767,8 @@ def build_verification_command_groups(facts, areas):
     groups.append(
         command_group(
             "markdown-smoke",
-            "List markdown files to verify documentation-only changes stay visible and local.",
-            [command("List markdown files", ".", ["find", ".", "-name", "*.md", "-not", "-path", "./.git/*", "-print"])]
+            "Validate tracked Markdown files for tabs and trailing whitespace.",
+            [command("Check tracked Markdown whitespace", ".", ["bash", "-lc", MARKDOWN_SMOKE_SCRIPT])]
             if facts["markdown_file_count"]
             else [],
             recommended=bool(facts["markdown_file_count"] and area_set & {"docs", "ci"}),
@@ -785,7 +831,11 @@ def render_verification_script(repo, command_groups):
         "#!/usr/bin/env bash",
         "set -Eeuo pipefail",
         "",
-        f"REPO_ROOT={shlex.quote(str(repo))}",
+        "if git rev-parse --show-toplevel >/dev/null 2>&1; then",
+        "  REPO_ROOT=\"$(git rev-parse --show-toplevel)\"",
+        "else",
+        f"  REPO_ROOT={shlex.quote(str(repo))}",
+        "fi",
         'cd "$REPO_ROOT"',
         "",
         "run_in() {",

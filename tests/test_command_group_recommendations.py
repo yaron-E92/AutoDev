@@ -1,4 +1,5 @@
 import importlib.util
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -21,6 +22,21 @@ def load_area_reader_bench():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def base_facts(**overrides):
+    facts = {
+        "solutions": [],
+        "package_roots": [],
+        "api_client_package_roots": [],
+        "web_package_roots": [],
+        "maui_projects": [],
+        "maui_helper_scripts": [],
+        "markdown_file_count": 0,
+        "workflow_files": [],
+    }
+    facts.update(overrides)
+    return facts
 
 
 class CommandGroupRecommendationTests(unittest.TestCase):
@@ -164,6 +180,108 @@ class CommandGroupRecommendationTests(unittest.TestCase):
         self.assertIn("conditional_command_groups", result)
         self.assertIn("available_command_groups", coder_prompt)
 
+    def test_dotnet_solution_group_restores_builds_and_tests_solutions(self):
+        bench = load_area_reader_bench()
+
+        groups = bench.build_verification_command_groups(
+            base_facts(solutions=["App.sln"]),
+            ["backend"],
+        )
+
+        dotnet_group = next(group for group in groups if group["name"] == "dotnet-solution")
+        self.assertEqual(
+            [item["argv"] for item in dotnet_group["commands"]],
+            [
+                ["dotnet", "restore", "App.sln"],
+                ["dotnet", "build", "App.sln", "--no-restore", "--verbosity", "minimal"],
+                ["dotnet", "test", "App.sln", "--no-build", "--verbosity", "minimal"],
+            ],
+        )
+
+    def test_markdown_smoke_group_validates_tracked_markdown_whitespace(self):
+        bench = load_area_reader_bench()
+
+        groups = bench.build_verification_command_groups(
+            base_facts(markdown_file_count=2),
+            ["docs"],
+        )
+
+        markdown_group = next(group for group in groups if group["name"] == "markdown-smoke")
+        self.assertEqual(len(markdown_group["commands"]), 1)
+        argv = markdown_group["commands"][0]["argv"]
+        self.assertEqual(argv[:2], ["bash", "-lc"])
+        self.assertIn("git ls-files '*.md'", argv[2])
+        self.assertIn("grep -nE", argv[2])
+        self.assertIn("Markdown smoke check failed", argv[2])
+
+    def test_maui_android_groups_prefer_detected_repo_helper_script(self):
+        bench = load_area_reader_bench()
+        helper = "phoodab/apps/mobile/scripts/maui-android-ubuntu.sh"
+
+        groups = bench.build_verification_command_groups(
+            base_facts(
+                maui_projects=[
+                    {
+                        "path": "phoodab/apps/mobile/PHOODAB.Mobile.csproj",
+                        "target_frameworks": ["net9.0-android"],
+                        "android_target_frameworks": ["net9.0-android"],
+                    }
+                ],
+                maui_helper_scripts=[helper],
+            ),
+            ["maui"],
+        )
+
+        doctor_group = next(group for group in groups if group["name"] == "maui-android-doctor")
+        build_group = next(group for group in groups if group["name"] == "maui-android-build")
+        self.assertEqual(doctor_group["commands"][0]["argv"], ["bash", helper, "doctor"])
+        self.assertEqual(build_group["commands"][0]["argv"], ["bash", helper, "build", "-c", "Debug"])
+
+    def test_detect_repo_facts_records_maui_helper_scripts(self):
+        bench = load_area_reader_bench()
+        helper = "phoodab/apps/mobile/scripts/maui-android-ubuntu.sh"
+        project = "phoodab/apps/mobile/PHOODAB.Mobile.csproj"
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            helper_path = repo / helper
+            helper_path.parent.mkdir(parents=True)
+            helper_path.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+            project_path = repo / project
+            project_path.write_text(
+                "<Project><PropertyGroup><UseMaui>true</UseMaui>"
+                "<TargetFrameworks>net9.0-android</TargetFrameworks></PropertyGroup></Project>",
+                encoding="utf-8",
+            )
+
+            facts = bench.detect_repo_facts(
+                repo,
+                [
+                    {"path": helper, "areas": ["ci"]},
+                    {"path": project, "areas": ["maui"]},
+                ],
+                ["maui"],
+                {},
+            )
+
+        self.assertEqual(facts["maui_helper_scripts"], [helper])
+
+    def test_render_verification_script_detects_repo_root_dynamically(self):
+        bench = load_area_reader_bench()
+
+        script = bench.render_verification_script(Path("/fallback/repo"), [])
+
+        self.assertIn("if git rev-parse --show-toplevel >/dev/null 2>&1; then", script)
+        self.assertIn('REPO_ROOT="$(git rev-parse --show-toplevel)"', script)
+        self.assertIn("REPO_ROOT=/fallback/repo", script)
+
+    def test_api_client_area_matching_excludes_generic_ts_tsx_and_cs_paths(self):
+        bench = load_area_reader_bench()
+
+        self.assertFalse(bench.area_for_file("apps/web/src/App.tsx", "api-client"))
+        self.assertFalse(bench.area_for_file("apps/api/Controllers/FooController.cs", "api-client"))
+        self.assertTrue(bench.area_for_file("packages/api-client/src/generated.ts", "api-client"))
+        self.assertTrue(bench.area_for_file("apps/api/openapi.json", "api-client"))
 
 if __name__ == "__main__":
     unittest.main()
