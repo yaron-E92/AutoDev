@@ -45,8 +45,8 @@ C:\Users\<you>\codex-tools
 
 This setup automates the boring issue-to-PR loop:
 
-1. Pick one GitHub issue labeled `codex:ready`.
-2. Mark it `codex:in-progress`.
+1. Pick one GitHub issue labeled `autodev:ready`.
+2. Mark it `autodev:running`.
 3. Resolve profiles from area labels such as `area:backend`, `area:web`, `area:maui`, or `area:python`.
 4. Render planner/implementer/repair/verifier prompts.
 5. Let Codex Desktop do the AI work.
@@ -57,7 +57,7 @@ This setup automates the boring issue-to-PR loop:
 10. Watch required CI checks.
 11. If needed, let Codex repair CI failures.
 12. Verify the implementation against the issue.
-13. Mark the issue `codex:ready-for-review`.
+13. Mark the issue `autodev:done`.
 
 It never merges to `main`. The human remains merge authority. Crown stays on head; robot gets a broom.
 
@@ -392,10 +392,11 @@ Do **not** create `area:fullstack`. Full-stack means multiple area labels.
 Each target repo should have:
 
 ```text
-codex:ready
-codex:in-progress
-codex:ready-for-review
-codex:blocked
+autodev:ready
+autodev:running
+autodev:blocked
+autodev:failed
+autodev:done
 
 area:backend
 area:web
@@ -525,7 +526,7 @@ The prepare script:
 - sets `GH_TOKEN`
 - sets `GH_CONFIG_DIR`
 - selects one issue
-- marks it `codex:in-progress`
+- marks it `autodev:running`
 - resolves profiles from labels
 - reads base SHA/tree SHA from GitHub API
 - snapshots workspace files
@@ -569,16 +570,16 @@ ReadyForReview
 Blocked
 ```
 
-It removes `codex:in-progress` and adds either:
+It removes `autodev:running` and adds either:
 
 ```text
-codex:ready-for-review
+autodev:done
 ```
 
 or:
 
 ```text
-codex:blocked
+autodev:blocked
 ```
 
 ---
@@ -603,7 +604,7 @@ gh issue create `
   --repo "yaron-E92/PHOODAB" `
   --title "Show item names in expiring / expired entries list" `
   --body "..." `
-  --label "codex:ready" `
+  --label "autodev:ready" `
   --label "area:web"
 ```
 
@@ -612,11 +613,11 @@ Or mark an existing issue:
 ```powershell
 gh issue edit 54 `
   --repo "yaron-E92/PHOODAB" `
-  --add-label "codex:ready" `
+  --add-label "autodev:ready" `
   --add-label "area:web"
 ```
 
-Codex automation will process one ready issue per run.
+AutoDev automation will process one ready issue per run.
 
 ---
 
@@ -627,9 +628,9 @@ Reset a blocked issue:
 ```powershell
 gh issue edit 54 `
   --repo "yaron-E92/PHOODAB" `
-  --remove-label "codex:blocked" `
-  --remove-label "codex:in-progress" `
-  --add-label "codex:ready"
+  --remove-label "autodev:blocked" `
+  --remove-label "autodev:running" `
+  --add-label "autodev:ready"
 ```
 
 Mark manually ready for review:
