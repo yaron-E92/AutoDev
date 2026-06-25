@@ -217,6 +217,154 @@ linux/config.example.env  Linux project env template
 
 Keep common files at the root so Windows and Linux automation can use the same prompts, profiles, and skill instructions without duplication.
 
+## Local LLM model aliases
+
+This repository includes reproducible Ollama aliases for local LLM benchmarking. Ollama must already be installed, and the base models must be pulled manually before recreating aliases.
+
+The aliases are pinned to explicit model tags for reproducibility:
+
+- `qwen35-9b-32k`
+- `qwen35-9b-64k`
+- `devstral-small2-12k`
+- `devstral-small2-16k`
+
+Pull the base models from the repository root:
+
+```bash
+ollama pull qwen3.5:9b-q4_K_M
+ollama pull devstral-small-2:24b-instruct-2512-q4_K_M
+```
+
+Recreate the local aliases from the repository root:
+
+```bash
+./ollama-aliases/scripts/recreate-aliases.sh
+```
+
+Select aliases based on the benchmark role:
+
+- Use `qwen35-9b-32k` or `qwen35-9b-64k` as the area reader and synthesis model.
+- Use `devstral-small2-12k` or `devstral-small2-16k` as the coder model.
+- Prefer the 32K reader for faster local comparisons and the 64K reader when area bundles need more context.
+
+## Simple reader-coder benchmark
+
+This repository includes a simple baseline benchmark that sends a repository context bundle to one local Ollama model as a reader, then sends the reader's handoff brief to a second local Ollama model as a coder. The script writes prompts, raw Ollama responses, extracted thinking files, metrics, and a summary under `./.benchmark-results/...`.
+
+This is intentionally a broad baseline benchmark. It can miss smaller app surfaces when one large area dominates the input bundle, so area-based benchmarking is preferred for complex polyglot repositories. Benchmark outputs are intentionally gitignored.
+
+Run from this repository root:
+
+```bash
+mkdir -p ./.benchmark-results/phoodab-qwen35-devstral12
+
+./benchmarks/local-llm/reader_coder_bench.py \
+  --repo ../PHOODAB \
+  --reader qwen35-9b-32k \
+  --coder devstral-small2-12k \
+  --issue "Analyze the repository structure and propose the safest local verification approach for a small issue-to-PR automation run. Do not edit files." \
+  --max-chars 70000 \
+  --out ./.benchmark-results/phoodab-qwen35-devstral12
+```
+
+Inspect outputs from this repository root:
+
+```bash
+cat ./.benchmark-results/phoodab-qwen35-devstral12/summary.json | jq
+less ./.benchmark-results/phoodab-qwen35-devstral12/reader-brief.md
+less ./.benchmark-results/phoodab-qwen35-devstral12/coder-plan.md
+```
+
+## Area-based reader benchmark
+
+The area-based reader benchmark is the canonical local model benchmark for repository-level analysis. A single-reader benchmark can miss smaller app surfaces when backend or documentation context dominates the input bundle. Area-reader v2 keeps backend, web, MAUI/mobile/desktop, CI, tests, docs, and API-client context separated, synthesizes factual area briefs, and gives the coder deterministic verification command groups instead of asking it to invent shell commands.
+
+The script writes repo maps, deterministic facts, routed area bundles, prompts, model outputs, metrics, command group definitions, an executable `verification-commands.sh`, and summaries under `./.benchmark-results/...`. Those generated output directories are intentionally gitignored and should not be committed.
+
+Run the canonical v2 PHOODAB benchmark from this repository root:
+
+```bash
+mkdir -p ./.benchmark-results/phoodab-area-v2-qwen35-32k-devstral12
+
+./benchmarks/local-llm/area_reader_bench.py \
+  --repo ../PHOODAB \
+  --reader qwen35-9b-32k \
+  --coder devstral-small2-12k \
+  --areas backend,web,maui,ci \
+  --issue "Analyze the complete repository structure, including backend, web, MAUI/mobile/desktop if present, tests, and CI. Propose the safest local verification approach for a small issue-to-PR automation run. Do not edit files." \
+  --max-chars-per-area 50000 \
+  --out ./.benchmark-results/phoodab-area-v2-qwen35-32k-devstral12
+```
+
+Run a 64K reader comparison when the area bundles need more context:
+
+```bash
+mkdir -p ./.benchmark-results/phoodab-area-v2-qwen35-64k-devstral12
+
+./benchmarks/local-llm/area_reader_bench.py \
+  --repo ../PHOODAB \
+  --reader qwen35-9b-64k \
+  --coder devstral-small2-12k \
+  --areas backend,web,maui,ci \
+  --issue "Analyze the complete repository structure, including backend, web, MAUI/mobile/desktop if present, tests, and CI. Propose the safest local verification approach for a small issue-to-PR automation run. Do not edit files." \
+  --max-chars-per-area 100000 \
+  --out ./.benchmark-results/phoodab-area-v2-qwen35-64k-devstral12
+```
+
+Important output files:
+
+- `repo-map.txt`: deterministic repository file map used for routing and area bundles.
+- `detected-facts.json`: deterministic facts extracted from repository files, package roots, .NET projects, MAUI targets, workflows, and markdown files.
+- `area-<area>/reader-brief.md`: factual brief from each routed area reader.
+- `area-<area>/metrics.json`: area reader timing and token metrics.
+- `synthesis-brief.md`: compact cross-area handoff for the coder model.
+- `recommended-command-groups.json`: command groups selected for the routed areas.
+- `verification-command-groups.json`: all deterministic local verification command groups.
+- `verification-commands.sh`: executable local helper that normalizes to the repo root, exposes named groups, uses `run_in`, and does not run remote CI by default.
+- `coder-plan.md`: coder model plan based on the synthesized handoff and named command groups.
+- `summary.json`: top-level benchmark metadata, output manifest, metrics, facts, and command groups.
+
+Run generated verification groups from the benchmark output directory:
+
+```bash
+./.benchmark-results/phoodab-area-v2-qwen35-32k-devstral12/verification-commands.sh recommended
+./.benchmark-results/phoodab-area-v2-qwen35-32k-devstral12/verification-commands.sh env
+./.benchmark-results/phoodab-area-v2-qwen35-32k-devstral12/verification-commands.sh web-app
+```
+
+Available command groups include:
+
+```text
+env
+dotnet-solution
+node-root
+api-client-generate
+web-app
+maui-android-doctor
+maui-android-build
+markdown-smoke
+ci-manual-reference
+```
+
+`ci-manual-reference` is a manual reference group only; the generated script does not invoke GitHub Actions or other remote CI by default.
+
+Compare summaries from this repository root:
+
+```bash
+jq '{
+  reader,
+  coder,
+  max_chars_per_area,
+  areas,
+  recommended_command_groups,
+  area_metrics,
+  synthesis_metrics,
+  coder_metrics
+}' \
+  ./.benchmark-results/phoodab-area-v2-qwen35-32k-devstral12/summary.json \
+  ./.benchmark-results/phoodab-area-v2-qwen35-64k-devstral12/summary.json
+```
+
 Example area labels:
 
 ```text
