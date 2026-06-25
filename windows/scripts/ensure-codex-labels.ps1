@@ -19,24 +19,29 @@ $repoTarget = Resolve-GitHubRepoFullName -Username $Username -Repo $Repo
 
 $labels = @(
     @{
-        Name = "codex:ready"
+        Name = "autodev:ready"
         Color = "0E8A16"
-        Description = "Ready for Codex automation"
+        Description = "Ready for AutoDev automation"
     },
     @{
-        Name = "codex:in-progress"
+        Name = "autodev:running"
         Color = "FBCA04"
-        Description = "Codex is currently working on this"
+        Description = "AutoDev is currently working on this"
     },
     @{
-        Name = "codex:ready-for-review"
-        Color = "1D76DB"
-        Description = "Codex says the PR is ready to review or merge"
-    },
-    @{
-        Name = "codex:blocked"
+        Name = "autodev:blocked"
         Color = "D93F0B"
-        Description = "Codex automation failed or needs human input"
+        Description = "AutoDev automation is blocked"
+    },
+    @{
+        Name = "autodev:failed"
+        Color = "D93F0B"
+        Description = "AutoDev automation failed"
+    },
+    @{
+        Name = "autodev:done"
+        Color = "1D76DB"
+        Description = "AutoDev completed this issue"
     }
 )
 
@@ -75,4 +80,4 @@ foreach ($label in $labels) {
         --force
 }
 
-Write-Host "Codex labels are ready in $repoTarget"
+Write-Host "AutoDev labels are ready in $repoTarget"

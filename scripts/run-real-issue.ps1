@@ -6,12 +6,12 @@ param(
 
 function Show-Usage {
     @"
-Run the real GitHub issue automation flow.
+Run the AutoDev real GitHub issue automation flow.
 
 Examples:
-  scripts\run-real-issue.ps1 --repo . --github-repo owner/AutoDev --issue 18 --mode plan-only --out .codex-run\real-issue-18
-  scripts\run-real-issue.ps1 --repo . --github-repo owner/AutoDev --issue 18 --mode implement --out .codex-run\real-issue-18 --allow-dirty
-  scripts\run-real-issue.ps1 --repo . --github-repo owner/AutoDev --issue 18 --mode pr --out .codex-run\real-issue-18
+  scripts\run-real-issue.ps1 --repo . --github-repo owner/AutoDev --issue 18 --mode plan-only --out .autodev-runs\issue-18 --reader-command "ollama run qwen35-9b-32k" --coder-command "ollama run devstral-small2-12k"
+  scripts\run-real-issue.ps1 --repo . --github-repo owner/AutoDev --next --manage-labels --mode implement --out .autodev-runs\next --provider-config autodev-providers.json
+  scripts\run-real-issue.ps1 --repo . --github-repo owner/AutoDev --issue 18 --mode pr --out .autodev-runs\issue-18 --reader-provider chat-completions --reader-base-url http://localhost:1234/v1 --coder-command "my-coder"
 "@
 }
 

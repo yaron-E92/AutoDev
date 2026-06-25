@@ -293,7 +293,7 @@ Return JSON only, with this shape:
       "non_goals": ["Out-of-scope item"],
       "implementation_notes": ["Helpful note without over-prescribing"],
       "acceptance_criteria": ["Observable outcome"],
-      "labels": ["codex:ready", "area:python"]
+      "labels": ["autodev:ready", "area:python"]
     }}
   ]
 }}
@@ -385,7 +385,7 @@ def _as_string_list(value: object) -> list[str]:
 
 def suggest_labels(description: str) -> list[str]:
     normalized = description.casefold()
-    labels = ["codex:ready"]
+    labels = ["autodev:ready"]
     if any(term in normalized for term in ("automation", "issue", "codex", "script", "tool", "wrapper", "autodev")):
         labels.append("automation")
     if any(term in normalized for term in ("python", "script", "tool", "automation", "wrapper")):

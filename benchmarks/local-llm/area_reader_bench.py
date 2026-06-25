@@ -17,6 +17,7 @@ if str(REPO_TOOL_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_TOOL_ROOT))
 
 from area_reader_v2.command_group_recommendations import recommend_command_groups as recommend_area_reader_command_groups
+from automation.model_providers import ModelConfig, create_provider
 
 
 OLLAMA_CHAT_URL = "http://localhost:11434/api/chat"
@@ -228,12 +229,34 @@ def parse_args():
         description="Run an area-based local Ollama reader-synthesis-coder benchmark."
     )
     parser.add_argument("--repo", required=True, help="Repository to read for context.")
-    parser.add_argument("--reader", required=True, help="Ollama area reader model name.")
+    parser.add_argument("--reader", help="Deprecated alias for --reader-model.")
+    parser.add_argument("--reader-model", help="Area reader model name.")
+    parser.add_argument(
+        "--reader-provider",
+        choices=("command", "chat-completions", "openai-compatible", "mock"),
+        default="command",
+        help="Reader provider transport.",
+    )
+    parser.add_argument("--reader-command", default="", help="Command provider command for reader prompts.")
+    parser.add_argument("--reader-base-url", default="", help="chat-completions base URL for reader prompts.")
+    parser.add_argument("--reader-api-key-env", default="", help="Environment variable containing reader API key.")
+    parser.add_argument("--reader-timeout-seconds", type=int, default=600)
     parser.add_argument(
         "--synthesizer",
         help="Ollama synthesis reader model name. Defaults to --reader.",
     )
-    parser.add_argument("--coder", required=True, help="Ollama coder model name.")
+    parser.add_argument("--coder", help="Deprecated alias for --coder-model.")
+    parser.add_argument("--coder-model", help="Coder model name.")
+    parser.add_argument(
+        "--coder-provider",
+        choices=("command", "chat-completions", "openai-compatible", "mock"),
+        default="command",
+        help="Coder provider transport.",
+    )
+    parser.add_argument("--coder-command", default="", help="Command provider command for coder prompts.")
+    parser.add_argument("--coder-base-url", default="", help="chat-completions base URL for coder prompts.")
+    parser.add_argument("--coder-api-key-env", default="", help="Environment variable containing coder API key.")
+    parser.add_argument("--coder-timeout-seconds", type=int, default=600)
     parser.add_argument("--issue", required=True, help="Issue or task text.")
     parser.add_argument(
         "--areas",
@@ -1260,6 +1283,43 @@ def build_metrics(raw, wall_seconds, response_text):
     }
 
 
+def model_config_from_args(args, role, model_override=None):
+    model = model_override or getattr(args, f"{role}_model") or getattr(args, role)
+    if not model:
+        raise RuntimeError(f"{role} model is required")
+    return ModelConfig(
+        provider=getattr(args, f"{role}_provider"),
+        model=model,
+        command=getattr(args, f"{role}_command"),
+        base_url=getattr(args, f"{role}_base_url"),
+        api_key_env=getattr(args, f"{role}_api_key_env"),
+        timeout_seconds=getattr(args, f"{role}_timeout_seconds"),
+    )
+
+
+def call_provider(args, role, prompt, num_predict, model_override=None):
+    config = model_config_from_args(args, role, model_override=model_override)
+    provider = create_provider(config)
+    started = time.monotonic()
+    content = provider.generate(
+        prompt,
+        model=config.model,
+        timeout_seconds=config.timeout_seconds,
+    )
+    wall_seconds = time.monotonic() - started
+    return {
+        "message": {
+            "content": content,
+            "thinking": "",
+        },
+        "done_reason": "stop",
+        "provider": config.provider,
+        "model": config.model,
+        "eval_count": 0,
+        "prompt_eval_count": 0,
+    }, wall_seconds
+
+
 def run_area_reader(args, repo, out, area, repo_map, files):
     area_dir = out / f"area-{area}"
     selected_files = area_file_map(files, area)
@@ -1277,7 +1337,7 @@ def run_area_reader(args, repo, out, area, repo_map, files):
     write_text(area_dir / "input-bundle.txt", bundle)
     write_text(area_dir / "reader-prompt.txt", reader_prompt)
 
-    raw, wall_seconds = call_ollama(args.reader, reader_prompt, args.reader_num_predict)
+    raw, wall_seconds = call_provider(args, "reader", reader_prompt, args.reader_num_predict)
     brief, thinking = extract_message(raw)
     metrics = build_metrics(raw, wall_seconds, brief)
 
@@ -1307,8 +1367,12 @@ def run_area_reader(args, repo, out, area, repo_map, files):
 
 def main():
     args = parse_args()
+    if args.reader_model is None:
+        args.reader_model = args.reader
+    if args.coder_model is None:
+        args.coder_model = args.coder
     if args.synthesizer is None:
-        args.synthesizer = args.reader
+        args.synthesizer = args.reader_model
 
     repo = expand_user_path(args.repo)
     out = expand_user_path(args.out)
@@ -1375,10 +1439,12 @@ def main():
     )
     write_text(out / "synthesis-prompt.txt", synthesis_prompt)
     try:
-        synthesis_raw, synthesis_wall_seconds = call_ollama(
-            args.synthesizer,
+        synthesis_raw, synthesis_wall_seconds = call_provider(
+            args,
+            "reader",
             synthesis_prompt,
             args.synth_num_predict,
+            model_override=args.synthesizer,
         )
     except RuntimeError as exc:
         print(str(exc), file=sys.stderr)
@@ -1400,8 +1466,9 @@ def main():
     )
     write_text(out / "coder-prompt.txt", coder_prompt)
     try:
-        coder_raw, coder_wall_seconds = call_ollama(
-            args.coder,
+        coder_raw, coder_wall_seconds = call_provider(
+            args,
+            "coder",
             coder_prompt,
             args.coder_num_predict,
         )
@@ -1420,9 +1487,11 @@ def main():
     summary = {
         "repo": str(repo),
         "out": str(out),
-        "reader": args.reader,
+        "reader": args.reader_model,
         "synthesizer": args.synthesizer,
-        "coder": args.coder,
+        "coder": args.coder_model,
+        "reader_provider": args.reader_provider,
+        "coder_provider": args.coder_provider,
         "max_chars_per_area": args.max_chars_per_area,
         "areas": areas,
         "routing": routing,
