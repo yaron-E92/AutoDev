@@ -7,6 +7,7 @@
   "tests/test_command_group_recommendations.py::CommandGroupRecommendationTests::test_ci_manual_reference_remains_conditional_reference_only",
   "tests/test_command_group_recommendations.py::CommandGroupRecommendationTests::test_detect_repo_facts_records_maui_helper_scripts",
   "tests/test_command_group_recommendations.py::CommandGroupRecommendationTests::test_docs_architecture_boundary_issue_does_not_recommend_maui_groups",
+  "tests/test_command_group_recommendations.py::CommandGroupRecommendationTests::test_docs_surface_mentions_do_not_recommend_maui_groups",
   "tests/test_command_group_recommendations.py::CommandGroupRecommendationTests::test_dotnet_solution_group_restores_builds_and_tests_solutions",
   "tests/test_command_group_recommendations.py::CommandGroupRecommendationTests::test_generic_issue_uses_conservative_default_recommendations",
   "tests/test_command_group_recommendations.py::CommandGroupRecommendationTests::test_inventory_prompt_does_not_recommend_maui_groups",
@@ -25,5 +26,9 @@
   "tests/test_create_issues_from_description.py::CreateIssuesFromDescriptionTests::test_model_can_create_multiple_issue_drafts_from_one_description",
   "tests/test_create_issues_from_description.py::CreateIssuesFromDescriptionTests::test_refuses_ambiguous_repo_map_matches",
   "tests/test_create_issues_from_description.py::CreateIssuesFromDescriptionTests::test_selects_explicit_repo_before_repo_map",
-  "tests/test_create_issues_from_description.py::CreateIssuesFromDescriptionTests::test_splits_description_file_on_markdown_headings_and_separators"
+  "tests/test_create_issues_from_description.py::CreateIssuesFromDescriptionTests::test_splits_description_file_on_markdown_headings_and_separators",
+  "tests/test_run_real_issue.py::RunRealIssueTests::test_build_run_summary_uses_routing_and_recommendations",
+  "tests/test_run_real_issue.py::RunRealIssueTests::test_fetch_issue_text_formats_gh_json",
+  "tests/test_run_real_issue.py::RunRealIssueTests::test_issue_branch_name_uses_issue_number_and_slug",
+  "tests/test_run_real_issue.py::RunRealIssueTests::test_positive_int_rejects_non_positive_values"
 ]
