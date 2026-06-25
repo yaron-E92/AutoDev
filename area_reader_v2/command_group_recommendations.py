@@ -41,19 +41,39 @@ WEB_TERMS = (
     "web shell",
 )
 
-MAUI_SPECIFIC_TERMS = (
+MAUI_CONTEXT_TERMS = (
     "maui",
+    "mobile",
     "android",
-    "xaml",
-    "mobile ui",
-    "mobile build",
-    "mobile verification",
-    "mobile tooling",
-    "mobile run",
-    "mobile app",
-    "mobile device",
-    "android device",
+)
+
+MAUI_WORK_INTENT_TERMS = (
+    "build",
+    "run",
+    "debug",
+    "fix",
+    "modify",
+    "update",
+    "verify",
+    "validate",
+    "test",
+    "tooling",
+    "device",
     "emulator",
+    "xaml",
+)
+
+MAUI_EXPLICIT_WORK_TERMS = (
+    "android device",
+    "android emulator",
+    "emulator",
+    "mobile build",
+    "mobile run",
+    "mobile tooling",
+    "mobile ui",
+    "mobile verification",
+    "mobile-specific behavior",
+    "xaml",
 )
 
 MAUI_INVENTORY_PHRASES = (
@@ -170,7 +190,7 @@ def _maui_relevant(
     if "phoodab/apps/mobile" in scoped_issue_text or "phoodab/apps/mobile-shared" in scoped_issue_text:
         return True
 
-    return _contains_any(scoped_issue_text, MAUI_SPECIFIC_TERMS)
+    return _maui_text_relevant(scoped_issue_text)
 
 
 def _is_api_contract_path(path: str) -> bool:
@@ -185,6 +205,13 @@ def _remove_maui_inventory_mentions(value: str) -> str:
     for phrase in MAUI_INVENTORY_PHRASES:
         result = result.replace(phrase, "")
     return result
+
+
+def _maui_text_relevant(issue_text: str) -> bool:
+    if _contains_any(issue_text, MAUI_EXPLICIT_WORK_TERMS):
+        return True
+
+    return _contains_any(issue_text, MAUI_CONTEXT_TERMS) and _contains_any(issue_text, MAUI_WORK_INTENT_TERMS)
 
 
 def _contains_any(value: str, terms: Iterable[str]) -> bool:

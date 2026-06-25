@@ -134,6 +134,43 @@ class CommandGroupRecommendationTests(unittest.TestCase):
         self.assertNotIn("maui-android-doctor", result["recommended_command_groups"])
         self.assertNotIn("maui-android-build", result["recommended_command_groups"])
 
+    def test_docs_architecture_boundary_issue_does_not_recommend_maui_groups(self):
+        result = recommend_command_groups(
+            issue_text=(
+                "Define the architectural boundary between PHOODAB inventory-native "
+                "actions and SecondBrain cross-domain orchestration. Document which "
+                "actions remain in PHOODAB and which future workflows are handed off "
+                "to SecondBrain. Mention web and MAUI/mobile as consumers, but do not "
+                "implement integration logic."
+            ),
+            changed_paths=[],
+            available_command_groups=[
+                "env",
+                "dotnet-solution",
+                "node-root",
+                "api-client-generate",
+                "web-app",
+                "maui-android-doctor",
+                "maui-android-build",
+                "markdown-smoke",
+                "ci-manual-reference",
+            ],
+            android_sdk_available=True,
+        )
+
+        self.assertNotIn("maui-android-doctor", result["recommended_command_groups"])
+        self.assertNotIn("maui-android-build", result["recommended_command_groups"])
+
+    def test_maui_text_build_scope_recommends_android_groups_when_sdk_available(self):
+        result = recommend_command_groups(
+            issue_text="Build the MAUI Android app locally.",
+            changed_paths=[],
+            android_sdk_available=True,
+        )
+
+        self.assertIn("maui-android-doctor", result["recommended_command_groups"])
+        self.assertIn("maui-android-build", result["recommended_command_groups"])
+
     def test_recommendations_are_filtered_to_available_groups(self):
         result = recommend_command_groups(
             issue_text="Fix the MAUI mobile build.",
