@@ -25,7 +25,7 @@ flock -n 9 || { echo "Another run is active for $GITHUB_REPO" | tee -a "$log"; e
 
 {
   echo "Running one Codex issue-to-PR cycle for $GITHUB_OWNER/$GITHUB_REPO at $ts"
-  echo "This script runs deterministic steps and invokes codex exec on each rendered prompt."
+  echo "This script runs deterministic steps and invokes the configured agent command on each rendered prompt."
   "$AUTOMATION_ROOT/scripts/issue-to-pr-cycle.sh" \
     --env "$ENV_FILE" \
     --mode Run \

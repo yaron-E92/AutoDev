@@ -3,11 +3,12 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Run one trusted issue-to-PR workflow without nested prompt orchestration.
+Run one trusted issue-to-PR workflow without a hard-coded agent backend.
 
-The default Run mode performs the deterministic workflow steps, invokes
-`codex exec` on each rendered prompt at the point where agent work is needed,
-and uses only the trusted scripts for GitHub issue/PR/CI state transitions.
+The default Run mode performs the deterministic workflow steps and invokes a
+configurable agent command on each rendered prompt at the point where agent work
+is needed. The default agent command is `codex exec`; override it with
+--agent-command or AGENT_COMMAND to use another prompt runner.
 
 Usage:
   issue-to-pr-cycle.sh --env ENV_FILE [--mode Run] [options]
@@ -31,6 +32,8 @@ Options:
   --issue NUMBER             Prepare a specific issue instead of the next ready issue.
   --message TEXT             Blocked status message.
   --max-repair-attempts N    Repair attempts for local, CI, and verifier failures. Default: 3.
+  --agent-command COMMAND     Prompt runner. Default: AGENT_COMMAND or `codex exec`.
+                              Use {prompt_file} or {prompt} placeholders for non-Codex runners.
 EOF
 }
 
@@ -44,6 +47,7 @@ base="${BASE_BRANCH:-main}"
 remote="${REMOTE_NAME:-origin}"
 issue="${ISSUE_NUMBER:-}"
 message=""
+agent_command="${AGENT_COMMAND:-codex exec}"
 max_repair_attempts="${MAX_REPAIR_ATTEMPTS:-3}"
 current_dir=".codex-run/current"
 
@@ -58,6 +62,7 @@ while [[ $# -gt 0 ]]; do
     --issue) issue="$2"; shift 2 ;;
     --message) message="$2"; shift 2 ;;
     --max-repair-attempts) max_repair_attempts="$2"; shift 2 ;;
+    --agent-command) agent_command="$2"; shift 2 ;;
     --help|-h) usage; exit 0 ;;
     *) echo "Unknown arg: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -83,16 +88,30 @@ mark_blocked() {
   "${with_env[@]}" "$automation_root/scripts/mark-current-issue.sh" --status Blocked --message "$reason" || true
 }
 
-run_codex_prompt() {
-  local wrapper_file
-  wrapper_file="$(mktemp)"
-  cat > "$wrapper_file"
-  "${with_env[@]}" codex exec "$(cat "$wrapper_file")"
-  rm -f "$wrapper_file"
+shell_quote() {
+  printf "%q" "$1"
 }
 
-codex_write_plan() {
-  run_codex_prompt <<EOF
+run_agent_prompt() {
+  local prompt_file prompt rendered_command
+  prompt_file="$(mktemp)"
+  cat > "$prompt_file"
+  prompt="$(cat "$prompt_file")"
+  if [[ "$agent_command" == *"{prompt_file}"* ]]; then
+    rendered_command="${agent_command//\{prompt_file\}/$(shell_quote "$prompt_file")}"
+    "${with_env[@]}" bash -lc "$rendered_command"
+  elif [[ "$agent_command" == *"{prompt}"* ]]; then
+    rendered_command="${agent_command//\{prompt\}/$(shell_quote "$prompt")}"
+    "${with_env[@]}" bash -lc "$rendered_command"
+  else
+    # Codex-compatible default: append the prompt as the final argv value.
+    "${with_env[@]}" bash -lc "$agent_command \"\$@\"" _ "$prompt"
+  fi
+  rm -f "$prompt_file"
+}
+
+agent_write_plan() {
+  run_agent_prompt <<EOF
 Use the issue-to-pr-automation skill.
 
 Run the planner prompt below. Write your complete planner output to:
@@ -107,8 +126,8 @@ EOF
   [[ -s "$current_dir/plan.md" ]] || { echo "Planner did not write $current_dir/plan.md" >&2; return 1; }
 }
 
-codex_implement() {
-  run_codex_prompt <<EOF
+agent_implement() {
+  run_agent_prompt <<EOF
 Use the issue-to-pr-automation skill.
 
 Run the implementer prompt below. Edit the workspace directly.
@@ -130,9 +149,9 @@ EOF
   [[ -s "$current_dir/commit-message.txt" ]] || { echo "Implementer did not write $current_dir/commit-message.txt" >&2; return 1; }
 }
 
-codex_repair_file() {
+agent_repair_file() {
   local prompt_file="$1"
-  run_codex_prompt <<EOF
+  run_agent_prompt <<EOF
 Use the issue-to-pr-automation skill.
 
 Run the repair prompt below. Fix only the failure described by the prompt, and edit the workspace directly.
@@ -142,8 +161,8 @@ $(cat "$prompt_file")
 EOF
 }
 
-codex_verify() {
-  run_codex_prompt <<EOF
+agent_verify() {
+  run_agent_prompt <<EOF
 Use the issue-to-pr-automation skill.
 
 Run the verifier prompt below. Write only the verification result to:
@@ -168,7 +187,7 @@ local_check_with_repairs() {
     [[ $code -eq 0 ]] && return 0
     [[ $code -eq 10 && $attempt -lt $max_repair_attempts ]] || return "$code"
     attempt=$((attempt + 1))
-    codex_repair_file "$current_dir/local-repair.md"
+    agent_repair_file "$current_dir/local-repair.md"
   done
 }
 
@@ -182,7 +201,7 @@ pr_and_ci_with_repairs() {
     [[ $code -eq 0 ]] && return 0
     [[ $code -eq 20 && $attempt -lt $max_repair_attempts ]] || return "$code"
     attempt=$((attempt + 1))
-    codex_repair_file "$current_dir/ci-repair.md"
+    agent_repair_file "$current_dir/ci-repair.md"
     local_check_with_repairs
   done
 }
@@ -200,14 +219,14 @@ run_full_cycle() {
   fi
   rm -f "$prepare_log"
 
-  codex_write_plan || { mark_blocked "Planner did not produce plan.md."; return 1; }
+  agent_write_plan || { mark_blocked "Planner did not produce plan.md."; return 1; }
   run_finalize RenderImplementerPrompt
-  codex_implement || { mark_blocked "Implementer did not produce commit-message.txt."; return 1; }
+  agent_implement || { mark_blocked "Implementer did not produce commit-message.txt."; return 1; }
   local_check_with_repairs || { mark_blocked "Automation could not complete after local repair attempts."; return 1; }
 
   while true; do
     pr_and_ci_with_repairs || { mark_blocked "Automation could not complete after CI repair attempts."; return 1; }
-    codex_verify || { mark_blocked "Verifier did not produce verification-result.md."; return 1; }
+    agent_verify || { mark_blocked "Verifier did not produce verification-result.md."; return 1; }
     verification_first_line="$(head -n1 "$current_dir/verification-result.md" | tr -d '\r')"
     if [[ "$verification_first_line" == "PASS" ]]; then
       "${with_env[@]}" "$automation_root/scripts/mark-current-issue.sh" --status ReadyForReview
@@ -217,7 +236,7 @@ run_full_cycle() {
     [[ $verification_attempt -lt $max_repair_attempts ]] || { mark_blocked "Automation could not complete after verification repair attempts."; return 1; }
     verification_attempt=$((verification_attempt + 1))
     run_finalize RenderVerificationRepair
-    codex_repair_file "$current_dir/verification-repair.md"
+    agent_repair_file "$current_dir/verification-repair.md"
     local_check_with_repairs || { mark_blocked "Automation could not complete after verification local-check repairs."; return 1; }
   done
 }

@@ -13,7 +13,7 @@ Do not duplicate common prompt, profile, or skill files under this directory.
 
 The Linux automation files checked into this repository are:
 
-- `linux/run-once.sh` for a timer-friendly prepare-only automation handoff. It does not call `codex exec`.
+- `linux/run-once.sh` for a timer-friendly single-command automation run using the configured agent command.
 - `linux/scripts/issue-to-pr-cycle.sh` for the script-based issue-to-PR workflow wrapper.
 - `linux/scripts/*.sh` for reusable Linux workflow primitives.
 - `linux/systemd/` for optional systemd unit templates.
@@ -21,7 +21,7 @@ The Linux automation files checked into this repository are:
 
 ## Script-based workflow
 
-Use `issue-to-pr-cycle.sh` for the trusted state transitions from the Codex Desktop workflow. The default `Run` mode performs deterministic prepare/finalize/mark steps and invokes `codex exec` on the rendered planner, implementer, repair, and verifier prompts at the points where agent work is needed.
+Use `issue-to-pr-cycle.sh` for the trusted state transitions from the Codex Desktop workflow. The default `Run` mode performs deterministic prepare/finalize/mark steps and invokes the configured agent command on the rendered planner, implementer, repair, and verifier prompts at the points where agent work is needed.
 
 ```bash
 ~/automation/scripts/issue-to-pr-cycle.sh \
@@ -45,7 +45,7 @@ For debugging or resuming a partially completed cycle, run an individual transit
 
 For debugging, each deterministic transition is still available as an individual mode (`Prepare`, `RenderImplementerPrompt`, `LocalCheck`, `PrAndCi`, `RenderVerificationRepair`, `ReadyForReview`, and `Blocked`).
 
-`linux/run-once.sh` now runs the single-command cycle and logs the deterministic and Codex-exec phases.
+`linux/run-once.sh` now runs the single-command cycle and logs the deterministic and agent-command phases.
 
 ## Legacy automation prompt
 

@@ -1,6 +1,6 @@
 # Script-based issue-to-PR workflow
 
-The preferred real-issue workflow is the trusted script flow under `linux/scripts/issue-to-pr-cycle.sh`. It mirrors the Codex Desktop prompt as a single command: scripts perform GitHub/state transitions, then invoke `codex exec` on each rendered prompt so Codex performs planning, implementation, repair, and verification directly in the workspace.
+The preferred real-issue workflow is the trusted script flow under `linux/scripts/issue-to-pr-cycle.sh`. It mirrors the Codex Desktop prompt as a single command: scripts perform GitHub/state transitions, then invoke the configured agent command on each rendered prompt so the configured agent performs planning, implementation, repair, and verification directly in the workspace.
 
 ```bash
 scripts/run-real-issue.sh --env ~/automation/state/PROJECT.env --mode Run --owner owner --repo AutoDev --base main --remote origin
