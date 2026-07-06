@@ -1,5 +1,4 @@
 import io
-import os
 import subprocess
 import tempfile
 import unittest
@@ -353,53 +352,24 @@ END_UNIFIED_DIFF"""
         self.assertEqual(coder.model, "coder-custom")
         self.assertEqual(coder.command, "coder-cli --model coder-custom")
 
-    def test_linux_wrapper_invokes_runner_from_repo_root_parent_of_scripts(self):
+    def test_linux_wrapper_delegates_to_script_workflow(self):
         repo_root = Path(__file__).resolve().parents[1]
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp = Path(temp_dir)
-            calls = temp / "calls.txt"
-            python_stub = temp / "python3"
-            python_stub.write_text(
-                """#!/usr/bin/env bash
-printf 'cwd=%s\n' "$PWD" > "$RUNNER_CALLS"
-printf 'argv=%s\n' "$*" >> "$RUNNER_CALLS"
-""",
-                encoding="utf-8",
-            )
-            python_stub.chmod(0o755)
-            gh_stub = temp / "gh"
-            gh_stub.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
-            gh_stub.chmod(0o755)
-            env = {
-                **os.environ,
-                "PATH": f"{temp}{os.pathsep}{os.environ.get('PATH', '')}",
-                "RUNNER_CALLS": str(calls),
-            }
 
-            result = subprocess.run(
-                [
-                    "bash",
-                    str(repo_root / "scripts" / "run-real-issue.sh"),
-                    "--repo",
-                    ".",
-                    "--github-repo",
-                    "owner/repo",
-                    "--issue",
-                    "18",
-                    "--out",
-                    "out",
-                ],
-                cwd=repo_root,
-                env=env,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
+        result = subprocess.run(
+            [
+                "bash",
+                str(repo_root / "scripts" / "run-real-issue.sh"),
+                "--help",
+            ],
+            cwd=repo_root,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
 
-            self.assertEqual(result.returncode, 0, result.stderr)
-            recorded = calls.read_text(encoding="utf-8")
-            self.assertIn(f"cwd={repo_root}", recorded)
-            self.assertIn(str(repo_root / "automation" / "run_real_issue.py"), recorded)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Run one trusted issue-to-PR workflow step", result.stdout)
+        self.assertIn("issue-to-pr-cycle.sh --env ENV_FILE --mode MODE", result.stdout)
 
 
 if __name__ == "__main__":

@@ -13,12 +13,41 @@ Do not duplicate common prompt, profile, or skill files under this directory.
 
 The Linux automation files checked into this repository are:
 
-- `linux/run-once.sh` for a timer-friendly one-shot automation run.
-- `linux/scripts/*.sh` for reusable Linux workflow scripts.
+- `linux/run-once.sh` for a timer-friendly prepare-only automation handoff. It does not call `codex exec`.
+- `linux/scripts/issue-to-pr-cycle.sh` for the script-based issue-to-PR workflow wrapper.
+- `linux/scripts/*.sh` for reusable Linux workflow primitives.
 - `linux/systemd/` for optional systemd unit templates.
 - `linux/config.example.env` as a sanitized project environment template.
 
-## Automation Prompt
+## Script-based workflow
+
+Use `issue-to-pr-cycle.sh` for the trusted state transitions from the Codex Desktop workflow. The script never calls `codex exec`; it runs only the deterministic prepare/finalize/mark steps and prints the next file the Codex agent should read or write.
+
+```bash
+~/automation/scripts/issue-to-pr-cycle.sh \
+  --env ~/automation/state/PROJECT.env \
+  --mode Prepare \
+  --owner OWNER \
+  --repo REPO \
+  --base main \
+  --remote origin
+```
+
+Then continue the cycle by running the mode that matches the next trusted transition:
+
+```bash
+~/automation/scripts/issue-to-pr-cycle.sh --env ~/automation/state/PROJECT.env --mode RenderImplementerPrompt
+~/automation/scripts/issue-to-pr-cycle.sh --env ~/automation/state/PROJECT.env --mode LocalCheck
+~/automation/scripts/issue-to-pr-cycle.sh --env ~/automation/state/PROJECT.env --mode PrAndCi
+~/automation/scripts/issue-to-pr-cycle.sh --env ~/automation/state/PROJECT.env --mode RenderVerificationRepair
+~/automation/scripts/issue-to-pr-cycle.sh --env ~/automation/state/PROJECT.env --mode ReadyForReview
+```
+
+The Codex agent is still responsible for the non-scriptable work between transitions: reading `planner.md`, writing `plan.md`, implementing from `implementer.md`, fixing repair prompts, writing `commit-message.txt`, and writing `verification-result.md`.
+
+`linux/run-once.sh` now performs only the Prepare transition and logs the handoff; it does not spawn a nested Codex session.
+
+## Legacy automation prompt
 
 Use this as the Linux automation task, adjusting repo names and paths.
 
