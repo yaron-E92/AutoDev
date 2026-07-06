@@ -4,7 +4,6 @@ import argparse
 import json
 import os
 import re
-import shlex
 import shutil
 import subprocess
 import sys
@@ -20,6 +19,7 @@ from automation.model_providers import (
     ProviderError,
     create_provider,
     load_provider_config,
+    ollama_command_for_model,
     resolve_model_config,
 )
 
@@ -315,7 +315,7 @@ def default_ollama_command_config(model: str) -> dict[str, object]:
     return {
         "provider": "command",
         "model": model,
-        "command": f"ollama run {shlex.quote(model)}",
+        "command": ollama_command_for_model(model),
         "timeout_seconds": 600,
     }
 
@@ -355,7 +355,7 @@ def add_default_ollama_command(
         return
     model = cli_values.get("model") or role_values.get("model") or defaults.get("model")
     if model:
-        cli_values["command"] = f"ollama run {shlex.quote(str(model))}"
+        cli_values["command"] = ollama_command_for_model(str(model))
 
 
 def require_tools(tools: list[str]) -> None:

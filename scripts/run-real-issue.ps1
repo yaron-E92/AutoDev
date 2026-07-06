@@ -9,9 +9,9 @@ function Show-Usage {
 Run the AutoDev real GitHub issue automation flow.
 
 Examples:
-  scripts\run-real-issue.ps1 --repo . --github-repo owner/AutoDev --issue 18 --mode plan-only --out .autodev-runs\issue-18 --reader-command "ollama run qwen35-9b-32k" --coder-command "ollama run devstral-small2-12k"
+  scripts\run-real-issue.ps1 --repo . --github-repo owner/AutoDev --issue 18 --mode plan-only --out .autodev-runs\issue-18 --reader qwen35-9b-32k --coder devstral-small2-12k
   scripts\run-real-issue.ps1 --repo . --github-repo owner/AutoDev --next --manage-labels --mode implement --out .autodev-runs\next --provider-config autodev-providers.json
-  scripts\run-real-issue.ps1 --repo . --github-repo owner/AutoDev --issue 18 --mode pr --out .autodev-runs\issue-18 --reader-provider chat-completions --reader-base-url http://localhost:1234/v1 --coder-command "my-coder"
+  scripts\run-real-issue.ps1 --repo . --github-repo owner/AutoDev --issue 18 --mode pr --out .autodev-runs\issue-18 --reader-provider chat-completions --reader-base-url http://localhost:1234/v1 --reader-model qwen35-9b-32k --coder-command "my-coder"
 "@
 }
 
@@ -32,7 +32,7 @@ while ($null -ne $ScriptItem.Target) {
     $ScriptItem = Get-Item -LiteralPath $TargetPath
 }
 $ScriptsDir = $ScriptItem.DirectoryName
-$RepoRoot = Resolve-Path (Join-Path $ScriptsDir "..")
+$RepoRoot = (Resolve-Path (Join-Path $ScriptsDir "..")).Path
 
 if ($Arguments.Count -gt 0 -and ($Arguments[0] -eq "--help" -or $Arguments[0] -eq "-h")) {
     Show-Usage

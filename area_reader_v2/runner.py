@@ -17,7 +17,7 @@ if str(REPO_TOOL_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_TOOL_ROOT))
 
 from area_reader_v2.command_group_recommendations import recommend_command_groups as recommend_area_reader_command_groups
-from automation.model_providers import ModelConfig, create_provider
+from automation.model_providers import ModelConfig, create_provider, ollama_command_for_model
 
 
 OLLAMA_CHAT_URL = "http://localhost:11434/api/chat"
@@ -1287,10 +1287,14 @@ def model_config_from_args(args, role, model_override=None):
     model = model_override or getattr(args, f"{role}_model") or getattr(args, role)
     if not model:
         raise RuntimeError(f"{role} model is required")
+    provider = getattr(args, f"{role}_provider")
+    command = getattr(args, f"{role}_command")
+    if provider == "command" and not command:
+        command = ollama_command_for_model(str(model))
     return ModelConfig(
-        provider=getattr(args, f"{role}_provider"),
+        provider=provider,
         model=model,
-        command=getattr(args, f"{role}_command"),
+        command=command,
         base_url=getattr(args, f"{role}_base_url"),
         api_key_env=getattr(args, f"{role}_api_key_env"),
         timeout_seconds=getattr(args, f"{role}_timeout_seconds"),
