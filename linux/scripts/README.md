@@ -21,19 +21,19 @@ The Linux automation files checked into this repository are:
 
 ## Script-based workflow
 
-Use `issue-to-pr-cycle.sh` for the trusted state transitions from the Codex Desktop workflow. The script never calls `codex exec`; it runs only the deterministic prepare/finalize/mark steps and prints the next file the Codex agent should read or write.
+Use `issue-to-pr-cycle.sh` for the trusted state transitions from the Codex Desktop workflow. The default `Run` mode performs deterministic prepare/finalize/mark steps and invokes `codex exec` on the rendered planner, implementer, repair, and verifier prompts at the points where agent work is needed.
 
 ```bash
 ~/automation/scripts/issue-to-pr-cycle.sh \
   --env ~/automation/state/PROJECT.env \
-  --mode Prepare \
+  --mode Run \
   --owner OWNER \
   --repo REPO \
   --base main \
   --remote origin
 ```
 
-Then continue the cycle by running the mode that matches the next trusted transition:
+For debugging or resuming a partially completed cycle, run an individual transition mode:
 
 ```bash
 ~/automation/scripts/issue-to-pr-cycle.sh --env ~/automation/state/PROJECT.env --mode RenderImplementerPrompt
@@ -43,9 +43,9 @@ Then continue the cycle by running the mode that matches the next trusted transi
 ~/automation/scripts/issue-to-pr-cycle.sh --env ~/automation/state/PROJECT.env --mode ReadyForReview
 ```
 
-The Codex agent is still responsible for the non-scriptable work between transitions: reading `planner.md`, writing `plan.md`, implementing from `implementer.md`, fixing repair prompts, writing `commit-message.txt`, and writing `verification-result.md`.
+For debugging, each deterministic transition is still available as an individual mode (`Prepare`, `RenderImplementerPrompt`, `LocalCheck`, `PrAndCi`, `RenderVerificationRepair`, `ReadyForReview`, and `Blocked`).
 
-`linux/run-once.sh` now performs only the Prepare transition and logs the handoff; it does not spawn a nested Codex session.
+`linux/run-once.sh` now runs the single-command cycle and logs the deterministic and Codex-exec phases.
 
 ## Legacy automation prompt
 

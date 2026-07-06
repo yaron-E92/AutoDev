@@ -24,11 +24,11 @@ exec 9>"$lock"
 flock -n 9 || { echo "Another run is active for $GITHUB_REPO" | tee -a "$log"; exit 0; }
 
 {
-  echo "Preparing one Codex issue-to-PR cycle for $GITHUB_OWNER/$GITHUB_REPO at $ts"
-  echo "This script does not call codex exec. Continue the cycle by following the NEXT_ACTION handoff."
+  echo "Running one Codex issue-to-PR cycle for $GITHUB_OWNER/$GITHUB_REPO at $ts"
+  echo "This script runs deterministic steps and invokes codex exec on each rendered prompt."
   "$AUTOMATION_ROOT/scripts/issue-to-pr-cycle.sh" \
     --env "$ENV_FILE" \
-    --mode Prepare \
+    --mode Run \
     --owner "$GITHUB_OWNER" \
     --repo "$GITHUB_REPO" \
     --base "$BASE_BRANCH" \

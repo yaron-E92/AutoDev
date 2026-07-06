@@ -368,8 +368,8 @@ END_UNIFIED_DIFF"""
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("Run one trusted issue-to-PR workflow step", result.stdout)
-        self.assertIn("issue-to-pr-cycle.sh --env ENV_FILE --mode MODE", result.stdout)
+        self.assertIn("Run one trusted issue-to-PR workflow without nested prompt orchestration", result.stdout)
+        self.assertIn("issue-to-pr-cycle.sh --env ENV_FILE [--mode Run]", result.stdout)
 
 
 if __name__ == "__main__":
