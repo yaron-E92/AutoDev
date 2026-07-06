@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, TextIO
 
+from area_reader_v2 import runner as area_reader_runner
 from automation.model_providers import (
     ModelConfig,
     ModelProvider,
@@ -31,7 +32,6 @@ DEFAULT_FAILED_LABEL = "autodev:failed"
 DEFAULT_DONE_LABEL = "autodev:done"
 DEFAULT_BLOCKED_LABEL = "autodev:blocked"
 RUNNER_ROOT = Path(__file__).resolve().parents[1]
-AREA_READER_SCRIPT = RUNNER_ROOT / "benchmarks" / "local-llm" / "area_reader_bench.py"
 PROMPT_TEMPLATE_DIR = RUNNER_ROOT / "promptTemplates"
 PATCH_START = "BEGIN_UNIFIED_DIFF"
 PATCH_END = "END_UNIFIED_DIFF"
@@ -284,8 +284,8 @@ def validate_inputs(args: argparse.Namespace, repo: Path) -> None:
         raise RunnerError(f"--repo is not a directory: {repo}", 2)
     if "/" not in args.github_repo or args.github_repo.count("/") != 1:
         raise RunnerError("--github-repo must use owner/name format", 2)
-    if not AREA_READER_SCRIPT.is_file():
-        raise RunnerError(f"Missing area-reader script: {AREA_READER_SCRIPT}", 2)
+    if not Path(area_reader_runner.__file__).is_file():
+        raise RunnerError(f"Missing area-reader v2 runner module: {area_reader_runner.__file__}", 2)
     if args.mode == "plan-only" and args.dry_run_implementation:
         raise RunnerError("--dry-run-implementation is only valid for implement or pr mode", 2)
 
@@ -574,9 +574,7 @@ def run_area_reader(
 ) -> None:
     if out_dir.exists():
         shutil.rmtree(out_dir)
-    command = [
-        sys.executable,
-        str(AREA_READER_SCRIPT),
+    argv = [
         "--repo",
         str(repo),
         "--reader-provider",
@@ -596,9 +594,12 @@ def run_area_reader(
         "--out",
         str(out_dir),
     ]
-    append_provider_command_args(command, "reader", reader_config)
-    append_provider_command_args(command, "coder", coder_config)
-    run_command(command, cwd=RUNNER_ROOT, stream=stream)
+    append_provider_command_args(argv, "reader", reader_config)
+    append_provider_command_args(argv, "coder", coder_config)
+    print("Running shared area-reader v2 planner", file=stream)
+    exit_code = area_reader_runner.main(argv)
+    if exit_code:
+        raise RunnerError(f"area-reader v2 planner failed with exit code {exit_code}", exit_code)
 
 
 def append_provider_command_args(command: list[str], role: str, config: ModelConfig) -> None:
