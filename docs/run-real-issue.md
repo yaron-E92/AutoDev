@@ -1,3 +1,15 @@
+# Script-based issue-to-PR workflow
+
+The preferred real-issue workflow is the trusted script flow under `linux/scripts/issue-to-pr-cycle.sh`. It mirrors the Codex Desktop prompt as a single command: scripts perform GitHub/state transitions, then invoke the configured agent command on each rendered prompt so the configured agent performs planning, implementation, repair, and verification directly in the workspace.
+
+```bash
+scripts/run-real-issue.sh --env ~/automation/state/PROJECT.env --mode Run --owner owner --repo AutoDev --base main --remote origin
+```
+
+The same script also exposes `--mode Plan` for the reader/planner-only portion, plus individual transition modes for debugging or resuming a partially completed cycle. Use `--planner-agent-command` when planning should use a different reader-style agent than implementation/repair.
+
+---
+
 # AutoDev Real-Issue Runner
 
 `automation/run_real_issue.py` is the AutoDev orchestrator for running real GitHub issues through planning, model-proposed patches, deterministic verification, optional fix attempts, and optional draft PR creation.
