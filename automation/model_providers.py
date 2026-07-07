@@ -144,6 +144,10 @@ def normalize_provider_name(value: str) -> str:
     return normalized
 
 
+def ollama_command_for_model(model: str) -> str:
+    return f"ollama run {shlex.quote(model)}"
+
+
 def create_provider(config: ModelConfig, mock_responses: list[str] | None = None) -> ModelProvider:
     provider = normalize_provider_name(config.provider)
     if provider == "command":

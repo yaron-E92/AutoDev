@@ -320,5 +320,28 @@ class CommandGroupRecommendationTests(unittest.TestCase):
         self.assertTrue(bench.area_for_file("packages/api-client/src/generated.ts", "api-client"))
         self.assertTrue(bench.area_for_file("apps/api/openapi.json", "api-client"))
 
+    def test_benchmark_model_only_command_provider_uses_ollama_run(self):
+        bench = load_area_reader_bench()
+        args = bench.parse_args(
+            [
+                "--repo",
+                ".",
+                "--issue",
+                "Issue",
+                "--out",
+                "out",
+                "--reader",
+                "reader-model",
+                "--coder",
+                "coder-model",
+            ]
+        )
+
+        reader = bench.model_config_from_args(args, "reader")
+        coder = bench.model_config_from_args(args, "coder")
+
+        self.assertEqual(reader.command, "ollama run reader-model")
+        self.assertEqual(coder.command, "ollama run coder-model")
+
 if __name__ == "__main__":
     unittest.main()

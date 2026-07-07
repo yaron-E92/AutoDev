@@ -1,4 +1,5 @@
 import io
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -350,6 +351,27 @@ END_UNIFIED_DIFF"""
         self.assertEqual(reader.command, "reader-cli --model reader-custom")
         self.assertEqual(coder.model, "coder-custom")
         self.assertEqual(coder.command, "coder-cli --model coder-custom")
+
+    def test_linux_wrapper_delegates_to_script_workflow(self):
+        repo_root = Path(__file__).resolve().parents[1]
+
+        result = subprocess.run(
+            [
+                "bash",
+                str(repo_root / "scripts" / "run-real-issue.sh"),
+                "--help",
+            ],
+            cwd=repo_root,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Run one trusted issue-to-PR workflow without a hard-coded agent backend", result.stdout)
+        self.assertIn("issue-to-pr-cycle.sh --env ENV_FILE [--mode Run]", result.stdout)
+        self.assertIn("Plan                       Prepare one issue and write plan.md with the planner agent.", result.stdout)
+        self.assertIn("--planner-agent-command CMD", result.stdout)
 
 
 if __name__ == "__main__":
