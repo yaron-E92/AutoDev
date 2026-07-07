@@ -31,6 +31,8 @@ Options:
   --base BRANCH              Base branch. Defaults to BASE_BRANCH or main.
   --remote NAME              Remote name. Defaults to REMOTE_NAME or origin.
   --issue NUMBER             Prepare a specific issue instead of the next ready issue.
+  --description TEXT         Use literal issue text instead of a GitHub issue.
+  --description-file FILE    Read literal issue text from a file.
   --message TEXT             Blocked status message.
   --max-repair-attempts N    Repair attempts for local, CI, and verifier failures. Default: 3.
   --agent-command COMMAND     Prompt runner for implementation/repair/verification.
@@ -50,6 +52,8 @@ repo="${GITHUB_REPO:-}"
 base="${BASE_BRANCH:-main}"
 remote="${REMOTE_NAME:-origin}"
 issue="${ISSUE_NUMBER:-}"
+description="${ISSUE_DESCRIPTION:-}"
+description_file="${ISSUE_DESCRIPTION_FILE:-}"
 message=""
 agent_command="${AGENT_COMMAND:-codex exec}"
 planner_agent_command="${PLANNER_AGENT_COMMAND:-}"
@@ -65,6 +69,8 @@ while [[ $# -gt 0 ]]; do
     --base) base="$2"; shift 2 ;;
     --remote) remote="$2"; shift 2 ;;
     --issue) issue="$2"; shift 2 ;;
+    --description) description="$2"; shift 2 ;;
+    --description-file) description_file="$2"; shift 2 ;;
     --message) message="$2"; shift 2 ;;
     --max-repair-attempts) max_repair_attempts="$2"; shift 2 ;;
     --agent-command) agent_command="$2"; shift 2 ;;
@@ -83,6 +89,8 @@ with_env=("$automation_root/scripts/with-env.sh" "$env_file")
 run_prepare() {
   local args=("$automation_root/scripts/prepare-next-ready-issue.sh" --owner "$owner" --repo "$repo" --base "$base" --remote "$remote")
   [[ -n "$issue" ]] && args+=(--issue "$issue")
+  [[ -n "$description" ]] && args+=(--description "$description")
+  [[ -n "$description_file" ]] && args+=(--description-file "$description_file")
   "${with_env[@]}" "${args[@]}"
 }
 
@@ -217,9 +225,16 @@ prepare_and_plan() {
   [[ -n "$owner" ]] || { echo "Missing --owner or GITHUB_OWNER" >&2; exit 2; }
   [[ -n "$repo" ]] || { echo "Missing --repo or GITHUB_REPO" >&2; exit 2; }
 
-  local prepare_log
+  local prepare_log prepare_code restore_errexit=false
   prepare_log="$(mktemp)"
+  case $- in *e*) restore_errexit=true; set +e ;; esac
   run_prepare | tee "$prepare_log"
+  prepare_code=$?
+  [[ "$restore_errexit" == true ]] && set -e
+  if [[ $prepare_code -ne 0 ]]; then
+    rm -f "$prepare_log"
+    return "$prepare_code"
+  fi
   if grep -q '^NO_READY_ISSUE$' "$prepare_log"; then
     rm -f "$prepare_log"
     return 2

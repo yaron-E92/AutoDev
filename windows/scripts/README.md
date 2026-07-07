@@ -10,7 +10,20 @@ Common files remain at the repository root:
 - `codex-profiles.json`
 
 Do not duplicate common prompt, profile, or skill files under this directory.
+## Single-command workflow
 
+Use `issue-to-pr-cycle.ps1` for the native Windows equivalent of the old prompt-driven flow. It composes the Windows prepare/finalize/mark scripts and invokes configurable planner and coder agent commands at the points where agent work is needed.
+
+```powershell
+pwsh -File "C:\Users\you\codex-tools\issue-to-pr-cycle.ps1" `
+  -Mode Run `
+  -Username owner `
+  -Repo AutoDev `
+  -PlannerAgentCommand "reader-agent {prompt_file}" `
+  -AgentCommand "coder-agent {prompt_file}"
+```
+
+Omit `-Issue` to process the next open issue labeled `autodev:ready`, pass `-Issue 123` for a specific GitHub issue, or pass `-Description "..."` / `-DescriptionFile ideas.md` for a local task description. `-Mode Plan` runs only prepare plus the planner agent; individual transition modes are available for debugging and resuming.
 
 ## Planner-only helper
 
@@ -21,7 +34,7 @@ pwsh -File "C:\Users\you\codex-tools\codex-plan-current-issue.ps1" `
   -PlannerAgentCommand "reader-agent {prompt_file}"
 ```
 
-If `-PlannerAgentCommand` is omitted, the script uses `$env:PLANNER_AGENT_COMMAND` or falls back to `codex exec`. Commands can use `{prompt_file}` or `{prompt}` placeholders for area-reader-style prompt runners.
+If `-PlannerAgentCommand` is omitted, the script uses `$env:PLANNER_AGENT_COMMAND` or falls back to `codex exec`. Commands can use `{prompt_file}` or `{prompt}` placeholders for area-reader-style prompt runners and are executed through PowerShell, not bash.
 
 ## Automation Prompt
 

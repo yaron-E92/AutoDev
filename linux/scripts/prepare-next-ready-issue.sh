@@ -1,20 +1,39 @@
 #!/usr/bin/env bash
 set -euo pipefail
 source "${AUTOMATION_ROOT:-~/automation}/scripts/lib.sh"
-OWNER="${GITHUB_OWNER:-}"; REPO="${GITHUB_REPO:-}"; BASE="${BASE_BRANCH:-main}"; REMOTE="${REMOTE_NAME:-origin}"; ISSUE="${ISSUE_NUMBER:-}"; PROFILES="${PROFILES:-}"; LOCAL_CHECK="${LOCAL_CHECK:-}"; STACK_CONTEXT="${STACK_CONTEXT:-}"; FORCE_CURRENT="${FORCE_CURRENT:-false}"
-while [[ $# -gt 0 ]]; do case "$1" in --owner) OWNER="$2"; shift 2;; --repo) REPO="$2"; shift 2;; --base) BASE="$2"; shift 2;; --remote) REMOTE="$2"; shift 2;; --issue) ISSUE="$2"; shift 2;; --profiles) PROFILES="$2"; shift 2;; --local-check) LOCAL_CHECK="$2"; shift 2;; --stack-context) STACK_CONTEXT="$2"; shift 2;; --force-current) FORCE_CURRENT=true; shift;; *) echo "Unknown arg: $1" >&2; exit 2;; esac; done
+OWNER="${GITHUB_OWNER:-}"; REPO="${GITHUB_REPO:-}"; BASE="${BASE_BRANCH:-main}"; REMOTE="${REMOTE_NAME:-origin}"; ISSUE="${ISSUE_NUMBER:-}"; DESCRIPTION="${ISSUE_DESCRIPTION:-}"; DESCRIPTION_FILE="${ISSUE_DESCRIPTION_FILE:-}"; PROFILES="${PROFILES:-}"; LOCAL_CHECK="${LOCAL_CHECK:-}"; STACK_CONTEXT="${STACK_CONTEXT:-}"; FORCE_CURRENT="${FORCE_CURRENT:-false}"
+while [[ $# -gt 0 ]]; do case "$1" in --owner) OWNER="$2"; shift 2;; --repo) REPO="$2"; shift 2;; --base) BASE="$2"; shift 2;; --remote) REMOTE="$2"; shift 2;; --issue) ISSUE="$2"; shift 2;; --description) DESCRIPTION="$2"; shift 2;; --description-file) DESCRIPTION_FILE="$2"; shift 2;; --profiles) PROFILES="$2"; shift 2;; --local-check) LOCAL_CHECK="$2"; shift 2;; --stack-context) STACK_CONTEXT="$2"; shift 2;; --force-current) FORCE_CURRENT=true; shift;; *) echo "Unknown arg: $1" >&2; exit 2;; esac; done
 require_cmd gh; require_cmd jq; require_cmd sha256sum; require_cmd python3; init_gh_env
 FULL="$(repo_full_name "$OWNER" "$REPO")"; RUN_ROOT=".codex-run"; CURRENT="$RUN_ROOT/current"; mkdir -p "$RUN_ROOT"
 if [[ -d "$CURRENT" ]]; then if [[ "$FORCE_CURRENT" == true ]]; then rm -rf "$CURRENT"; else mv "$CURRENT" "$RUN_ROOT/archive-$(date -u +%Y%m%d-%H%M%S)"; fi; fi; mkdir -p "$CURRENT"
-if [[ -n "$ISSUE" ]]; then issue_json="$(gh issue view "$ISSUE" --repo "$FULL" --json number,title,body,url,labels)"; else next_number="$(gh issue list --repo "$FULL" --state open --label "codex:ready" --json number,title,labels --limit 50 | jq -r '[.[] | select([.labels[].name] | index("codex:in-progress") | not)][0].number // empty')"; [[ -z "$next_number" ]] && { echo "NO_READY_ISSUE"; exit 0; }; issue_json="$(gh issue view "$next_number" --repo "$FULL" --json number,title,body,url,labels)"; fi
+if [[ -n "$DESCRIPTION_FILE" ]]; then DESCRIPTION="$(cat "$DESCRIPTION_FILE")"; fi
+[[ -n "$ISSUE" && -n "$DESCRIPTION" ]] && { echo "Use either --issue or --description, not both" >&2; exit 2; }
+if [[ -n "$DESCRIPTION" ]]; then
+  issue_title="$(printf '%s\n' "$DESCRIPTION" | sed -n '/[^[:space:]]/{s/^[[:space:]#-]*//;s/[[:space:]]*$//;p;q}')"
+  [[ -n "$issue_title" ]] || issue_title="Local AutoDev task"
+  issue_json="$(jq -n --arg title "$issue_title" --arg body "$DESCRIPTION" '{number:0,title:$title,body:$body,url:"",labels:[]}')"
+elif [[ -n "$ISSUE" ]]; then
+  issue_json="$(gh issue view "$ISSUE" --repo "$FULL" --json number,title,body,url,labels)"
+else
+  next_number="$(gh issue list --repo "$FULL" --state open --label "autodev:ready" --json number,title,labels --limit 50 | jq -r '[.[] | select(([.labels[].name] | index("autodev:running") | not) and ([.labels[].name] | index("autodev:blocked") | not))][0].number // empty')"
+  [[ -z "$next_number" ]] && { echo "NO_READY_ISSUE"; exit 0; }
+  issue_json="$(gh issue view "$next_number" --repo "$FULL" --json number,title,body,url,labels)"
+fi
 issue_number="$(jq -r '.number' <<< "$issue_json")"; issue_title="$(jq -r '.title' <<< "$issue_json")"; issue_url="$(jq -r '.url' <<< "$issue_json")"; labels_json="$(jq '[.labels[].name]' <<< "$issue_json")"
 echo "Selected issue #$issue_number: $issue_title"
-cleanup_on_fail(){ code=$?; if [[ $code -ne 0 && -n "${issue_number:-}" ]]; then gh issue edit "$issue_number" --repo "$FULL" --remove-label "codex:in-progress" --add-label "codex:blocked" >/dev/null 2>&1 || true; gh issue comment "$issue_number" --repo "$FULL" --body "Codex automation prepare step failed. Check automation logs." >/dev/null 2>&1 || true; fi; exit $code; }
+cleanup_on_fail(){ code=$?; if [[ $code -ne 0 && -n "${issue_number:-}" && "$issue_number" != "0" ]]; then gh issue edit "$issue_number" --repo "$FULL" --remove-label "autodev:running" --add-label "autodev:blocked" >/dev/null 2>&1 || true; gh issue comment "$issue_number" --repo "$FULL" --body "AutoDev automation prepare step failed. Check automation logs." >/dev/null 2>&1 || true; fi; exit $code; }
 trap cleanup_on_fail ERR
-gh issue edit "$issue_number" --repo "$FULL" --add-label "codex:in-progress" >/dev/null
+[[ "$issue_number" == "0" ]] || gh issue edit "$issue_number" --repo "$FULL" --add-label "autodev:running" >/dev/null
 resolved="$(resolve_profiles_json "$labels_json" "$PROFILES" "$LOCAL_CHECK" "$STACK_CONTEXT")"; profiles_csv="$(jq -r '.profilesCsv' <<< "$resolved")"; local_check="$(jq -r '.localCheck' <<< "$resolved")"; stack_context="$(jq -r '.stackContext' <<< "$resolved")"
 base_ref="$(gh api "repos/$FULL/git/ref/heads/$BASE")"; base_sha="$(jq -r '.object.sha' <<< "$base_ref")"; base_commit="$(gh api "repos/$FULL/git/commits/$base_sha")"; base_tree_sha="$(jq -r '.tree.sha' <<< "$base_commit")"
-slug="$(safe_slug "issue-$issue_number-$issue_title")"; branch_name="codex/$slug-$(date -u +%Y%m%d-%H%M%S)"; body="$(jq -r '.body // ""' <<< "$issue_json")"
+slug="$(safe_slug "issue-$issue_number-$issue_title")"; branch_name="autodev/$slug-$(date -u +%Y%m%d-%H%M%S)"; body="$(jq -r '.body // ""' <<< "$issue_json")"
+if [[ "$issue_number" == "0" ]]; then
+cat > "$CURRENT/issue.md" <<ISSUEEOF
+# Local AutoDev Task: $issue_title
+
+$body
+ISSUEEOF
+else
 cat > "$CURRENT/issue.md" <<ISSUEEOF
 # GitHub Issue #$issue_number: $issue_title
 
@@ -22,6 +41,7 @@ URL: $issue_url
 
 $body
 ISSUEEOF
+fi
 write_workspace_snapshot "$CURRENT/workspace-snapshot.json"
 printf '%s' "$(cat "$CURRENT/issue.md")" > "$CURRENT/.issue.tmp"; printf '%s' "$local_check" > "$CURRENT/.local-check.tmp"; printf '%s' "$stack_context" > "$CURRENT/.stack-context.tmp"
 render_file "$PROMPT_DIR/planner.md" "$CURRENT/planner.md" IssueText "$CURRENT/.issue.tmp" LocalCheck "$CURRENT/.local-check.tmp" StackContext "$CURRENT/.stack-context.tmp"; rm -f "$CURRENT"/.issue.tmp "$CURRENT"/.local-check.tmp "$CURRENT"/.stack-context.tmp

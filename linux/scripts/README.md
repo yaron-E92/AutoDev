@@ -50,7 +50,7 @@ Use `issue-to-pr-cycle.sh` for the trusted state transitions from the Codex Desk
   --remote origin
 ```
 
-For a planner-only run with a reader-style agent, use `--mode Plan` and optionally `--planner-agent-command`. For debugging or resuming a partially completed cycle, run an individual transition mode:
+For a planner-only run with a reader-style agent, use `--mode Plan` and optionally `--planner-agent-command`. Use `--agent-command` for implementation, repair, and verifier prompts. Both commands can use `{prompt_file}` or `{prompt}` placeholders for non-Codex runners. For debugging or resuming a partially completed cycle, run an individual transition mode:
 
 ```bash
 ~/automation/scripts/issue-to-pr-cycle.sh --env ~/automation/state/PROJECT.env --mode Plan --planner-agent-command "reader-agent {prompt_file}"
@@ -61,7 +61,7 @@ For a planner-only run with a reader-style agent, use `--mode Plan` and optional
 ~/automation/scripts/issue-to-pr-cycle.sh --env ~/automation/state/PROJECT.env --mode ReadyForReview
 ```
 
-For debugging, each deterministic transition is still available as an individual mode (`Plan`, `Prepare`, `RenderImplementerPrompt`, `LocalCheck`, `PrAndCi`, `RenderVerificationRepair`, `ReadyForReview`, and `Blocked`).
+For input selection, omit `--issue` to process the next open issue labeled `autodev:ready`, pass `--issue NUMBER` for a specific GitHub issue, or pass `--description TEXT` / `--description-file FILE` for a local task description. For debugging, each deterministic transition is still available as an individual mode (`Plan`, `Prepare`, `RenderImplementerPrompt`, `LocalCheck`, `PrAndCi`, `RenderVerificationRepair`, `ReadyForReview`, and `Blocked`).
 
 `linux/run-once.sh` now runs the single-command cycle and logs the deterministic and agent-command phases.
 

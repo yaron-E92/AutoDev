@@ -382,6 +382,38 @@ END_UNIFIED_DIFF"""
         self.assertIn("PlannerAgentCommand", text)
         self.assertIn("{prompt_file}", text)
         self.assertIn("plan.md", text)
+        self.assertIn("pwsh -NoProfile -Command", text)
+        self.assertNotIn("bash -lc", text)
+
+    def test_script_workflows_use_autodev_labels_and_description_input(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        linux_prepare = (repo_root / "linux" / "scripts" / "prepare-next-ready-issue.sh").read_text(encoding="utf-8")
+        linux_cycle = (repo_root / "linux" / "scripts" / "issue-to-pr-cycle.sh").read_text(encoding="utf-8")
+        windows_prepare = (repo_root / "windows" / "scripts" / "codex-prepare-next-ready-issue.ps1").read_text(encoding="utf-8")
+        windows_cycle = (repo_root / "windows" / "scripts" / "issue-to-pr-cycle.ps1").read_text(encoding="utf-8")
+
+        self.assertIn("autodev:ready", linux_prepare)
+        self.assertIn("autodev:running", linux_prepare)
+        self.assertIn("--description", linux_cycle)
+        self.assertIn("ISSUE_DESCRIPTION", linux_cycle)
+        self.assertNotIn("codex:ready", linux_prepare)
+        self.assertNotIn("codex:in-progress", linux_prepare)
+
+        self.assertIn("autodev:ready", windows_prepare)
+        self.assertIn("autodev:running", windows_prepare)
+        self.assertIn("[string]$Description", windows_prepare)
+        self.assertIn("PlannerAgentCommand", windows_cycle)
+        self.assertIn("AgentCommand", windows_cycle)
+
+    def test_windows_root_wrapper_delegates_to_native_workflow(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        script = repo_root / "scripts" / "run-real-issue.ps1"
+
+        text = script.read_text(encoding="utf-8")
+
+        self.assertIn("windows/scripts/issue-to-pr-cycle.ps1", text)
+        self.assertNotIn("linux/scripts/issue-to-pr-cycle.sh", text)
+        self.assertNotIn("Get-Command bash", text)
 
     def test_linux_run_once_resolves_workflow_script_relative_to_itself(self):
         repo_root = Path(__file__).resolve().parents[1]

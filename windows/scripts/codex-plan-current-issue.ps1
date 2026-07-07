@@ -20,9 +20,9 @@ function Set-OptionalWorkingDirectory {
     Set-Location -LiteralPath $Path
 }
 
-function ConvertTo-SingleQuotedShellArgument {
+function ConvertTo-SingleQuotedPowerShellArgument {
     param([Parameter(Mandatory = $true)][string]$Value)
-    return "'" + $Value.Replace("'", "'\"'\"'") + "'"
+    return "'" + $Value.Replace("'", "''") + "'"
 }
 
 function Invoke-AgentPrompt {
@@ -36,26 +36,21 @@ function Invoke-AgentPrompt {
         Set-Content -LiteralPath $promptFile.FullName -Encoding UTF8 -Value $Prompt
 
         if ($AgentCommand.Contains("{prompt_file}")) {
-            $command = $AgentCommand.Replace("{prompt_file}", (ConvertTo-SingleQuotedShellArgument $promptFile.FullName))
-            bash -lc $command
+            $command = $AgentCommand.Replace("{prompt_file}", (ConvertTo-SingleQuotedPowerShellArgument $promptFile.FullName))
+            pwsh -NoProfile -Command $command
             if ($LASTEXITCODE -ne 0) { throw "Planner agent command failed with exit code $LASTEXITCODE." }
             return
         }
 
         if ($AgentCommand.Contains("{prompt}")) {
-            $command = $AgentCommand.Replace("{prompt}", (ConvertTo-SingleQuotedShellArgument $Prompt))
-            bash -lc $command
+            $command = $AgentCommand.Replace("{prompt}", (ConvertTo-SingleQuotedPowerShellArgument $Prompt))
+            pwsh -NoProfile -Command $command
             if ($LASTEXITCODE -ne 0) { throw "Planner agent command failed with exit code $LASTEXITCODE." }
             return
         }
 
-        $parts = $AgentCommand -split " ", 2
-        $exe = $parts[0]
-        $prefixArgs = @()
-        if ($parts.Count -gt 1 -and -not [string]::IsNullOrWhiteSpace($parts[1])) {
-            $prefixArgs = @($parts[1])
-        }
-        & $exe @prefixArgs $Prompt
+        $command = $AgentCommand + " " + (ConvertTo-SingleQuotedPowerShellArgument $Prompt)
+        pwsh -NoProfile -Command $command
         if ($LASTEXITCODE -ne 0) { throw "Planner agent command failed with exit code $LASTEXITCODE." }
     }
     finally {

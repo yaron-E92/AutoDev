@@ -199,7 +199,7 @@ function Get-CodexCommitMessage {
         return "Implement issue-$issueNumber`: $issueTitle"
     }
 
-    return "Implement issue-$issueNumber via Codex"
+    return "Implement issue-$issueNumber via AutoDev"
 }
 
 function New-GitHubApiCommit {
@@ -405,7 +405,7 @@ Implements:
 
 $($State.IssueText)
 
-Codex plan:
+AutoDev plan:
 
 $planText
 

@@ -14,12 +14,7 @@ while ($null -ne $ScriptItem.Target) {
     $ScriptItem = Get-Item -LiteralPath $TargetPath
 }
 $RepoRoot = (Resolve-Path (Join-Path $ScriptItem.DirectoryName "..")).Path
-$LinuxWorkflow = Join-Path $RepoRoot "linux/scripts/issue-to-pr-cycle.sh"
+$WindowsWorkflow = Join-Path $RepoRoot "windows/scripts/issue-to-pr-cycle.ps1"
 
-if (Get-Command bash -ErrorAction SilentlyContinue) {
-    & bash $LinuxWorkflow @Arguments
-    exit $LASTEXITCODE
-}
-
-Write-Error "This compatibility wrapper requires bash. Use windows/scripts/codex-*.ps1 directly on systems without bash."
-exit 127
+& pwsh -NoProfile -File $WindowsWorkflow @Arguments
+exit $LASTEXITCODE

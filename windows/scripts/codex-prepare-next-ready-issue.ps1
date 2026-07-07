@@ -1,5 +1,7 @@
 param(
     [int]$Issue = 0,
+    [string]$Description = "",
+    [string]$DescriptionFile = "",
 
     [string]$Username = "",
     [string]$Repo = "",
@@ -188,7 +190,27 @@ $issueData = $null
 $issueNumber = 0
 
 try {
-    if ($Issue -ne 0) {
+    if (-not [string]::IsNullOrWhiteSpace($DescriptionFile)) {
+        $Description = Get-Content -LiteralPath $DescriptionFile -Raw -Encoding UTF8
+    }
+
+    if ($Issue -ne 0 -and -not [string]::IsNullOrWhiteSpace($Description)) {
+        throw "Use either -Issue or -Description, not both."
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($Description)) {
+        $firstLine = @($Description -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1)
+        $title = if ($firstLine.Count -gt 0) { ($firstLine[0] -replace '^[\s#-]+', '').Trim() } else { "Local AutoDev task" }
+        if ([string]::IsNullOrWhiteSpace($title)) { $title = "Local AutoDev task" }
+        $issueData = [pscustomobject]@{
+            number = 0
+            title = $title
+            body = $Description
+            url = ""
+            labels = @()
+        }
+    }
+    elseif ($Issue -ne 0) {
         $issueData = gh issue view $Issue `
             --repo $RepoFullName `
             --json number,title,body,url,labels | ConvertFrom-Json
@@ -197,7 +219,7 @@ try {
         $issuesJson = gh issue list `
             --repo $RepoFullName `
             --state open `
-            --label "codex:ready" `
+            --label "autodev:ready" `
             --json number,title,labels `
             --limit 50
 
@@ -205,7 +227,7 @@ try {
 
         $next = $issues | Where-Object {
             $labelNames = @($_.labels | ForEach-Object { $_.name })
-            $labelNames -notcontains "codex:in-progress"
+            $labelNames -notcontains "autodev:running" -and $labelNames -notcontains "autodev:blocked"
         } | Select-Object -First 1
 
         if (-not $next) {
@@ -222,9 +244,11 @@ try {
 
     Write-Host ("Selected issue #{0}: {1}" -f $issueNumber, $issueData.title)
 
-    gh issue edit $issueNumber `
-        --repo $RepoFullName `
-        --add-label "codex:in-progress"
+    if ($issueNumber -ne 0) {
+        gh issue edit $issueNumber `
+            --repo $RepoFullName `
+            --add-label "autodev:running"
+    }
 
     $labelNames = @($issueData.labels | ForEach-Object { $_.name })
 
@@ -248,17 +272,26 @@ try {
 
     $issueTitle = [string]$issueData.title
 
-    $issueText = @"
+    if ($issueNumber -eq 0) {
+        $issueText = @"
+# Local AutoDev Task: $issueTitle
+
+$($issueData.body)
+"@
+    }
+    else {
+        $issueText = @"
 # GitHub Issue #${issueNumber}: $issueTitle
 
 URL: $($issueData.url)
 
 $($issueData.body)
 "@
+    }
 
     $issueLabel = "issue-$issueNumber"
     $branchSlug = Safe-FileName "$issueLabel-$issueTitle"
-    $branchName = "codex/$branchSlug-$timestamp"
+    $branchName = "autodev/$branchSlug-$timestamp"
 
     $issuePath = Join-Path $currentDir "issue.md"
     Set-Content -Path $issuePath -Encoding UTF8 -Value $issueText
@@ -345,13 +378,13 @@ catch {
         try {
             gh issue edit $issueNumber `
                 --repo $RepoFullName `
-                --remove-label "codex:in-progress" `
-                --add-label "codex:blocked"
+                --remove-label "autodev:running" `
+                --add-label "autodev:blocked"
 
             gh issue comment $issueNumber `
                 --repo $RepoFullName `
                 --body @"
-Codex automation prepare step failed.
+AutoDev automation prepare step failed.
 
 Error:
 
