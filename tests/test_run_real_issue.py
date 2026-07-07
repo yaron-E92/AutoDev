@@ -370,6 +370,8 @@ END_UNIFIED_DIFF"""
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Run one trusted issue-to-PR workflow without a hard-coded agent backend", result.stdout)
         self.assertIn("issue-to-pr-cycle.sh --env ENV_FILE [--mode Run]", result.stdout)
+        self.assertIn("Plan                       Prepare one issue and write plan.md with the planner agent.", result.stdout)
+        self.assertIn("--planner-agent-command CMD", result.stdout)
 
 
 if __name__ == "__main__":

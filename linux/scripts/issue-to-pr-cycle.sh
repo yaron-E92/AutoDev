@@ -15,6 +15,7 @@ Usage:
 
 Modes:
   Run                        Prepare, plan, implement, check, PR/CI, verify, mark ready.
+  Plan                       Prepare one issue and write plan.md with the planner agent.
   Prepare                    Select one ready issue and render planner.md.
   RenderImplementerPrompt    Render implementer.md after plan.md exists.
   LocalCheck                 Run local verification and render local-repair.md on failure.
@@ -32,8 +33,11 @@ Options:
   --issue NUMBER             Prepare a specific issue instead of the next ready issue.
   --message TEXT             Blocked status message.
   --max-repair-attempts N    Repair attempts for local, CI, and verifier failures. Default: 3.
-  --agent-command COMMAND     Prompt runner. Default: AGENT_COMMAND or `codex exec`.
-                              Use {prompt_file} or {prompt} placeholders for non-Codex runners.
+  --agent-command COMMAND     Prompt runner for implementation/repair/verification.
+                              Default: AGENT_COMMAND or `codex exec`.
+  --planner-agent-command CMD Prompt runner for planning. Defaults to PLANNER_AGENT_COMMAND
+                              or --agent-command. Use {prompt_file} or {prompt}
+                              placeholders for non-Codex runners.
 EOF
 }
 
@@ -48,6 +52,7 @@ remote="${REMOTE_NAME:-origin}"
 issue="${ISSUE_NUMBER:-}"
 message=""
 agent_command="${AGENT_COMMAND:-codex exec}"
+planner_agent_command="${PLANNER_AGENT_COMMAND:-}"
 max_repair_attempts="${MAX_REPAIR_ATTEMPTS:-3}"
 current_dir=".codex-run/current"
 
@@ -63,6 +68,7 @@ while [[ $# -gt 0 ]]; do
     --message) message="$2"; shift 2 ;;
     --max-repair-attempts) max_repair_attempts="$2"; shift 2 ;;
     --agent-command) agent_command="$2"; shift 2 ;;
+    --planner-agent-command) planner_agent_command="$2"; shift 2 ;;
     --help|-h) usage; exit 0 ;;
     *) echo "Unknown arg: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -70,6 +76,7 @@ done
 
 [[ -n "$env_file" ]] || { echo "Missing --env or ENV_FILE" >&2; usage >&2; exit 2; }
 [[ "$max_repair_attempts" =~ ^[0-9]+$ ]] || { echo "--max-repair-attempts must be a non-negative integer" >&2; exit 2; }
+[[ -n "$planner_agent_command" ]] || planner_agent_command="$agent_command"
 
 with_env=("$automation_root/scripts/with-env.sh" "$env_file")
 
@@ -93,25 +100,25 @@ shell_quote() {
 }
 
 run_agent_prompt() {
-  local prompt_file prompt rendered_command
+  local command="$1" prompt_file prompt rendered_command
   prompt_file="$(mktemp)"
   cat > "$prompt_file"
   prompt="$(cat "$prompt_file")"
-  if [[ "$agent_command" == *"{prompt_file}"* ]]; then
-    rendered_command="${agent_command//\{prompt_file\}/$(shell_quote "$prompt_file")}"
+  if [[ "$command" == *"{prompt_file}"* ]]; then
+    rendered_command="${command//\{prompt_file\}/$(shell_quote "$prompt_file")}"
     "${with_env[@]}" bash -lc "$rendered_command"
-  elif [[ "$agent_command" == *"{prompt}"* ]]; then
-    rendered_command="${agent_command//\{prompt\}/$(shell_quote "$prompt")}"
+  elif [[ "$command" == *"{prompt}"* ]]; then
+    rendered_command="${command//\{prompt\}/$(shell_quote "$prompt")}"
     "${with_env[@]}" bash -lc "$rendered_command"
   else
     # Codex-compatible default: append the prompt as the final argv value.
-    "${with_env[@]}" bash -lc "$agent_command \"\$@\"" _ "$prompt"
+    "${with_env[@]}" bash -lc "$command \"\$@\"" _ "$prompt"
   fi
   rm -f "$prompt_file"
 }
 
 agent_write_plan() {
-  run_agent_prompt <<EOF
+  run_agent_prompt "$planner_agent_command" <<EOF
 Use the issue-to-pr-automation skill.
 
 Run the planner prompt below. Write your complete planner output to:
@@ -127,7 +134,7 @@ EOF
 }
 
 agent_implement() {
-  run_agent_prompt <<EOF
+  run_agent_prompt "$agent_command" <<EOF
 Use the issue-to-pr-automation skill.
 
 Run the implementer prompt below. Edit the workspace directly.
@@ -151,7 +158,7 @@ EOF
 
 agent_repair_file() {
   local prompt_file="$1"
-  run_agent_prompt <<EOF
+  run_agent_prompt "$agent_command" <<EOF
 Use the issue-to-pr-automation skill.
 
 Run the repair prompt below. Fix only the failure described by the prompt, and edit the workspace directly.
@@ -162,7 +169,7 @@ EOF
 }
 
 agent_verify() {
-  run_agent_prompt <<EOF
+  run_agent_prompt "$agent_command" <<EOF
 Use the issue-to-pr-automation skill.
 
 Run the verifier prompt below. Write only the verification result to:
@@ -206,20 +213,29 @@ pr_and_ci_with_repairs() {
   done
 }
 
-run_full_cycle() {
+prepare_and_plan() {
   [[ -n "$owner" ]] || { echo "Missing --owner or GITHUB_OWNER" >&2; exit 2; }
   [[ -n "$repo" ]] || { echo "Missing --repo or GITHUB_REPO" >&2; exit 2; }
 
-  local prepare_log verification_attempt=0 verification_first_line
+  local prepare_log
   prepare_log="$(mktemp)"
   run_prepare | tee "$prepare_log"
   if grep -q '^NO_READY_ISSUE$' "$prepare_log"; then
     rm -f "$prepare_log"
-    return 0
+    return 2
   fi
   rm -f "$prepare_log"
-
   agent_write_plan || { mark_blocked "Planner did not produce plan.md."; return 1; }
+}
+
+run_full_cycle() {
+  local verification_attempt=0 verification_first_line plan_code
+  set +e
+  prepare_and_plan
+  plan_code=$?
+  set -e
+  [[ $plan_code -eq 2 ]] && return 0
+  [[ $plan_code -eq 0 ]] || return "$plan_code"
   run_finalize RenderImplementerPrompt
   agent_implement || { mark_blocked "Implementer did not produce commit-message.txt."; return 1; }
   local_check_with_repairs || { mark_blocked "Automation could not complete after local repair attempts."; return 1; }
@@ -244,6 +260,14 @@ run_full_cycle() {
 case "$mode" in
   Run)
     run_full_cycle
+    ;;
+  Plan)
+    set +e
+    prepare_and_plan
+    code=$?
+    set -e
+    [[ $code -eq 2 ]] && exit 0
+    exit "$code"
     ;;
   Prepare)
     [[ -n "$owner" ]] || { echo "Missing --owner or GITHUB_OWNER" >&2; exit 2; }

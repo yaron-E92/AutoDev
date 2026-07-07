@@ -6,7 +6,7 @@ The preferred real-issue workflow is the trusted script flow under `linux/script
 scripts/run-real-issue.sh --env ~/automation/state/PROJECT.env --mode Run --owner owner --repo AutoDev --base main --remote origin
 ```
 
-The same script also exposes individual modes for debugging or resuming a partially completed cycle.
+The same script also exposes `--mode Plan` for the reader/planner-only portion, plus individual transition modes for debugging or resuming a partially completed cycle. Use `--planner-agent-command` when planning should use a different reader-style agent than implementation/repair.
 
 ---
 
