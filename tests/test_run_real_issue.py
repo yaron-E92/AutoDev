@@ -373,6 +373,16 @@ END_UNIFIED_DIFF"""
         self.assertIn("Plan                       Prepare one issue and write plan.md with the planner agent.", result.stdout)
         self.assertIn("--planner-agent-command CMD", result.stdout)
 
+    def test_windows_planner_helper_documents_planner_agent_command(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        script = repo_root / "windows" / "scripts" / "codex-plan-current-issue.ps1"
+
+        text = script.read_text(encoding="utf-8")
+
+        self.assertIn("PlannerAgentCommand", text)
+        self.assertIn("{prompt_file}", text)
+        self.assertIn("plan.md", text)
+
 
 if __name__ == "__main__":
     unittest.main()

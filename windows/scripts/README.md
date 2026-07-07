@@ -11,6 +11,18 @@ Common files remain at the repository root:
 
 Do not duplicate common prompt, profile, or skill files under this directory.
 
+
+## Planner-only helper
+
+Use `codex-plan-current-issue.ps1` after `codex-prepare-next-ready-issue.ps1` when the planning phase should be run by a dedicated reader/planner agent before implementation starts. It reads `.codex-run/current/planner.md`, invokes the configured planner agent, and requires `.codex-run/current/plan.md` to be written.
+
+```powershell
+pwsh -File "C:\Users\you\codex-tools\codex-plan-current-issue.ps1" `
+  -PlannerAgentCommand "reader-agent {prompt_file}"
+```
+
+If `-PlannerAgentCommand` is omitted, the script uses `$env:PLANNER_AGENT_COMMAND` or falls back to `codex exec`. Commands can use `{prompt_file}` or `{prompt}` placeholders for area-reader-style prompt runners.
+
 ## Automation Prompt
 
 Use this as the Windows automation task, adjusting repo names and paths.
