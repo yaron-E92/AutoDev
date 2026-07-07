@@ -69,6 +69,10 @@ planner_provider="${PLANNER_PROVIDER:-}"
 planner_model="${PLANNER_MODEL:-}"
 agent_provider="${AGENT_PROVIDER:-}"
 agent_model="${AGENT_MODEL:-}"
+planner_provider_mode=false
+agent_provider_mode=false
+[[ -n "$planner_provider" ]] && planner_provider_mode=true
+[[ -n "$agent_provider" ]] && agent_provider_mode=true
 max_repair_attempts="${MAX_REPAIR_ATTEMPTS:-3}"
 current_dir=".codex-run/current"
 
@@ -85,10 +89,10 @@ while [[ $# -gt 0 ]]; do
     --description-file) description_file="$2"; shift 2 ;;
     --message) message="$2"; shift 2 ;;
     --max-repair-attempts) max_repair_attempts="$2"; shift 2 ;;
-    --planner-provider) planner_provider="$2"; shift 2 ;;
-    --planner-model) planner_model="$2"; shift 2 ;;
-    --agent-provider) agent_provider="$2"; shift 2 ;;
-    --agent-model) agent_model="$2"; shift 2 ;;
+    --planner-provider) planner_provider="$2"; planner_provider_mode=true; shift 2 ;;
+    --planner-model) planner_model="$2"; planner_provider_mode=true; shift 2 ;;
+    --agent-provider) agent_provider="$2"; agent_provider_mode=true; shift 2 ;;
+    --agent-model) agent_model="$2"; agent_provider_mode=true; shift 2 ;;
     --agent-command) agent_command="$2"; shift 2 ;;
     --planner-agent-command) planner_agent_command="$2"; shift 2 ;;
     --help|-h) usage; exit 0 ;;
@@ -98,6 +102,8 @@ done
 
 [[ -n "$env_file" ]] || { echo "Missing --env or ENV_FILE" >&2; usage >&2; exit 2; }
 [[ "$max_repair_attempts" =~ ^[0-9]+$ ]] || { echo "--max-repair-attempts must be a non-negative integer" >&2; exit 2; }
+[[ -n "$planner_model" ]] && planner_provider_mode=true
+[[ -n "$agent_model" ]] && agent_provider_mode=true
 [[ -n "$planner_model" && -z "$planner_provider" ]] && planner_provider="ollama"
 [[ -n "$agent_model" && -z "$agent_provider" ]] && agent_provider="ollama"
 [[ -n "$planner_provider" ]] || planner_provider="command"
@@ -150,11 +156,12 @@ run_agent_prompt() {
 }
 
 run_provider_prompt() {
-  local role="$1" provider="$2" model="$3" output_file="${4:-}" commit_file="${5:-}" prompt_file args=()
+  local role="$1" provider="$2" model="$3" command="$4" output_file="${5:-}" commit_file="${6:-}" prompt_file args=()
   prompt_file="$(mktemp)"
   cat > "$prompt_file"
   args=("$prompt_runner" --role "$role" --provider "$provider" --prompt-file "$prompt_file")
   [[ -n "$model" ]] && args+=(--model "$model")
+  [[ -n "$command" ]] && args+=(--command "$command")
   [[ -n "$output_file" ]] && args+=(--output-file "$output_file")
   [[ -n "$commit_file" ]] && args+=(--commit-message-file "$commit_file")
   "${with_env[@]}" "$python_bin" "${args[@]}"
@@ -162,8 +169,8 @@ run_provider_prompt() {
 }
 
 agent_write_plan() {
-  if [[ "$planner_provider" == "ollama" ]]; then
-    run_provider_prompt planner "$planner_provider" "$planner_model" "$current_dir/plan.md" "" <<EOF
+  if [[ "$planner_provider_mode" == true ]]; then
+    run_provider_prompt planner "$planner_provider" "$planner_model" "$planner_agent_command" "$current_dir/plan.md" "" <<EOF
 You are planning an AutoDev issue-to-PR run.
 
 Return only the complete implementation plan as markdown. Do not edit files.
@@ -189,8 +196,8 @@ EOF
 }
 
 agent_implement() {
-  if [[ "$agent_provider" == "ollama" ]]; then
-    run_provider_prompt implementer "$agent_provider" "$agent_model" "" "$current_dir/commit-message.txt" <<EOF
+  if [[ "$agent_provider_mode" == true ]]; then
+    run_provider_prompt implementer "$agent_provider" "$agent_model" "$agent_command" "" "$current_dir/commit-message.txt" <<EOF
 You are implementing an AutoDev issue-to-PR task as a raw text model.
 
 You cannot edit files directly. Return exactly one of these forms:
@@ -228,15 +235,15 @@ Commit message rules:
 $(cat "$current_dir/implementer.md")
 EOF
   fi
-  if [[ "$agent_provider" != "ollama" ]]; then
+  if [[ "$agent_provider_mode" != true ]]; then
     [[ -s "$current_dir/commit-message.txt" ]] || { echo "Implementer did not write $current_dir/commit-message.txt" >&2; return 1; }
   fi
 }
 
 agent_repair_file() {
   local prompt_file="$1"
-  if [[ "$agent_provider" == "ollama" ]]; then
-    run_provider_prompt repair "$agent_provider" "$agent_model" "" "" <<EOF
+  if [[ "$agent_provider_mode" == true ]]; then
+    run_provider_prompt repair "$agent_provider" "$agent_model" "$agent_command" "" "" <<EOF
 You are repairing an AutoDev issue-to-PR task as a raw text model.
 
 You cannot edit files directly. Return exactly one of these forms:
@@ -265,8 +272,8 @@ EOF
 }
 
 agent_verify() {
-  if [[ "$agent_provider" == "ollama" ]]; then
-    run_provider_prompt verifier "$agent_provider" "$agent_model" "$current_dir/verification-result.md" "" <<EOF
+  if [[ "$agent_provider_mode" == true ]]; then
+    run_provider_prompt verifier "$agent_provider" "$agent_model" "$agent_command" "$current_dir/verification-result.md" "" <<EOF
 You are verifying an AutoDev issue-to-PR task.
 
 Return only the verification result. The first line must be exactly PASS or FAIL.

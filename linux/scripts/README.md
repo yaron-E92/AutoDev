@@ -50,7 +50,7 @@ Use `issue-to-pr-cycle.sh` for the trusted state transitions from the Codex Desk
   --remote origin
 ```
 
-For a planner-only run with a reader-style command agent, use `--mode Plan` and optionally `--planner-agent-command`. Use `--agent-command` for implementation, repair, and verifier prompts. Both commands can use `{prompt_file}` or `{prompt}` placeholders for non-Codex runners. For raw Ollama, pass model names instead of shell commands; `--planner-model` and `--agent-model` imply the `ollama` provider and run `ollama run <model>` with the prompt on stdin. Raw Ollama implementation and repair responses must return `NO_CHANGES_REQUIRED` or a marked unified diff that AutoDev applies with `git apply`.
+For a planner-only run with a reader-style command agent, use `--mode Plan` and optionally `--planner-agent-command`. Use `--agent-command` for implementation, repair, and verifier prompts. Both commands can use `{prompt_file}` or `{prompt}` placeholders for non-Codex runners. For provider mode, pass `--planner-provider command` / `--agent-provider command` with command strings when the tool returns stdout artifacts, or pass model names for Ollama. `--planner-model` and `--agent-model` imply the `ollama` provider and run `ollama run <model>` with the prompt on stdin. Provider-mode implementation and repair responses must return `NO_CHANGES_REQUIRED` or a marked unified diff that AutoDev applies with `git apply`.
 
 ```bash
 ~/automation/scripts/issue-to-pr-cycle.sh \

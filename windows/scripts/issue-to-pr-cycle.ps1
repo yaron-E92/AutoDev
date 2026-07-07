@@ -58,6 +58,10 @@ $toolRoot = Split-Path -Parent (Split-Path -Parent $scriptRoot)
 if ([string]::IsNullOrWhiteSpace($PromptRunner)) { $PromptRunner = Join-Path $toolRoot "automation\prompt_runner.py" }
 $currentDir = Join-Path ".codex-run" "current"
 
+$PlannerProviderMode = -not [string]::IsNullOrWhiteSpace($PlannerProvider)
+$AgentProviderMode = -not [string]::IsNullOrWhiteSpace($AgentProvider)
+if (-not [string]::IsNullOrWhiteSpace($PlannerModel)) { $PlannerProviderMode = $true }
+if (-not [string]::IsNullOrWhiteSpace($AgentModel)) { $AgentProviderMode = $true }
 if (-not [string]::IsNullOrWhiteSpace($PlannerModel) -and [string]::IsNullOrWhiteSpace($PlannerProvider)) { $PlannerProvider = "ollama" }
 if (-not [string]::IsNullOrWhiteSpace($AgentModel) -and [string]::IsNullOrWhiteSpace($AgentProvider)) { $AgentProvider = "ollama" }
 if ([string]::IsNullOrWhiteSpace($PlannerProvider)) { $PlannerProvider = "command" }
@@ -124,6 +128,7 @@ function Invoke-ProviderPrompt {
         [Parameter(Mandatory = $true)][string]$Role,
         [Parameter(Mandatory = $true)][string]$Provider,
         [string]$Model = "",
+        [string]$Command = "",
         [Parameter(Mandatory = $true)][string]$Prompt,
         [string]$OutputFile = "",
         [string]$CommitMessageFile = ""
@@ -134,6 +139,7 @@ function Invoke-ProviderPrompt {
         Set-Content -LiteralPath $promptFile.FullName -Encoding UTF8 -Value $Prompt
         $args = @($PromptRunner, "--role", $Role, "--provider", $Provider, "--prompt-file", $promptFile.FullName)
         if (-not [string]::IsNullOrWhiteSpace($Model)) { $args += @("--model", $Model) }
+        if (-not [string]::IsNullOrWhiteSpace($Command)) { $args += @("--command", $Command) }
         if (-not [string]::IsNullOrWhiteSpace($OutputFile)) { $args += @("--output-file", $OutputFile) }
         if (-not [string]::IsNullOrWhiteSpace($CommitMessageFile)) { $args += @("--commit-message-file", $CommitMessageFile) }
 
@@ -204,7 +210,7 @@ function Invoke-PlanAgent {
     $planPath = Join-Path $currentDir "plan.md"
     $plannerPrompt = Get-FileText -Path $plannerPath
 
-    if ($PlannerProvider -eq "ollama") {
+    if ($PlannerProviderMode) {
         $prompt = @"
 You are planning an AutoDev issue-to-PR run.
 
@@ -213,7 +219,7 @@ Return only the complete implementation plan as markdown. Do not edit files.
 --- PLANNER PROMPT ---
 $plannerPrompt
 "@
-        Invoke-ProviderPrompt -Role "planner" -Provider $PlannerProvider -Model $PlannerModel -Prompt $prompt -OutputFile $planPath
+        Invoke-ProviderPrompt -Role "planner" -Provider $PlannerProvider -Model $PlannerModel -Command $PlannerAgentCommand -Prompt $prompt -OutputFile $planPath
     }
     else {
         $prompt = @"
@@ -241,7 +247,7 @@ function Invoke-ImplementAgent {
     $commitMessagePath = Join-Path $currentDir "commit-message.txt"
     $implementerPrompt = Get-FileText -Path $implementerPath
 
-    if ($AgentProvider -eq "ollama") {
+    if ($AgentProviderMode) {
         $prompt = @"
 You are implementing an AutoDev issue-to-PR task as a raw text model.
 
@@ -259,7 +265,7 @@ END_UNIFIED_DIFF
 --- IMPLEMENTER PROMPT ---
 $implementerPrompt
 "@
-        Invoke-ProviderPrompt -Role "implementer" -Provider $AgentProvider -Model $AgentModel -Prompt $prompt -CommitMessageFile $commitMessagePath
+        Invoke-ProviderPrompt -Role "implementer" -Provider $AgentProvider -Model $AgentModel -Command $AgentCommand -Prompt $prompt -CommitMessageFile $commitMessagePath
     }
     else {
         $prompt = @"
@@ -284,7 +290,7 @@ $implementerPrompt
         Invoke-AgentPrompt -Command $AgentCommand -Prompt $prompt -FailureMessage "Implementer agent command failed."
     }
 
-    if ($AgentProvider -ne "ollama") {
+    if (-not $AgentProviderMode) {
         if (-not (Test-Path -LiteralPath $commitMessagePath) -or [string]::IsNullOrWhiteSpace((Get-Content -LiteralPath $commitMessagePath -Raw -Encoding UTF8))) {
             throw "Implementer agent did not write $commitMessagePath."
         }
@@ -295,7 +301,7 @@ function Invoke-RepairAgent {
     param([Parameter(Mandatory = $true)][string]$PromptPath)
     $repairPrompt = Get-FileText -Path $PromptPath
 
-    if ($AgentProvider -eq "ollama") {
+    if ($AgentProviderMode) {
         $prompt = @"
 You are repairing an AutoDev issue-to-PR task as a raw text model.
 
@@ -312,7 +318,7 @@ END_UNIFIED_DIFF
 --- REPAIR PROMPT ---
 $repairPrompt
 "@
-        Invoke-ProviderPrompt -Role "repair" -Provider $AgentProvider -Model $AgentModel -Prompt $prompt
+        Invoke-ProviderPrompt -Role "repair" -Provider $AgentProvider -Model $AgentModel -Command $AgentCommand -Prompt $prompt
     }
     else {
         $prompt = @"
@@ -332,7 +338,7 @@ function Invoke-VerifyAgent {
     $resultPath = Join-Path $currentDir "verification-result.md"
     $verifierPrompt = Get-FileText -Path $verifierPath
 
-    if ($AgentProvider -eq "ollama") {
+    if ($AgentProviderMode) {
         $prompt = @"
 You are verifying an AutoDev issue-to-PR task.
 
@@ -341,7 +347,7 @@ Return only the verification result. The first line must be exactly PASS or FAIL
 --- VERIFIER PROMPT ---
 $verifierPrompt
 "@
-        Invoke-ProviderPrompt -Role "verifier" -Provider $AgentProvider -Model $AgentModel -Prompt $prompt -OutputFile $resultPath
+        Invoke-ProviderPrompt -Role "verifier" -Provider $AgentProvider -Model $AgentModel -Command $AgentCommand -Prompt $prompt -OutputFile $resultPath
     }
     else {
         $prompt = @"

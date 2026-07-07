@@ -165,7 +165,7 @@ def handle_patch_output(
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run one AutoDev prompt through a command or raw Ollama provider.")
+    parser = argparse.ArgumentParser(description="Run one AutoDev prompt through a command or Ollama text provider.")
     parser.add_argument("--role", choices=["planner", "implementer", "repair", "verifier"], required=True)
     parser.add_argument("--provider", choices=["command", "ollama"], required=True)
     parser.add_argument("--model", default="")

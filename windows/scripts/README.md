@@ -23,7 +23,7 @@ pwsh -File "C:\Users\you\codex-tools\issue-to-pr-cycle.ps1" `
   -AgentCommand "coder-agent {prompt_file}"
 ```
 
-For raw Ollama, pass model names instead of shell commands. Supplying `-PlannerModel` or `-AgentModel` without an explicit provider defaults that side to `ollama` and runs `ollama run <model>` with the prompt on stdin. Raw Ollama implementation and repair responses must return `NO_CHANGES_REQUIRED` or a marked unified diff that AutoDev applies with `git apply`.
+For provider mode, pass `-PlannerProvider command` / `-AgentProvider command` with command strings when the tool returns stdout artifacts, or pass model names for Ollama. Supplying `-PlannerModel` or `-AgentModel` without an explicit provider defaults that side to `ollama` and runs `ollama run <model>` with the prompt on stdin. Provider-mode implementation and repair responses must return `NO_CHANGES_REQUIRED` or a marked unified diff that AutoDev applies with `git apply`.
 
 ```powershell
 pwsh -File "C:\Users\you\codex-tools\issue-to-pr-cycle.ps1" `

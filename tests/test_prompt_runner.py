@@ -25,6 +25,42 @@ class PromptRunnerTests(unittest.TestCase):
         self.assertEqual(calls[0][0], ["ollama", "run", "qwen35-9b-32k"])
         self.assertEqual(calls[0][1]["input"], "prompt text")
 
+
+    def test_command_provider_appends_prompt_when_no_placeholder(self):
+        calls = []
+        original_run = prompt_runner.subprocess.run
+
+        def fake_run(argv, **kwargs):
+            calls.append((argv, kwargs))
+            return subprocess.CompletedProcess(argv, 0, "BEGIN_UNIFIED_DIFF\npatch\nEND_UNIFIED_DIFF\n", "")
+
+        try:
+            prompt_runner.subprocess.run = fake_run
+            output = prompt_runner.run_command_provider("model-cli --flag", "prompt text")
+        finally:
+            prompt_runner.subprocess.run = original_run
+
+        self.assertIn("BEGIN_UNIFIED_DIFF", output)
+        self.assertEqual(calls[0][0], ["model-cli", "--flag", "prompt text"])
+
+    def test_command_provider_substitutes_prompt_file_placeholder(self):
+        calls = []
+        original_run = prompt_runner.subprocess.run
+
+        def fake_run(command, **kwargs):
+            calls.append((command, kwargs))
+            return subprocess.CompletedProcess(command, 0, "# Plan", "")
+
+        try:
+            prompt_runner.subprocess.run = fake_run
+            output = prompt_runner.run_command_provider("model-cli {prompt_file}", "prompt text", Path("prompt.md"))
+        finally:
+            prompt_runner.subprocess.run = original_run
+
+        self.assertEqual(output, "# Plan")
+        self.assertIn("prompt.md", calls[0][0])
+        self.assertTrue(calls[0][1]["shell"])
+
     def test_planner_stdout_is_written_to_plan_file(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             plan_path = Path(temp_dir) / ".codex-run" / "current" / "plan.md"

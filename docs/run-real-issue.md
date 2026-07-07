@@ -1,6 +1,6 @@
 # Script-based issue-to-PR workflow
 
-The preferred real-issue workflow is the trusted script flow. It mirrors the old Codex Desktop prompt as a single command: scripts perform GitHub/state transitions, then invoke configurable planner and coder agent commands or raw provider/model runners on each rendered prompt. Tool-capable command agents can edit the workspace directly; raw Ollama models use AutoDev patch mode.
+The preferred real-issue workflow is the trusted script flow. It mirrors the old Codex Desktop prompt as a single command: scripts perform GitHub/state transitions, then invoke configurable planner and coder agent commands or raw provider/model runners on each rendered prompt. Tool-capable command agents can edit the workspace directly. Explicit provider mode uses stdout artifacts and AutoDev patch mode for text providers such as command wrappers or Ollama.
 
 Linux command-agent mode:
 
@@ -26,7 +26,7 @@ Windows PowerShell raw Ollama mode:
 scripts\run-real-issue.ps1 -Mode Run -Username owner -Repo AutoDev -PlannerModel qwen35-9b-32k -AgentModel devstral-small2-12k
 ```
 
-Both wrappers support the next `autodev:ready` issue by default, a specific GitHub issue (`--issue` on Linux, `-Issue` on Windows), or literal task text (`--description` / `--description-file` on Linux, `-Description` / `-DescriptionFile` on Windows). Supplying a planner or agent model without an explicit provider defaults that side to `ollama`, which runs `ollama run <model>` with the prompt on stdin. Raw Ollama implementer and repair responses must return `NO_CHANGES_REQUIRED` or a unified diff between `BEGIN_UNIFIED_DIFF` and `END_UNIFIED_DIFF`; AutoDev applies the diff with `git apply`.
+Both wrappers support the next `autodev:ready` issue by default, a specific GitHub issue (`--issue` on Linux, `-Issue` on Windows), or literal task text (`--description` / `--description-file` on Linux, `-Description` / `-DescriptionFile` on Windows). Supplying a planner or agent model without an explicit provider defaults that side to `ollama`, which runs `ollama run <model>` with the prompt on stdin. Explicit `command` provider mode runs the configured command as a stdout text provider instead of a direct-edit agent. Provider-mode implementer and repair responses must return `NO_CHANGES_REQUIRED` or a unified diff between `BEGIN_UNIFIED_DIFF` and `END_UNIFIED_DIFF`; AutoDev applies the diff with `git apply`.
 
 The same scripts expose `Plan` for the reader/planner-only portion, plus individual transition modes for debugging or resuming a partially completed cycle.
 
