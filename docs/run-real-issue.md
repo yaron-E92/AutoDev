@@ -1,20 +1,32 @@
 # Script-based issue-to-PR workflow
 
-The preferred real-issue workflow is the trusted script flow. It mirrors the old Codex Desktop prompt as a single command: scripts perform GitHub/state transitions, then invoke configurable planner and coder agent commands on each rendered prompt so the selected agents perform planning, implementation, repair, and verification directly in the workspace.
+The preferred real-issue workflow is the trusted script flow. It mirrors the old Codex Desktop prompt as a single command: scripts perform GitHub/state transitions, then invoke configurable planner and coder agent commands or raw provider/model runners on each rendered prompt. Tool-capable command agents can edit the workspace directly; raw Ollama models use AutoDev patch mode.
 
-Linux:
+Linux command-agent mode:
 
 ```bash
 scripts/run-real-issue.sh --env ~/automation/state/PROJECT.env --mode Run --owner owner --repo AutoDev --base main --remote origin --planner-agent-command "reader-agent {prompt_file}" --agent-command "coder-agent {prompt_file}"
 ```
 
-Windows PowerShell:
+Linux raw Ollama mode:
+
+```bash
+scripts/run-real-issue.sh --env ~/automation/state/PROJECT.env --mode Run --owner owner --repo AutoDev --base main --remote origin --planner-model qwen35-9b-32k --agent-model devstral-small2-12k
+```
+
+Windows PowerShell command-agent mode:
 
 ```powershell
 scripts\run-real-issue.ps1 -Mode Run -Username owner -Repo AutoDev -PlannerAgentCommand "reader-agent {prompt_file}" -AgentCommand "coder-agent {prompt_file}"
 ```
 
-Both wrappers support the next `autodev:ready` issue by default, a specific GitHub issue (`--issue` on Linux, `-Issue` on Windows), or literal task text (`--description` / `--description-file` on Linux, `-Description` / `-DescriptionFile` on Windows).
+Windows PowerShell raw Ollama mode:
+
+```powershell
+scripts\run-real-issue.ps1 -Mode Run -Username owner -Repo AutoDev -PlannerModel qwen35-9b-32k -AgentModel devstral-small2-12k
+```
+
+Both wrappers support the next `autodev:ready` issue by default, a specific GitHub issue (`--issue` on Linux, `-Issue` on Windows), or literal task text (`--description` / `--description-file` on Linux, `-Description` / `-DescriptionFile` on Windows). Supplying a planner or agent model without an explicit provider defaults that side to `ollama`, which runs `ollama run <model>` with the prompt on stdin. Raw Ollama implementer and repair responses must return `NO_CHANGES_REQUIRED` or a unified diff between `BEGIN_UNIFIED_DIFF` and `END_UNIFIED_DIFF`; AutoDev applies the diff with `git apply`.
 
 The same scripts expose `Plan` for the reader/planner-only portion, plus individual transition modes for debugging or resuming a partially completed cycle.
 

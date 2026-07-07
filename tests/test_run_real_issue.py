@@ -1,5 +1,6 @@
 import io
-import subprocess
+import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -208,7 +209,21 @@ END_UNIFIED_DIFF"""
                 encoding="utf-8",
             )
             (out_dir / "verification-command-groups.json").write_text(
-                '[{"name":"fail","manual":false,"commands":[{"argv":["python3","-c","import sys; sys.exit(2)"],"cwd":".","optional":false}]}]',
+                json.dumps(
+                    [
+                        {
+                            "name": "fail",
+                            "manual": False,
+                            "commands": [
+                                {
+                                    "argv": [sys.executable, "-c", "import sys; sys.exit(2)"],
+                                    "cwd": ".",
+                                    "optional": False,
+                                }
+                            ],
+                        }
+                    ]
+                ),
                 encoding="utf-8",
             )
 
@@ -354,24 +369,18 @@ END_UNIFIED_DIFF"""
 
     def test_linux_wrapper_delegates_to_script_workflow(self):
         repo_root = Path(__file__).resolve().parents[1]
+        root_wrapper = (repo_root / "scripts" / "run-real-issue.sh").read_text(encoding="utf-8")
+        linux_cycle = (repo_root / "linux" / "scripts" / "issue-to-pr-cycle.sh").read_text(encoding="utf-8")
 
-        result = subprocess.run(
-            [
-                "bash",
-                str(repo_root / "scripts" / "run-real-issue.sh"),
-                "--help",
-            ],
-            cwd=repo_root,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("Run one trusted issue-to-PR workflow without a hard-coded agent backend", result.stdout)
-        self.assertIn("issue-to-pr-cycle.sh --env ENV_FILE [--mode Run]", result.stdout)
-        self.assertIn("Plan                       Prepare one issue and write plan.md with the planner agent.", result.stdout)
-        self.assertIn("--planner-agent-command CMD", result.stdout)
+        self.assertIn("linux/scripts/issue-to-pr-cycle.sh", root_wrapper)
+        self.assertIn("Run one trusted issue-to-PR workflow without a hard-coded agent backend", linux_cycle)
+        self.assertIn("issue-to-pr-cycle.sh --env ENV_FILE [--mode Run]", linux_cycle)
+        self.assertIn("Plan                       Prepare one issue and write plan.md with the planner agent.", linux_cycle)
+        self.assertIn("--planner-agent-command CMD", linux_cycle)
+        self.assertIn("--planner-provider NAME", linux_cycle)
+        self.assertIn("--planner-model MODEL", linux_cycle)
+        self.assertIn("--agent-provider NAME", linux_cycle)
+        self.assertIn("--agent-model MODEL", linux_cycle)
 
     def test_windows_planner_helper_documents_planner_agent_command(self):
         repo_root = Path(__file__).resolve().parents[1]

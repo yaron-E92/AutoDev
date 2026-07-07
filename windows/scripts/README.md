@@ -12,7 +12,7 @@ Common files remain at the repository root:
 Do not duplicate common prompt, profile, or skill files under this directory.
 ## Single-command workflow
 
-Use `issue-to-pr-cycle.ps1` for the native Windows equivalent of the old prompt-driven flow. It composes the Windows prepare/finalize/mark scripts and invokes configurable planner and coder agent commands at the points where agent work is needed.
+Use `issue-to-pr-cycle.ps1` for the native Windows equivalent of the old prompt-driven flow. It composes the Windows prepare/finalize/mark scripts and invokes configurable planner and coder agent commands or raw provider/model runners at the points where agent work is needed.
 
 ```powershell
 pwsh -File "C:\Users\you\codex-tools\issue-to-pr-cycle.ps1" `
@@ -21,6 +21,17 @@ pwsh -File "C:\Users\you\codex-tools\issue-to-pr-cycle.ps1" `
   -Repo AutoDev `
   -PlannerAgentCommand "reader-agent {prompt_file}" `
   -AgentCommand "coder-agent {prompt_file}"
+```
+
+For raw Ollama, pass model names instead of shell commands. Supplying `-PlannerModel` or `-AgentModel` without an explicit provider defaults that side to `ollama` and runs `ollama run <model>` with the prompt on stdin. Raw Ollama implementation and repair responses must return `NO_CHANGES_REQUIRED` or a marked unified diff that AutoDev applies with `git apply`.
+
+```powershell
+pwsh -File "C:\Users\you\codex-tools\issue-to-pr-cycle.ps1" `
+  -Mode Run `
+  -Username owner `
+  -Repo AutoDev `
+  -PlannerModel qwen35-9b-32k `
+  -AgentModel devstral-small2-12k
 ```
 
 Omit `-Issue` to process the next open issue labeled `autodev:ready`, pass `-Issue 123` for a specific GitHub issue, or pass `-Description "..."` / `-DescriptionFile ideas.md` for a local task description. `-Mode Plan` runs only prepare plus the planner agent; individual transition modes are available for debugging and resuming.

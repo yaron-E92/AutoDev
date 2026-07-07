@@ -8,7 +8,8 @@ Run one trusted issue-to-PR workflow without a hard-coded agent backend.
 The default Run mode performs the deterministic workflow steps and invokes a
 configurable agent command on each rendered prompt at the point where agent work
 is needed. The default agent command is `codex exec`; override it with
---agent-command or AGENT_COMMAND to use another prompt runner.
+--agent-command or AGENT_COMMAND to use another tool-capable prompt runner.
+Raw Ollama models are supported through provider/model patch mode.
 
 Usage:
   issue-to-pr-cycle.sh --env ENV_FILE [--mode Run] [options]
@@ -25,26 +26,33 @@ Modes:
   Blocked                    Mark the current issue blocked.
 
 Options:
-  --env FILE                 Project environment file. Required unless ENV_FILE is set.
-  --owner OWNER              GitHub owner. Defaults to GITHUB_OWNER from env.
-  --repo REPO                GitHub repo. Defaults to GITHUB_REPO from env.
-  --base BRANCH              Base branch. Defaults to BASE_BRANCH or main.
-  --remote NAME              Remote name. Defaults to REMOTE_NAME or origin.
-  --issue NUMBER             Prepare a specific issue instead of the next ready issue.
-  --description TEXT         Use literal issue text instead of a GitHub issue.
-  --description-file FILE    Read literal issue text from a file.
-  --message TEXT             Blocked status message.
-  --max-repair-attempts N    Repair attempts for local, CI, and verifier failures. Default: 3.
-  --agent-command COMMAND     Prompt runner for implementation/repair/verification.
-                              Default: AGENT_COMMAND or `codex exec`.
-  --planner-agent-command CMD Prompt runner for planning. Defaults to PLANNER_AGENT_COMMAND
-                              or --agent-command. Use {prompt_file} or {prompt}
-                              placeholders for non-Codex runners.
+  --env FILE                  Project environment file. Required unless ENV_FILE is set.
+  --owner OWNER               GitHub owner. Defaults to GITHUB_OWNER from env.
+  --repo REPO                 GitHub repo. Defaults to GITHUB_REPO from env.
+  --base BRANCH               Base branch. Defaults to BASE_BRANCH or main.
+  --remote NAME               Remote name. Defaults to REMOTE_NAME or origin.
+  --issue NUMBER              Prepare a specific issue instead of the next ready issue.
+  --description TEXT          Use literal issue text instead of a GitHub issue.
+  --description-file FILE     Read literal issue text from a file.
+  --message TEXT              Blocked status message.
+  --max-repair-attempts N     Repair attempts for local, CI, and verifier failures. Default: 3.
+  --planner-provider NAME     Planner provider: command or ollama.
+  --planner-model MODEL       Planner model. Implies --planner-provider ollama if omitted.
+  --agent-provider NAME       Implementer/repair/verifier provider: command or ollama.
+  --agent-model MODEL         Agent model. Implies --agent-provider ollama if omitted.
+  --agent-command COMMAND     Prompt runner for command-mode implementation/repair/verification.
+                               Default: AGENT_COMMAND or `codex exec`.
+  --planner-agent-command CMD Prompt runner for command-mode planning. Defaults to
+                               PLANNER_AGENT_COMMAND or --agent-command. Use
+                               {prompt_file} or {prompt} placeholders for non-Codex runners.
 EOF
 }
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 automation_root="${AUTOMATION_ROOT:-$(cd -- "$script_dir/.." && pwd)}"
+tool_root="${AUTODEV_ROOT:-$(cd -- "$script_dir/../.." && pwd)}"
+prompt_runner="${PROMPT_RUNNER:-$tool_root/automation/prompt_runner.py}"
+python_bin="${PYTHON:-python3}"
 env_file="${ENV_FILE:-}"
 mode="Run"
 owner="${GITHUB_OWNER:-}"
@@ -57,6 +65,10 @@ description_file="${ISSUE_DESCRIPTION_FILE:-}"
 message=""
 agent_command="${AGENT_COMMAND:-codex exec}"
 planner_agent_command="${PLANNER_AGENT_COMMAND:-}"
+planner_provider="${PLANNER_PROVIDER:-}"
+planner_model="${PLANNER_MODEL:-}"
+agent_provider="${AGENT_PROVIDER:-}"
+agent_model="${AGENT_MODEL:-}"
 max_repair_attempts="${MAX_REPAIR_ATTEMPTS:-3}"
 current_dir=".codex-run/current"
 
@@ -73,6 +85,10 @@ while [[ $# -gt 0 ]]; do
     --description-file) description_file="$2"; shift 2 ;;
     --message) message="$2"; shift 2 ;;
     --max-repair-attempts) max_repair_attempts="$2"; shift 2 ;;
+    --planner-provider) planner_provider="$2"; shift 2 ;;
+    --planner-model) planner_model="$2"; shift 2 ;;
+    --agent-provider) agent_provider="$2"; shift 2 ;;
+    --agent-model) agent_model="$2"; shift 2 ;;
     --agent-command) agent_command="$2"; shift 2 ;;
     --planner-agent-command) planner_agent_command="$2"; shift 2 ;;
     --help|-h) usage; exit 0 ;;
@@ -82,6 +98,14 @@ done
 
 [[ -n "$env_file" ]] || { echo "Missing --env or ENV_FILE" >&2; usage >&2; exit 2; }
 [[ "$max_repair_attempts" =~ ^[0-9]+$ ]] || { echo "--max-repair-attempts must be a non-negative integer" >&2; exit 2; }
+[[ -n "$planner_model" && -z "$planner_provider" ]] && planner_provider="ollama"
+[[ -n "$agent_model" && -z "$agent_provider" ]] && agent_provider="ollama"
+[[ -n "$planner_provider" ]] || planner_provider="command"
+[[ -n "$agent_provider" ]] || agent_provider="command"
+[[ "$planner_provider" == "command" || "$planner_provider" == "ollama" ]] || { echo "--planner-provider must be command or ollama" >&2; exit 2; }
+[[ "$agent_provider" == "command" || "$agent_provider" == "ollama" ]] || { echo "--agent-provider must be command or ollama" >&2; exit 2; }
+[[ "$planner_provider" != "ollama" || -n "$planner_model" ]] || { echo "--planner-provider ollama requires --planner-model" >&2; exit 2; }
+[[ "$agent_provider" != "ollama" || -n "$agent_model" ]] || { echo "--agent-provider ollama requires --agent-model" >&2; exit 2; }
 [[ -n "$planner_agent_command" ]] || planner_agent_command="$agent_command"
 
 with_env=("$automation_root/scripts/with-env.sh" "$env_file")
@@ -125,8 +149,30 @@ run_agent_prompt() {
   rm -f "$prompt_file"
 }
 
+run_provider_prompt() {
+  local role="$1" provider="$2" model="$3" output_file="${4:-}" commit_file="${5:-}" prompt_file args=()
+  prompt_file="$(mktemp)"
+  cat > "$prompt_file"
+  args=("$prompt_runner" --role "$role" --provider "$provider" --prompt-file "$prompt_file")
+  [[ -n "$model" ]] && args+=(--model "$model")
+  [[ -n "$output_file" ]] && args+=(--output-file "$output_file")
+  [[ -n "$commit_file" ]] && args+=(--commit-message-file "$commit_file")
+  "${with_env[@]}" "$python_bin" "${args[@]}"
+  rm -f "$prompt_file"
+}
+
 agent_write_plan() {
-  run_agent_prompt "$planner_agent_command" <<EOF
+  if [[ "$planner_provider" == "ollama" ]]; then
+    run_provider_prompt planner "$planner_provider" "$planner_model" "$current_dir/plan.md" "" <<EOF
+You are planning an AutoDev issue-to-PR run.
+
+Return only the complete implementation plan as markdown. Do not edit files.
+
+--- PLANNER PROMPT ---
+$(cat "$current_dir/planner.md")
+EOF
+  else
+    run_agent_prompt "$planner_agent_command" <<EOF
 Use the issue-to-pr-automation skill.
 
 Run the planner prompt below. Write your complete planner output to:
@@ -138,11 +184,31 @@ Do not edit any other files.
 --- PLANNER PROMPT ---
 $(cat "$current_dir/planner.md")
 EOF
+  fi
   [[ -s "$current_dir/plan.md" ]] || { echo "Planner did not write $current_dir/plan.md" >&2; return 1; }
 }
 
 agent_implement() {
-  run_agent_prompt "$agent_command" <<EOF
+  if [[ "$agent_provider" == "ollama" ]]; then
+    run_provider_prompt implementer "$agent_provider" "$agent_model" "" "$current_dir/commit-message.txt" <<EOF
+You are implementing an AutoDev issue-to-PR task as a raw text model.
+
+You cannot edit files directly. Return exactly one of these forms:
+
+NO_CHANGES_REQUIRED
+
+or:
+
+COMMIT_MESSAGE: concise imperative commit message
+BEGIN_UNIFIED_DIFF
+<unified diff applicable with git apply>
+END_UNIFIED_DIFF
+
+--- IMPLEMENTER PROMPT ---
+$(cat "$current_dir/implementer.md")
+EOF
+  else
+    run_agent_prompt "$agent_command" <<EOF
 Use the issue-to-pr-automation skill.
 
 Run the implementer prompt below. Edit the workspace directly.
@@ -161,12 +227,33 @@ Commit message rules:
 --- IMPLEMENTER PROMPT ---
 $(cat "$current_dir/implementer.md")
 EOF
-  [[ -s "$current_dir/commit-message.txt" ]] || { echo "Implementer did not write $current_dir/commit-message.txt" >&2; return 1; }
+  fi
+  if [[ "$agent_provider" != "ollama" ]]; then
+    [[ -s "$current_dir/commit-message.txt" ]] || { echo "Implementer did not write $current_dir/commit-message.txt" >&2; return 1; }
+  fi
 }
 
 agent_repair_file() {
   local prompt_file="$1"
-  run_agent_prompt "$agent_command" <<EOF
+  if [[ "$agent_provider" == "ollama" ]]; then
+    run_provider_prompt repair "$agent_provider" "$agent_model" "" "" <<EOF
+You are repairing an AutoDev issue-to-PR task as a raw text model.
+
+You cannot edit files directly. Return exactly one of these forms:
+
+NO_CHANGES_REQUIRED
+
+or:
+
+BEGIN_UNIFIED_DIFF
+<unified diff applicable with git apply>
+END_UNIFIED_DIFF
+
+--- REPAIR PROMPT ---
+$(cat "$prompt_file")
+EOF
+  else
+    run_agent_prompt "$agent_command" <<EOF
 Use the issue-to-pr-automation skill.
 
 Run the repair prompt below. Fix only the failure described by the prompt, and edit the workspace directly.
@@ -174,10 +261,21 @@ Run the repair prompt below. Fix only the failure described by the prompt, and e
 --- REPAIR PROMPT ---
 $(cat "$prompt_file")
 EOF
+  fi
 }
 
 agent_verify() {
-  run_agent_prompt "$agent_command" <<EOF
+  if [[ "$agent_provider" == "ollama" ]]; then
+    run_provider_prompt verifier "$agent_provider" "$agent_model" "$current_dir/verification-result.md" "" <<EOF
+You are verifying an AutoDev issue-to-PR task.
+
+Return only the verification result. The first line must be exactly PASS or FAIL.
+
+--- VERIFIER PROMPT ---
+$(cat "$current_dir/verifier.md")
+EOF
+  else
+    run_agent_prompt "$agent_command" <<EOF
 Use the issue-to-pr-automation skill.
 
 Run the verifier prompt below. Write only the verification result to:
@@ -189,6 +287,7 @@ The file must start with exactly PASS or FAIL.
 --- VERIFIER PROMPT ---
 $(cat "$current_dir/verifier.md")
 EOF
+  fi
   [[ -s "$current_dir/verification-result.md" ]] || { echo "Verifier did not write $current_dir/verification-result.md" >&2; return 1; }
 }
 

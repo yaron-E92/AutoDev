@@ -38,6 +38,12 @@ param(
 
     [string]$PlannerAgentCommand = $(if ($env:PLANNER_AGENT_COMMAND) { $env:PLANNER_AGENT_COMMAND } else { "" }),
     [string]$AgentCommand = $(if ($env:AGENT_COMMAND) { $env:AGENT_COMMAND } else { "codex exec" }),
+    [string]$PlannerProvider = $env:PLANNER_PROVIDER,
+    [string]$PlannerModel = $env:PLANNER_MODEL,
+    [string]$AgentProvider = $env:AGENT_PROVIDER,
+    [string]$AgentModel = $env:AGENT_MODEL,
+    [string]$PromptRunner = $env:PROMPT_RUNNER,
+    [string]$Python = $(if ($env:PYTHON) { $env:PYTHON } else { "python" }),
     [int]$MaxRepairAttempts = $(if ($env:MAX_REPAIR_ATTEMPTS) { [int]$env:MAX_REPAIR_ATTEMPTS } else { 3 }),
     [string]$Message = "",
     [string]$WorkingDirectory = "",
@@ -48,7 +54,18 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $scriptRoot = $PSScriptRoot
+$toolRoot = Split-Path -Parent (Split-Path -Parent $scriptRoot)
+if ([string]::IsNullOrWhiteSpace($PromptRunner)) { $PromptRunner = Join-Path $toolRoot "automation\prompt_runner.py" }
 $currentDir = Join-Path ".codex-run" "current"
+
+if (-not [string]::IsNullOrWhiteSpace($PlannerModel) -and [string]::IsNullOrWhiteSpace($PlannerProvider)) { $PlannerProvider = "ollama" }
+if (-not [string]::IsNullOrWhiteSpace($AgentModel) -and [string]::IsNullOrWhiteSpace($AgentProvider)) { $AgentProvider = "ollama" }
+if ([string]::IsNullOrWhiteSpace($PlannerProvider)) { $PlannerProvider = "command" }
+if ([string]::IsNullOrWhiteSpace($AgentProvider)) { $AgentProvider = "command" }
+if ($PlannerProvider -notin @("command", "ollama")) { throw "-PlannerProvider must be command or ollama." }
+if ($AgentProvider -notin @("command", "ollama")) { throw "-AgentProvider must be command or ollama." }
+if ($PlannerProvider -eq "ollama" -and [string]::IsNullOrWhiteSpace($PlannerModel)) { throw "-PlannerProvider ollama requires -PlannerModel." }
+if ($AgentProvider -eq "ollama" -and [string]::IsNullOrWhiteSpace($AgentModel)) { throw "-AgentProvider ollama requires -AgentModel." }
 
 function Set-OptionalWorkingDirectory {
     param([string]$Path)
@@ -96,6 +113,34 @@ function Invoke-AgentPrompt {
 
         pwsh -NoProfile -Command $rendered
         if ($LASTEXITCODE -ne 0) { throw "$FailureMessage Exit code: $LASTEXITCODE." }
+    }
+    finally {
+        Remove-Item -LiteralPath $promptFile.FullName -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Invoke-ProviderPrompt {
+    param(
+        [Parameter(Mandatory = $true)][string]$Role,
+        [Parameter(Mandatory = $true)][string]$Provider,
+        [string]$Model = "",
+        [Parameter(Mandatory = $true)][string]$Prompt,
+        [string]$OutputFile = "",
+        [string]$CommitMessageFile = ""
+    )
+
+    $promptFile = New-TemporaryFile
+    try {
+        Set-Content -LiteralPath $promptFile.FullName -Encoding UTF8 -Value $Prompt
+        $args = @($PromptRunner, "--role", $Role, "--provider", $Provider, "--prompt-file", $promptFile.FullName)
+        if (-not [string]::IsNullOrWhiteSpace($Model)) { $args += @("--model", $Model) }
+        if (-not [string]::IsNullOrWhiteSpace($OutputFile)) { $args += @("--output-file", $OutputFile) }
+        if (-not [string]::IsNullOrWhiteSpace($CommitMessageFile)) { $args += @("--commit-message-file", $CommitMessageFile) }
+
+        $output = @(& $Python @args 2>&1)
+        $code = $LASTEXITCODE
+        foreach ($line in $output) { Write-Host $line }
+        if ($code -ne 0) { throw "$Provider provider prompt failed for $Role. Exit code: $code." }
     }
     finally {
         Remove-Item -LiteralPath $promptFile.FullName -Force -ErrorAction SilentlyContinue
@@ -158,7 +203,20 @@ function Invoke-PlanAgent {
     $plannerPath = Join-Path $currentDir "planner.md"
     $planPath = Join-Path $currentDir "plan.md"
     $plannerPrompt = Get-FileText -Path $plannerPath
-    $prompt = @"
+
+    if ($PlannerProvider -eq "ollama") {
+        $prompt = @"
+You are planning an AutoDev issue-to-PR run.
+
+Return only the complete implementation plan as markdown. Do not edit files.
+
+--- PLANNER PROMPT ---
+$plannerPrompt
+"@
+        Invoke-ProviderPrompt -Role "planner" -Provider $PlannerProvider -Model $PlannerModel -Prompt $prompt -OutputFile $planPath
+    }
+    else {
+        $prompt = @"
 Use the issue-to-pr-automation skill.
 
 Run the planner prompt below. Write your complete planner output to:
@@ -170,7 +228,9 @@ Do not edit any other files.
 --- PLANNER PROMPT ---
 $plannerPrompt
 "@
-    Invoke-AgentPrompt -Command $PlannerAgentCommand -Prompt $prompt -FailureMessage "Planner agent command failed."
+        Invoke-AgentPrompt -Command $PlannerAgentCommand -Prompt $prompt -FailureMessage "Planner agent command failed."
+    }
+
     if (-not (Test-Path -LiteralPath $planPath) -or [string]::IsNullOrWhiteSpace((Get-Content -LiteralPath $planPath -Raw -Encoding UTF8))) {
         throw "Planner agent did not write $planPath."
     }
@@ -180,7 +240,29 @@ function Invoke-ImplementAgent {
     $implementerPath = Join-Path $currentDir "implementer.md"
     $commitMessagePath = Join-Path $currentDir "commit-message.txt"
     $implementerPrompt = Get-FileText -Path $implementerPath
-    $prompt = @"
+
+    if ($AgentProvider -eq "ollama") {
+        $prompt = @"
+You are implementing an AutoDev issue-to-PR task as a raw text model.
+
+You cannot edit files directly. Return exactly one of these forms:
+
+NO_CHANGES_REQUIRED
+
+or:
+
+COMMIT_MESSAGE: concise imperative commit message
+BEGIN_UNIFIED_DIFF
+<unified diff applicable with git apply>
+END_UNIFIED_DIFF
+
+--- IMPLEMENTER PROMPT ---
+$implementerPrompt
+"@
+        Invoke-ProviderPrompt -Role "implementer" -Provider $AgentProvider -Model $AgentModel -Prompt $prompt -CommitMessageFile $commitMessagePath
+    }
+    else {
+        $prompt = @"
 Use the issue-to-pr-automation skill.
 
 Run the implementer prompt below. Edit the workspace directly.
@@ -199,16 +281,41 @@ Commit message rules:
 --- IMPLEMENTER PROMPT ---
 $implementerPrompt
 "@
-    Invoke-AgentPrompt -Command $AgentCommand -Prompt $prompt -FailureMessage "Implementer agent command failed."
-    if (-not (Test-Path -LiteralPath $commitMessagePath) -or [string]::IsNullOrWhiteSpace((Get-Content -LiteralPath $commitMessagePath -Raw -Encoding UTF8))) {
-        throw "Implementer agent did not write $commitMessagePath."
+        Invoke-AgentPrompt -Command $AgentCommand -Prompt $prompt -FailureMessage "Implementer agent command failed."
+    }
+
+    if ($AgentProvider -ne "ollama") {
+        if (-not (Test-Path -LiteralPath $commitMessagePath) -or [string]::IsNullOrWhiteSpace((Get-Content -LiteralPath $commitMessagePath -Raw -Encoding UTF8))) {
+            throw "Implementer agent did not write $commitMessagePath."
+        }
     }
 }
 
 function Invoke-RepairAgent {
     param([Parameter(Mandatory = $true)][string]$PromptPath)
     $repairPrompt = Get-FileText -Path $PromptPath
-    $prompt = @"
+
+    if ($AgentProvider -eq "ollama") {
+        $prompt = @"
+You are repairing an AutoDev issue-to-PR task as a raw text model.
+
+You cannot edit files directly. Return exactly one of these forms:
+
+NO_CHANGES_REQUIRED
+
+or:
+
+BEGIN_UNIFIED_DIFF
+<unified diff applicable with git apply>
+END_UNIFIED_DIFF
+
+--- REPAIR PROMPT ---
+$repairPrompt
+"@
+        Invoke-ProviderPrompt -Role "repair" -Provider $AgentProvider -Model $AgentModel -Prompt $prompt
+    }
+    else {
+        $prompt = @"
 Use the issue-to-pr-automation skill.
 
 Run the repair prompt below. Fix only the failure described by the prompt, and edit the workspace directly.
@@ -216,14 +323,28 @@ Run the repair prompt below. Fix only the failure described by the prompt, and e
 --- REPAIR PROMPT ---
 $repairPrompt
 "@
-    Invoke-AgentPrompt -Command $AgentCommand -Prompt $prompt -FailureMessage "Repair agent command failed."
+        Invoke-AgentPrompt -Command $AgentCommand -Prompt $prompt -FailureMessage "Repair agent command failed."
+    }
 }
 
 function Invoke-VerifyAgent {
     $verifierPath = Join-Path $currentDir "verifier.md"
     $resultPath = Join-Path $currentDir "verification-result.md"
     $verifierPrompt = Get-FileText -Path $verifierPath
-    $prompt = @"
+
+    if ($AgentProvider -eq "ollama") {
+        $prompt = @"
+You are verifying an AutoDev issue-to-PR task.
+
+Return only the verification result. The first line must be exactly PASS or FAIL.
+
+--- VERIFIER PROMPT ---
+$verifierPrompt
+"@
+        Invoke-ProviderPrompt -Role "verifier" -Provider $AgentProvider -Model $AgentModel -Prompt $prompt -OutputFile $resultPath
+    }
+    else {
+        $prompt = @"
 Use the issue-to-pr-automation skill.
 
 Run the verifier prompt below. Write only the verification result to:
@@ -235,7 +356,9 @@ The file must start with exactly PASS or FAIL.
 --- VERIFIER PROMPT ---
 $verifierPrompt
 "@
-    Invoke-AgentPrompt -Command $AgentCommand -Prompt $prompt -FailureMessage "Verifier agent command failed."
+        Invoke-AgentPrompt -Command $AgentCommand -Prompt $prompt -FailureMessage "Verifier agent command failed."
+    }
+
     if (-not (Test-Path -LiteralPath $resultPath) -or [string]::IsNullOrWhiteSpace((Get-Content -LiteralPath $resultPath -Raw -Encoding UTF8))) {
         throw "Verifier agent did not write $resultPath."
     }
