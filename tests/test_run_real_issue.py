@@ -383,6 +383,16 @@ END_UNIFIED_DIFF"""
         self.assertIn("{prompt_file}", text)
         self.assertIn("plan.md", text)
 
+    def test_linux_run_once_resolves_workflow_script_relative_to_itself(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        script = repo_root / "linux" / "run-once.sh"
+
+        text = script.read_text(encoding="utf-8")
+
+        self.assertIn("RUN_ONCE_DIR=", text)
+        self.assertIn("$RUN_ONCE_DIR/scripts/issue-to-pr-cycle.sh", text)
+        self.assertIn("$RUN_ONCE_DIR/linux/scripts/issue-to-pr-cycle.sh", text)
+
 
 if __name__ == "__main__":
     unittest.main()

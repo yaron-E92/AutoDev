@@ -19,6 +19,23 @@ The Linux automation files checked into this repository are:
 - `linux/systemd/` for optional systemd unit templates.
 - `linux/config.example.env` as a sanitized project environment template.
 
+
+## Single-command equivalent
+
+The equivalent of pasting the legacy prompt into Codex Desktop connected to a Linux VM is now one command. From a checkout of this repository, run:
+
+```bash
+linux/scripts/issue-to-pr-cycle.sh \
+  --env ~/automation/state/PROJECT.env \
+  --mode Run \
+  --owner OWNER \
+  --repo REPO \
+  --base main \
+  --remote origin
+```
+
+For timer-style installed automation, `linux/run-once.sh` resolves `issue-to-pr-cycle.sh` relative to its own location, so it works both from this repository layout (`linux/scripts`) and from an installed `$AUTOMATION_ROOT/scripts` layout.
+
 ## Script-based workflow
 
 Use `issue-to-pr-cycle.sh` for the trusted state transitions from the Codex Desktop workflow. The default `Run` mode performs deterministic prepare/finalize/mark steps and invokes the configured agent command on the rendered planner, implementer, repair, and verifier prompts at the points where agent work is needed.
