@@ -54,10 +54,16 @@ if [[ -n "${KEEPASS_DB:-}" ]]; then
   fi
 fi
 
-export GH_CONFIG_DIR="${GH_CONFIG_DIR:-$AUTOMATION_ROOT/state/gh-config}"
 export GH_PROMPT_DISABLED=1
-mkdir -p "$GH_CONFIG_DIR"
-chmod 700 "$GH_CONFIG_DIR" || true
+if [[ -z "${GH_CONFIG_DIR:-}" && -z "${GH_TOKEN:-}" && -n "${SUDO_USER:-}" && "${SUDO_USER:-}" != "root" ]]; then
+  sudo_home="$(getent passwd "$SUDO_USER" | cut -d: -f6 || true)"
+  [[ -d "$sudo_home/.config/gh" ]] && GH_CONFIG_DIR="$sudo_home/.config/gh"
+fi
+if [[ -n "${GH_CONFIG_DIR:-}" ]]; then
+  export GH_CONFIG_DIR
+  mkdir -p "$GH_CONFIG_DIR"
+  chmod 700 "$GH_CONFIG_DIR" || true
+fi
 
 if [[ -n "${REPO_PATH:-}" ]]; then
   cd "$REPO_PATH"
