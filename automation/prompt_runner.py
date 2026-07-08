@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -135,9 +136,28 @@ def apply_unified_diff(patch: str) -> None:
 
 
 def handle_planner_output(output: str, output_file: Path) -> None:
-    if not output.strip():
+    raw_output_file = output_file.with_name(output_file.name + ".raw")
+    write_text(raw_output_file, output)
+    plan = sanitize_planner_output(output)
+    if not plan.strip():
         raise PromptRunnerError("planner output was empty")
-    write_text(output_file, output)
+    if contains_planner_preamble(plan):
+        raise PromptRunnerError(f"planner output contained unstrippable reasoning or preamble; raw response: {raw_output_file}")
+    write_text(output_file, plan)
+
+
+def sanitize_planner_output(output: str) -> str:
+    cleaned = re.sub(r"(?is)<think>.*?</think>", "", output).strip()
+    lines = cleaned.splitlines()
+    for index, line in enumerate(lines):
+        if re.match(r"^\s*(?:#\s*)?1\)\s+Where to look\b", line):
+            return "\n".join(lines[index:]).strip() + "\n"
+    return cleaned + ("\n" if cleaned else "")
+
+
+def contains_planner_preamble(value: str) -> bool:
+    first = first_line(value).casefold()
+    return first.startswith("thinking") or first.startswith("scratchpad") or first.startswith("reasoning")
 
 
 def handle_verifier_output(output: str, output_file: Path) -> None:

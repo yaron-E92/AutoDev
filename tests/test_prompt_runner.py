@@ -25,7 +25,6 @@ class PromptRunnerTests(unittest.TestCase):
         self.assertEqual(calls[0][0], ["ollama", "run", "qwen35-9b-32k"])
         self.assertEqual(calls[0][1]["input"], "prompt text")
 
-
     def test_command_provider_appends_prompt_when_no_placeholder(self):
         calls = []
         original_run = prompt_runner.subprocess.run
@@ -68,6 +67,31 @@ class PromptRunnerTests(unittest.TestCase):
             prompt_runner.handle_planner_output("# Plan\n", plan_path)
 
             self.assertEqual(plan_path.read_text(encoding="utf-8"), "# Plan\n")
+
+    def test_planner_output_strips_thinking_preamble_when_final_plan_is_clear(self):
+        output = """Thinking...
+private scratch
+
+1) Where to look
+- src/App.xaml.cs
+"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            plan_path = Path(temp_dir) / "plan.md"
+
+            prompt_runner.handle_planner_output(output, plan_path)
+
+            self.assertEqual(plan_path.read_text(encoding="utf-8"), "1) Where to look\n- src/App.xaml.cs\n")
+            self.assertEqual(plan_path.with_name("plan.md.raw").read_text(encoding="utf-8"), output)
+
+    def test_planner_output_fails_when_preamble_cannot_be_safely_stripped(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            plan_path = Path(temp_dir) / "plan.md"
+
+            with self.assertRaises(prompt_runner.PromptRunnerError) as raised:
+                prompt_runner.handle_planner_output("Thinking...\nMaybe inspect files", plan_path)
+
+            self.assertIn("raw response", str(raised.exception))
+            self.assertTrue(plan_path.with_name("plan.md.raw").is_file())
 
     def test_verifier_stdout_requires_pass_or_fail_first_line(self):
         with tempfile.TemporaryDirectory() as temp_dir:

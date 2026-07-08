@@ -33,6 +33,66 @@ class RunRealIssueTests(unittest.TestCase):
         self.assertIn("Labels: autodev:ready, area:python", issue_text)
         self.assertIn("Body text", issue_text)
 
+    def test_area_reader_planner_prompt_uses_synthesis_and_labels_as_hints(self):
+        prompt = run_real_issue.build_area_reader_planner_prompt(
+            issue_text="Fix expiring entries",
+            local_check="dotnet test",
+            labels=["area:maui", "area:api"],
+            profile_context_hints="MAUI profile text\nAPI profile text",
+            routed_areas={"areas": ["maui"]},
+            synthesized_handoff="Area-reader narrowed this to the MAUI list view.",
+            coder_plan="Inspect ExpiringEntriesPage.xaml and its view model.",
+            relevant_files=["src/App/ExpiringEntriesPage.xaml", "src/App/ExpiringEntriesViewModel.cs"],
+            recommended_command_groups={"recommended_command_groups": ["dotnet-test"]},
+            workspace_snapshot={"src/App/ExpiringEntriesPage.xaml": "abc", "src/App/ExpiringEntriesViewModel.cs": "def"},
+        )
+
+        self.assertIn("Area-reader synthesized handoff", prompt)
+        self.assertIn("Area-reader narrowed this to the MAUI list view.", prompt)
+        self.assertIn("Routing hints only", prompt)
+        self.assertIn("GitHub labels: area:maui, area:api", prompt)
+        self.assertIn("Treat labels and profile text as routing hints only", prompt)
+        self.assertIn("src/App/ExpiringEntriesPage.xaml", prompt)
+        self.assertIn("Workspace snapshot grounding", prompt)
+
+    def test_area_reader_relevant_files_are_grounded_in_workspace_snapshot(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            current = Path(temp_dir)
+            (current / "area-reader-summary.json").write_text(
+                json.dumps(
+                    {
+                        "area_metadata": {
+                            "maui": {
+                                "included_files": [
+                                    "src/App/ExpiringEntriesPage.xaml",
+                                    "src/App/Missing.xaml",
+                                ]
+                            }
+                        },
+                        "detected_facts": {"maui_projects": ["src/App/App.csproj"]},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (current / "detected-facts.json").write_text("{}", encoding="utf-8")
+            snapshot = {
+                "src/App/ExpiringEntriesPage.xaml": "abc",
+                "src/App/App.csproj": "def",
+            }
+
+            files = run_real_issue.collect_area_reader_relevant_files(current, snapshot)
+
+        self.assertEqual(files, ["src/App/App.csproj", "src/App/ExpiringEntriesPage.xaml"])
+
+    def test_linux_prepare_uses_area_reader_prompt_helper(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        script = (repo_root / "linux" / "scripts" / "prepare-next-ready-issue.sh").read_text(encoding="utf-8")
+
+        self.assertIn("prepare_planner_prompt.py", script)
+        self.assertIn("--labels-json", script)
+        self.assertIn("workspace-snapshot.json", script)
+        self.assertNotIn('render_file "$PROMPT_DIR/planner.md"', script)
+
     def test_build_run_summary_uses_routing_and_recommendations(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             out_dir = Path(temp_dir)

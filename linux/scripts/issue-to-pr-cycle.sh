@@ -121,6 +121,16 @@ run_prepare() {
   [[ -n "$issue" ]] && args+=(--issue "$issue")
   [[ -n "$description" ]] && args+=(--description "$description")
   [[ -n "$description_file" ]] && args+=(--description-file "$description_file")
+  if [[ "$planner_provider_mode" == true ]]; then
+    args+=(--reader-provider "$planner_provider")
+    [[ -n "$planner_model" ]] && args+=(--reader-model "$planner_model")
+    [[ "$planner_provider" == "command" && -n "$planner_agent_command" ]] && args+=(--reader-command "$planner_agent_command")
+  fi
+  if [[ "$agent_provider_mode" == true ]]; then
+    args+=(--coder-provider "$agent_provider")
+    [[ -n "$agent_model" ]] && args+=(--coder-model "$agent_model")
+    [[ "$agent_provider" == "command" && -n "$agent_command" ]] && args+=(--coder-command "$agent_command")
+  fi
   "${with_env[@]}" "${args[@]}"
 }
 
