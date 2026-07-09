@@ -55,6 +55,7 @@ $ErrorActionPreference = "Stop"
 
 $scriptRoot = $PSScriptRoot
 $toolRoot = Split-Path -Parent (Split-Path -Parent $scriptRoot)
+$UsePromptRunnerModule = [string]::IsNullOrWhiteSpace($PromptRunner)
 if ([string]::IsNullOrWhiteSpace($PromptRunner)) { $PromptRunner = Join-Path $toolRoot "automation\prompt_runner.py" }
 $currentDir = Join-Path ".codex-run" "current"
 
@@ -143,8 +144,21 @@ function Invoke-ProviderPrompt {
         if (-not [string]::IsNullOrWhiteSpace($OutputFile)) { $args += @("--output-file", $OutputFile) }
         if (-not [string]::IsNullOrWhiteSpace($CommitMessageFile)) { $args += @("--commit-message-file", $CommitMessageFile) }
 
-        $output = @(& $Python @args 2>&1)
-        $code = $LASTEXITCODE
+        if ($UsePromptRunnerModule) {
+            $oldPythonPath = $env:PYTHONPATH
+            try {
+                $env:PYTHONPATH = if ([string]::IsNullOrWhiteSpace($oldPythonPath)) { $toolRoot } else { "$toolRoot$([IO.Path]::PathSeparator)$oldPythonPath" }
+                $output = @(& $Python -m automation.prompt_runner @($args | Select-Object -Skip 1) 2>&1)
+                $code = $LASTEXITCODE
+            }
+            finally {
+                $env:PYTHONPATH = $oldPythonPath
+            }
+        }
+        else {
+            $output = @(& $Python @args 2>&1)
+            $code = $LASTEXITCODE
+        }
         foreach ($line in $output) { Write-Host $line }
         if ($code -ne 0) { throw "$Provider provider prompt failed for $Role. Exit code: $code." }
     }

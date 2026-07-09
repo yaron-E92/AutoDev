@@ -1,4 +1,5 @@
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -7,6 +8,32 @@ from automation import prompt_runner
 
 
 class PromptRunnerTests(unittest.TestCase):
+    def test_prompt_runner_direct_script_help_imports_sibling_modules(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        completed = subprocess.run(
+            [sys.executable, str(repo_root / "automation" / "prompt_runner.py"), "--help"],
+            cwd=repo_root,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("Run one AutoDev prompt", completed.stderr + completed.stdout)
+
+    def test_prompt_runner_module_help_still_works(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        completed = subprocess.run(
+            [sys.executable, "-m", "automation.prompt_runner", "--help"],
+            cwd=repo_root,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("Run one AutoDev prompt", completed.stderr + completed.stdout)
+
     def test_ollama_provider_runs_model_with_prompt_on_stdin(self):
         calls = []
         original_run = prompt_runner.subprocess.run

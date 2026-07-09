@@ -174,7 +174,11 @@ run_provider_prompt() {
   [[ -n "$command" ]] && args+=(--command "$command")
   [[ -n "$output_file" ]] && args+=(--output-file "$output_file")
   [[ -n "$commit_file" ]] && args+=(--commit-message-file "$commit_file")
-  "${with_env[@]}" "$python_bin" "${args[@]}"
+  if [[ -n "${PROMPT_RUNNER:-}" ]]; then
+    "${with_env[@]}" "$python_bin" "${args[@]}"
+  else
+    "${with_env[@]}" env PYTHONPATH="$tool_root${PYTHONPATH:+:$PYTHONPATH}" "$python_bin" -m automation.prompt_runner "${args[@]:1}"
+  fi
   rm -f "$prompt_file"
 }
 
