@@ -857,7 +857,7 @@ def render_verification_script(repo, command_groups):
         "if git rev-parse --show-toplevel >/dev/null 2>&1; then",
         "  REPO_ROOT=\"$(git rev-parse --show-toplevel)\"",
         "else",
-        f"  REPO_ROOT={shlex.quote(str(repo))}",
+        f"  REPO_ROOT={shlex.quote(repo.as_posix())}",
         "fi",
         'cd "$REPO_ROOT"',
         "",

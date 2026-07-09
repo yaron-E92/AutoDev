@@ -9,12 +9,21 @@ import sys
 import tempfile
 from pathlib import Path
 
+from automation.model_output_sanitizer import sanitize_model_output
+
 
 PATCH_START = "BEGIN_UNIFIED_DIFF"
 PATCH_END = "END_UNIFIED_DIFF"
 NO_CHANGES_REQUIRED = "NO_CHANGES_REQUIRED"
 DEFAULT_COMMIT_MESSAGE = "Implement AutoDev task"
-
+REQUIRED_PLAN_HEADINGS = (
+    "1) Where to look",
+    "2) Files / areas likely to touch",
+    "3) Assumptions",
+    "4) Plan",
+    "5) Risks / gotchas",
+    "6) Recommended implementation approach",
+)
 
 class PromptRunnerError(RuntimeError):
     pass
@@ -52,7 +61,7 @@ def run_command_provider(command: str, prompt: str, prompt_file: Path | None = N
             rendered = rendered.replace("{prompt}", quote_shell(prompt))
             completed = subprocess.run(rendered, shell=True, text=True, capture_output=True, check=False)
         else:
-            argv = shlex.split(command)
+            argv = shlex.split(command, posix=os.name != "nt")
             completed = subprocess.run(argv + [prompt], text=True, capture_output=True, check=False)
     finally:
         if temp_prompt is not None:
@@ -137,27 +146,62 @@ def apply_unified_diff(patch: str) -> None:
 
 def handle_planner_output(output: str, output_file: Path) -> None:
     raw_output_file = output_file.with_name(output_file.name + ".raw")
-    write_text(raw_output_file, output)
-    plan = sanitize_planner_output(output)
-    if not plan.strip():
-        raise PromptRunnerError("planner output was empty")
-    if contains_planner_preamble(plan):
-        raise PromptRunnerError(f"planner output contained unstrippable reasoning or preamble; raw response: {raw_output_file}")
+    parser_error_file = output_file.with_name(output_file.name + ".parser-error.md")
+    cleaned_output = sanitize_model_output(output, ensure_trailing_newline=True)
+    write_text(raw_output_file, cleaned_output)
+    try:
+        plan = sanitize_planner_output(cleaned_output)
+    except PromptRunnerError as exc:
+        write_planner_parser_failure(parser_error_file, raw_output_file, str(exc))
+        raise PromptRunnerError(f"{exc}; raw response: {raw_output_file}; parser failure: {parser_error_file}") from exc
     write_text(output_file, plan)
 
 
 def sanitize_planner_output(output: str) -> str:
-    cleaned = re.sub(r"(?is)<think>.*?</think>", "", output).strip()
+    cleaned = re.sub(r"(?is)<think>.*?</think>", "", sanitize_model_output(output)).strip()
+    if not cleaned:
+        raise PromptRunnerError("planner output was empty")
     lines = cleaned.splitlines()
-    for index, line in enumerate(lines):
-        if re.match(r"^\s*(?:#\s*)?1\)\s+Where to look\b", line):
-            return "\n".join(lines[index:]).strip() + "\n"
-    return cleaned + ("\n" if cleaned else "")
+    if contains_all_required_plan_sections(cleaned):
+        for index, line in enumerate(lines):
+            if is_first_plan_heading(line):
+                plan = "\n".join(lines[index:]).strip() + "\n"
+                break
+        else:
+            plan = cleaned + "\n"
+    else:
+        plan = cleaned + "\n"
+    if contains_hidden_reasoning(plan):
+        raise PromptRunnerError("planner output contained unstrippable reasoning or preamble")
+    return sanitize_model_output(plan, ensure_trailing_newline=True)
+
+
+def contains_all_required_plan_sections(value: str) -> bool:
+    return all(re.search(r"(?m)^\s*" + re.escape(heading) + r"\b", value) for heading in REQUIRED_PLAN_HEADINGS)
+
+
+def is_first_plan_heading(value: str) -> bool:
+    return bool(re.match(r"^\s*(?:#\s*)?" + re.escape(REQUIRED_PLAN_HEADINGS[0]) + r"\b", value))
+
+
+def contains_hidden_reasoning(value: str) -> bool:
+    lowered = value.casefold()
+    if "<think>" in lowered or "</think>" in lowered or "thinking..." in lowered:
+        return True
+    return bool(re.search(r"(?im)^\s*(thinking|scratchpad|reasoning)\b", value))
 
 
 def contains_planner_preamble(value: str) -> bool:
-    first = first_line(value).casefold()
-    return first.startswith("thinking") or first.startswith("scratchpad") or first.startswith("reasoning")
+    return contains_hidden_reasoning(value)
+
+
+def write_planner_parser_failure(path: Path, raw_output_file: Path, reason: str) -> None:
+    write_text(
+        path,
+        "# Planner Output Parser Failure\n\n"
+        f"Reason: {reason}\n\n"
+        f"Raw response: {raw_output_file}\n",
+    )
 
 
 def handle_verifier_output(output: str, output_file: Path) -> None:

@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import Callable, TextIO
 
 from area_reader_v2 import runner as area_reader_runner
+from area_reader_v2.command_group_recommendations import documentation_only_command_groups, is_documentation_only_scope
+from automation.model_output_sanitizer import sanitize_model_output
 from automation.model_providers import (
     ModelConfig,
     ModelProvider,
@@ -624,12 +626,34 @@ def write_operational_outputs(issue_text: str, area_out: Path, out_dir: Path, ke
     write_text(out_dir / "issue.md", issue_text)
     for source_name, target_name in copies.items():
         source = area_out / source_name
-        if source.is_file():
-            shutil.copyfile(source, out_dir / target_name)
+        if not source.is_file():
+            continue
+        target = out_dir / target_name
+        if source.suffix in {".md", ".txt"}:
+            write_text(target, sanitize_model_output(read_optional_text(source), ensure_trailing_newline=True))
+        else:
+            shutil.copyfile(source, target)
+    refine_recommendations_for_plan_scope(out_dir, issue_text)
     write_text(out_dir / "run-summary.md", build_run_summary(out_dir))
     if not keep_debug:
         shutil.rmtree(area_out, ignore_errors=True)
 
+
+def refine_recommendations_for_plan_scope(out_dir: Path, issue_text: str) -> None:
+    recommendations = read_json(out_dir / "recommended-command-groups.json")
+    if not isinstance(recommendations, dict):
+        return
+    available = recommendations.get("available_command_groups")
+    if not isinstance(available, list):
+        available = recommendations.get("recommended_command_groups", [])
+    available_set = {str(group) for group in available}
+    coder_plan = read_optional_text(out_dir / "coder-plan.md")
+    relevant_files = collect_area_reader_relevant_files(out_dir, {})
+    scope_text = f"{issue_text}\n{coder_plan}"
+    if not is_documentation_only_scope(scope_text.casefold(), relevant_files):
+        return
+    recommendations["recommended_command_groups"] = documentation_only_command_groups(relevant_files, available_set)
+    write_text(out_dir / "recommended-command-groups.json", json.dumps(recommendations, indent=2, sort_keys=True) + "\n")
 
 def build_run_summary(out_dir: Path) -> str:
     routing = read_json(out_dir / "routed-areas.json")
@@ -893,6 +917,28 @@ def workspace_snapshot_summary(workspace_snapshot: object, limit: int = 200) -> 
     )
 
 
+def usable_synthesized_handoff(value: str) -> str:
+    cleaned = sanitize_model_output(value)
+    if not cleaned:
+        return ""
+    lowered = cleaned.casefold()
+    if lowered.startswith("thinking") or lowered.startswith("scratchpad") or lowered.startswith("reasoning"):
+        return ""
+    if len(cleaned) < 40:
+        return ""
+    return cleaned
+
+
+def planner_handoff_section(value: str) -> str:
+    handoff = usable_synthesized_handoff(value)
+    if handoff:
+        return handoff
+    return (
+        "Area-reader synthesis unavailable: synthesis output was empty, too short, "
+        "or contained model reasoning. Use routed areas, detected facts, relevant files, "
+        "recommended commands, and the coder plan below as the planning scope."
+    )
+
 def build_area_reader_planner_prompt(
     *,
     issue_text: str,
@@ -916,10 +962,10 @@ Area-reader routed areas:
 {json.dumps(routed_areas, indent=2, sort_keys=True)}
 
 Area-reader synthesized handoff:
-{synthesized_handoff.strip()}
+{planner_handoff_section(synthesized_handoff)}
 
 Area-reader coder / implementation plan:
-{coder_plan.strip()}
+{sanitize_model_output(coder_plan)}
 
 Detected relevant files from area-reader facts:
 {json.dumps(relevant_files, indent=2, sort_keys=True)}

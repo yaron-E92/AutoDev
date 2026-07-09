@@ -74,13 +74,23 @@ private scratch
 
 1) Where to look
 - src/App.xaml.cs
+2) Files / areas likely to touch
+- src/App.xaml.cs
+3) Assumptions
+- Small local fix.
+4) Plan
+- Inspect and patch the file.
+5) Risks / gotchas
+- Keep scope narrow.
+6) Recommended implementation approach
+- Option A: patch the file.
 """
         with tempfile.TemporaryDirectory() as temp_dir:
             plan_path = Path(temp_dir) / "plan.md"
 
             prompt_runner.handle_planner_output(output, plan_path)
 
-            self.assertEqual(plan_path.read_text(encoding="utf-8"), "1) Where to look\n- src/App.xaml.cs\n")
+            self.assertTrue(plan_path.read_text(encoding="utf-8").startswith("1) Where to look\n- src/App.xaml.cs\n"))
             self.assertEqual(plan_path.with_name("plan.md.raw").read_text(encoding="utf-8"), output)
 
     def test_planner_output_fails_when_preamble_cannot_be_safely_stripped(self):
@@ -93,6 +103,54 @@ private scratch
             self.assertIn("raw response", str(raised.exception))
             self.assertTrue(plan_path.with_name("plan.md.raw").is_file())
 
+    def test_planner_output_strips_control_chars_and_extracts_required_sections(self):
+        output = "\x1b[?25lThinking...\b\b draft\r\n" """1) Where to look
+- docs/architecture.md
+2) Files / areas likely to touch
+- docs/architecture.md
+3) Assumptions
+- Documentation only.
+4) Plan
+- Update the doc.
+5) Risks / gotchas
+- Keep scope narrow.
+6) Recommended implementation approach
+- Option A: edit docs only.
+"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            plan_path = Path(temp_dir) / "plan.md"
+
+            prompt_runner.handle_planner_output(output, plan_path)
+
+            plan = plan_path.read_text(encoding="utf-8")
+            self.assertTrue(plan.startswith("1) Where to look"))
+            self.assertNotIn("Thinking", plan)
+            self.assertNotRegex(plan, r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+    def test_planner_output_rejects_reasoning_after_extracted_plan(self):
+        output = """Intro
+1) Where to look
+- docs/architecture.md
+2) Files / areas likely to touch
+- docs/architecture.md
+3) Assumptions
+- Documentation only.
+4) Plan
+- Update the doc.
+5) Risks / gotchas
+- Keep scope narrow.
+6) Recommended implementation approach
+- Option A: edit docs only.
+Thinking... hidden scratchpad
+"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            plan_path = Path(temp_dir) / "plan.md"
+
+            with self.assertRaises(prompt_runner.PromptRunnerError):
+                prompt_runner.handle_planner_output(output, plan_path)
+
+            self.assertTrue(plan_path.with_name("plan.md.raw").is_file())
+            self.assertTrue(plan_path.with_name("plan.md.parser-error.md").is_file())
+            self.assertFalse(plan_path.exists())
     def test_verifier_stdout_requires_pass_or_fail_first_line(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             result_path = Path(temp_dir) / "verification-result.md"

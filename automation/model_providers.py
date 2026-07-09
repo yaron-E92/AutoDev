@@ -35,7 +35,7 @@ class ModelConfig:
             "timeout_seconds": self.timeout_seconds,
         }
         if self.command:
-            metadata["command"] = shlex.split(self.command)[0]
+            metadata["command"] = shlex.split(self.command, posix=os.name != "nt")[0]
         if self.base_url:
             metadata["base_url"] = self.base_url
         if self.api_key_env:
@@ -56,7 +56,7 @@ class CommandProvider(ModelProvider):
     def generate(self, prompt: str, *, model: str, timeout_seconds: int) -> str:
         if not self.command:
             raise ProviderError("command provider requires a command")
-        argv = shlex.split(self.command)
+        argv = shlex.split(self.command, posix=os.name != "nt")
         if not argv:
             raise ProviderError("command provider command is empty")
         completed = subprocess.run(

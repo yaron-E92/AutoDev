@@ -93,6 +93,42 @@ class RunRealIssueTests(unittest.TestCase):
         self.assertIn("workspace-snapshot.json", script)
         self.assertNotIn('render_file "$PROMPT_DIR/planner.md"', script)
 
+    def test_operational_outputs_sanitize_model_artifacts(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            area_out = root / "area"
+            current = root / "current"
+            area_out.mkdir()
+            (area_out / "routing.json").write_text('{"areas":["docs"]}', encoding="utf-8")
+            (area_out / "synthesis-brief.md").write_text("\x1b[?25lFinal\b handoff\x07", encoding="utf-8")
+            (area_out / "coder-plan.md").write_text("Plan\x1b[0m\x00 text", encoding="utf-8")
+            (area_out / "recommended-command-groups.json").write_text(
+                '{"recommended_command_groups":["markdown-smoke"]}',
+                encoding="utf-8",
+            )
+
+            run_real_issue.write_operational_outputs("Issue", area_out, current, keep_debug=True)
+
+            self.assertEqual((current / "synthesized-handoff.md").read_text(encoding="utf-8"), "Final handoff\n")
+            self.assertEqual((current / "coder-plan.md").read_text(encoding="utf-8"), "Plan text\n")
+
+    def test_invalid_synthesized_handoff_is_not_fed_to_planner(self):
+        prompt = run_real_issue.build_area_reader_planner_prompt(
+            issue_text="Document architecture boundary",
+            local_check="bash verify.sh",
+            labels=["area:maui", "area:docs"],
+            profile_context_hints="MAUI profile text",
+            routed_areas={"areas": ["docs"]},
+            synthesized_handoff="Thinking... The",
+            coder_plan="Update docs/architecture.md only.",
+            relevant_files=["docs/architecture.md"],
+            recommended_command_groups={"recommended_command_groups": ["markdown-smoke"]},
+            workspace_snapshot={"docs/architecture.md": "abc"},
+        )
+
+        self.assertIn("Area-reader synthesis unavailable", prompt)
+        self.assertNotIn("Thinking... The", prompt)
+        self.assertIn("Update docs/architecture.md only.", prompt)
     def test_build_run_summary_uses_routing_and_recommendations(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             out_dir = Path(temp_dir)
