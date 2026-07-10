@@ -35,6 +35,11 @@ DEFAULT_DONE_LABEL = "autodev:done"
 DEFAULT_BLOCKED_LABEL = "autodev:blocked"
 RUNNER_ROOT = Path(__file__).resolve().parents[1]
 PROMPT_TEMPLATE_DIR = RUNNER_ROOT / "promptTemplates"
+FALLBACK_SYNTHESIZED_HANDOFF = (
+    "Area-reader synthesis unavailable: synthesis output was empty, too short, "
+    "or contained model reasoning. Use routed areas, detected facts, relevant files, "
+    "recommended commands, and the coder plan below as the planning scope."
+)
 PATCH_START = "BEGIN_UNIFIED_DIFF"
 PATCH_END = "END_UNIFIED_DIFF"
 NO_CHANGES_REQUIRED = "NO_CHANGES_REQUIRED"
@@ -630,7 +635,10 @@ def write_operational_outputs(issue_text: str, area_out: Path, out_dir: Path, ke
             continue
         target = out_dir / target_name
         if source.suffix in {".md", ".txt"}:
-            write_text(target, sanitize_model_output(read_optional_text(source), ensure_trailing_newline=True))
+            content = sanitize_model_output(read_optional_text(source))
+            if target_name == "synthesized-handoff.md":
+                content = synthesized_handoff_or_fallback(content)
+            write_text(target, sanitize_model_output(content, ensure_trailing_newline=True))
         else:
             shutil.copyfile(source, target)
     refine_recommendations_for_plan_scope(out_dir, issue_text)
@@ -929,15 +937,12 @@ def usable_synthesized_handoff(value: str) -> str:
     return cleaned
 
 
+def synthesized_handoff_or_fallback(value: str) -> str:
+    return usable_synthesized_handoff(value) or FALLBACK_SYNTHESIZED_HANDOFF
+
+
 def planner_handoff_section(value: str) -> str:
-    handoff = usable_synthesized_handoff(value)
-    if handoff:
-        return handoff
-    return (
-        "Area-reader synthesis unavailable: synthesis output was empty, too short, "
-        "or contained model reasoning. Use routed areas, detected facts, relevant files, "
-        "recommended commands, and the coder plan below as the planning scope."
-    )
+    return synthesized_handoff_or_fallback(value)
 
 def build_area_reader_planner_prompt(
     *,

@@ -100,8 +100,11 @@ class RunRealIssueTests(unittest.TestCase):
             current = root / "current"
             area_out.mkdir()
             (area_out / "routing.json").write_text('{"areas":["docs"]}', encoding="utf-8")
-            (area_out / "synthesis-brief.md").write_text("\x1b[?25lFinal\b handoff\x07", encoding="utf-8")
-            (area_out / "coder-plan.md").write_text("Plan\x1b[0m\x00 text", encoding="utf-8")
+            (area_out / "synthesis-brief.md").write_text(
+                "\x1b[?25lArea-reader selected documentation scope with repositor\nrepository facts.\x07",
+                encoding="utf-8",
+            )
+            (area_out / "coder-plan.md").write_text("Use interfa\ninterfaces only\x1b[0m\x00", encoding="utf-8")
             (area_out / "recommended-command-groups.json").write_text(
                 '{"recommended_command_groups":["markdown-smoke"]}',
                 encoding="utf-8",
@@ -109,8 +112,31 @@ class RunRealIssueTests(unittest.TestCase):
 
             run_real_issue.write_operational_outputs("Issue", area_out, current, keep_debug=True)
 
-            self.assertEqual((current / "synthesized-handoff.md").read_text(encoding="utf-8"), "Final handoff\n")
-            self.assertEqual((current / "coder-plan.md").read_text(encoding="utf-8"), "Plan text\n")
+            self.assertEqual(
+                (current / "synthesized-handoff.md").read_text(encoding="utf-8"),
+                "Area-reader selected documentation scope with repository facts.\n",
+            )
+            self.assertEqual((current / "coder-plan.md").read_text(encoding="utf-8"), "Use interfaces only\n")
+
+    def test_invalid_synthesized_handoff_artifact_uses_fallback(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            area_out = root / "area"
+            current = root / "current"
+            area_out.mkdir()
+            (area_out / "routing.json").write_text('{"areas":["docs"]}', encoding="utf-8")
+            (area_out / "synthesis-brief.md").write_text("Thinking... The", encoding="utf-8")
+            (area_out / "coder-plan.md").write_text("Update docs/architecture.md only.", encoding="utf-8")
+            (area_out / "recommended-command-groups.json").write_text(
+                '{"recommended_command_groups":["markdown-smoke"]}',
+                encoding="utf-8",
+            )
+
+            run_real_issue.write_operational_outputs("Issue", area_out, current, keep_debug=True)
+
+            handoff = (current / "synthesized-handoff.md").read_text(encoding="utf-8")
+            self.assertIn("Area-reader synthesis unavailable", handoff)
+            self.assertNotIn("Thinking... The", handoff)
 
     def test_invalid_synthesized_handoff_is_not_fed_to_planner(self):
         prompt = run_real_issue.build_area_reader_planner_prompt(
