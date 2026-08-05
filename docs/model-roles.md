@@ -171,3 +171,74 @@ python -m automation.run_real_issue \
 On PowerShell, replace each trailing `\` with a backtick, or place the command on one line.
 
 To replace either model, copy the profile and change the relevant `model` fields. The command provider derives the cross-platform `ollama run <model>` command automatically, so no machine-specific executable path is needed.
+
+## Role-specific prompt policies
+
+AutoDev applies a concise, role-specific adaptation of Ponytail directly at its provider boundary. It does not require the Ponytail Codex plugin, hooks, MCP server, or a network fetch during a run.
+
+Default mapping:
+
+```text
+reader       -> off
+synthesizer  -> lite
+planner      -> lite
+implementer  -> full
+fixer        -> full
+verifier     -> review
+```
+
+The reader remains `off`, so factual repository inspection receives no YAGNI, deletion, reuse, or smallest-diff pressure. `lite` favors existing behavior and the smallest complete approach while preserving requirements and uncertainty. `full` adds comprehension-first reuse and root-cause guidance with explicit safety carve-outs. `review` asks the verifier to identify unnecessary scope or abstractions and missing requirements or safeguards without rewriting the solution.
+
+Configure policies in the same provider file with the top-level `prompt_policy` object:
+
+```json
+{
+  "version": 2,
+  "roles": {
+    "reader": { "provider": "command", "model": "reader-model" },
+    "synthesizer": { "provider": "command", "model": "synth-model" },
+    "planner": { "provider": "command", "model": "planner-model" },
+    "implementer": { "provider": "command", "model": "implementer-model" },
+    "fixer": { "provider": "command", "model": "fixer-model" },
+    "verifier": { "provider": "command", "model": "verifier-model" }
+  },
+  "prompt_policy": {
+    "enabled": true,
+    "roles": {
+      "planner": "off",
+      "implementer": "lite"
+    }
+  }
+}
+```
+
+Omitted role entries keep the stable defaults. Disable all policy injection with:
+
+```json
+{
+  "prompt_policy": {
+    "enabled": false
+  }
+}
+```
+
+Supported modes are `off`, `lite`, `full`, and `review`. AutoDev inserts the policy before issue and repository evidence. Exact output contracts remain last, including `BEGIN_UNIFIED_DIFF`, `END_UNIFIED_DIFF`, `NO_CHANGES_REQUIRED`, and future verifier JSON schemas.
+
+Static metadata records the resolved mapping and source version beneath `prompt_policy` in `provider-metadata.json` and area-reader summaries. Every model-call record includes `prompt_policy_mode`, `prompt_policy_version`, source version, and source commit.
+
+### Source and attribution
+
+The adaptation is pinned to Ponytail `v4.8.4`, commit `bc9ee949d5f439e8b9f3bb92c6d6d3d1e6ebd324`, specifically its comprehension-first, reuse-before-writing, root-cause, and safety-carve-out principles:
+
+- <https://github.com/DietrichGebert/ponytail/releases/tag/v4.8.4>
+- <https://github.com/DietrichGebert/ponytail/blob/bc9ee949d5f439e8b9f3bb92c6d6d3d1e6ebd324/.agents/rules/ponytail.md>
+
+The upstream MIT license is retained at `third_party/ponytail/LICENSE`.
+
+This is an AutoDev-native adaptation rather than a verbatim runtime copy. Differences from the Ponytail plugin are intentional:
+
+- the policy is selected by AutoDev model role;
+- reader minimization guidance is disabled;
+- verifier guidance is review-only;
+- there is no `ultra` mode;
+- AutoDev's explicit issue requirements, safety rules, and machine-readable output contracts always take precedence.
