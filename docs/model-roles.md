@@ -82,3 +82,92 @@ The shared area runner also accepts `--provider-config`. Its legacy `--synthesiz
 ## Metadata
 
 `provider-metadata.json` records the safe static configuration for every role. `model-invocations.json` records each call's role, provider, model, timeout, attempt, start/end timestamps, elapsed time, and success or failure. Secret values and full environment variables are not written.
+
+## Opt-in Ollama Cloud profile
+
+`examples/providers/ollama-cloud-nemotron-minimax.json` maps the roles as follows:
+
+```text
+reader       -> nemotron-3-super:cloud
+synthesizer  -> nemotron-3-super:cloud
+planner      -> nemotron-3-super:cloud
+implementer  -> minimax-m3:cloud
+fixer        -> minimax-m3:cloud
+verifier     -> nemotron-3-super:cloud
+```
+
+This profile is opt-in. Ollama Cloud availability and usage limits depend on the signed-in account and plan. AutoDev does not guarantee free access to either model and does not silently substitute another model.
+
+Ollama `0.12.0` is the minimum supported version because that release introduced cloud models. Current Ollama documentation requires signing in and recommends pulling a cloud model before running it:
+
+- <https://github.com/ollama/ollama/releases/tag/v0.12.0>
+- <https://docs.ollama.com/cloud>
+- <https://docs.ollama.com/api/authentication>
+
+### Install or update Ollama
+
+On Windows, Ollama downloads updates automatically. Use the taskbar application's **Restart to update** action, or install the current `OllamaSetup.exe` from the official download page.
+
+On Linux, install or update with:
+
+```bash
+curl -fsSL https://ollama.com/install.sh | sh
+```
+
+Confirm the installed version and sign in:
+
+```text
+ollama --version
+ollama signin
+```
+
+Ensure the local Ollama service is running. Windows normally starts it in the background. On Linux, use the installed service or run `ollama serve`.
+
+### Run the preflight
+
+The preflight checks the executable, minimum version, local API, sign-in/access status, and each unique cloud model. It uses `ollama pull` and does not select an issue, change labels, create a branch, modify a target repository, or contact GitHub.
+
+Linux:
+
+```bash
+python -m automation.ollama_cloud_preflight \
+  --profile examples/providers/ollama-cloud-nemotron-minimax.json \
+  --out .autodev-run/ollama-cloud-preflight.json
+```
+
+Windows PowerShell:
+
+```powershell
+python -m automation.ollama_cloud_preflight `
+  --profile examples/providers/ollama-cloud-nemotron-minimax.json `
+  --out .autodev-run/ollama-cloud-preflight.json
+```
+
+The JSON result records the selected profile path, Ollama version, role/model mapping, local-service result, and per-model access result. Authentication tokens and environment-variable values are not recorded.
+
+Failure messages distinguish:
+
+```text
+missing Ollama
+outdated Ollama
+unreachable local service
+sign-in required
+plan upgrade required
+generic model access failure
+```
+
+### Use the profile
+
+```text
+python -m automation.run_real_issue \
+  --repo /path/to/repo \
+  --github-repo OWNER/REPO \
+  --issue 33 \
+  --mode plan-only \
+  --provider-config examples/providers/ollama-cloud-nemotron-minimax.json \
+  --out /tmp/autodev-run
+```
+
+On PowerShell, replace each trailing `\` with a backtick, or place the command on one line.
+
+To replace either model, copy the profile and change the relevant `model` fields. The command provider derives the cross-platform `ollama run <model>` command automatically, so no machine-specific executable path is needed.
