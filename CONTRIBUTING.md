@@ -310,6 +310,76 @@ For .NET/MAUI repos:
 - MAUI verification should target MAUI `.csproj` files directly
 - a non-GUI `.slnf` may be preferred for non-MAUI .NET verification
 
+### AutoDev CI equivalents
+
+Run these commands from the AutoDev repository root.
+
+Python syntax, unit tests, and the explicit no-network mocked runner smoke path:
+
+```text
+python -m compileall automation area_reader_v2 benchmarks tests
+python -m unittest discover -s tests -v
+python -m unittest -v tests.test_run_real_issue.RunRealIssueTests.test_plan_only_uses_reader_provider_for_planning_not_coder_provider tests.test_run_real_issue.RunRealIssueTests.test_dry_run_implementation_calls_coder_and_saves_patch
+```
+
+Bash syntax on Linux:
+
+```bash
+found=0
+while IFS= read -r -d '' script; do
+  found=1
+  echo "Checking $script"
+  bash -n "$script"
+done < <(git ls-files -z -- '*.sh')
+
+if [[ "$found" -eq 0 ]]; then
+  echo "No tracked Bash scripts found." >&2
+  exit 1
+fi
+```
+
+PowerShell syntax on Windows:
+
+```powershell
+$files = @(git ls-files -- '*.ps1')
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+if ($files.Count -eq 0) { throw 'No tracked PowerShell scripts found.' }
+
+$failed = $false
+foreach ($file in $files) {
+    $tokens = $null
+    $errors = $null
+    [System.Management.Automation.Language.Parser]::ParseFile(
+        (Resolve-Path -LiteralPath $file).Path,
+        [ref]$tokens,
+        [ref]$errors
+    ) | Out-Null
+
+    foreach ($error in $errors) {
+        Write-Host "ERROR ${file}:$($error.Extent.StartLineNumber):$($error.Extent.StartColumnNumber): $($error.Message)"
+        $failed = $true
+    }
+}
+
+if ($failed) { exit 1 }
+```
+
+Repository hygiene on Linux:
+
+```bash
+mapfile -d '' forbidden < <(
+  git ls-files -z |
+    grep -zE '(^|/)(\.pytest_cache|__pycache__|\.autodev-run|\.codex-run|\.benchmark-results)(/|$)|\.py[co]$' || true
+)
+
+if ((${#forbidden[@]} > 0)); then
+  printf 'Forbidden tracked artifact: %s\n' "${forbidden[@]}" >&2
+  exit 1
+fi
+```
+
+The two named `RunRealIssueTests` use `MockProvider`; they exercise plan-only reader routing and dry-run patch generation without contacting Ollama, GitHub, or a cloud model.
+
 ---
 
 ## Prompt templates

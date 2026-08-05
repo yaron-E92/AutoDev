@@ -1,0 +1,134 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: Python ${{ matrix.python-version }} / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+        python-version:
+          - "3.11"
+          - "3.14"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Compile Python sources
+        run: python -m compileall automation area_reader_v2 benchmarks tests
+
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Run mocked issue-to-PR smoke tests
+        run: >-
+          python -m unittest -v
+          tests.test_run_real_issue.RunRealIssueTests.test_plan_only_uses_reader_provider_for_planning_not_coder_provider
+          tests.test_run_real_issue.RunRealIssueTests.test_dry_run_implementation_calls_coder_and_saves_patch
+
+  bash-syntax:
+    name: Bash syntax
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Validate tracked Bash scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          found=0
+          while IFS= read -r -d '' script; do
+            found=1
+            echo "Checking $script"
+            bash -n "$script"
+          done < <(git ls-files -z -- '*.sh')
+
+          if [[ "$found" -eq 0 ]]; then
+            echo "No tracked Bash scripts found." >&2
+            exit 1
+          fi
+
+  powershell-syntax:
+    name: PowerShell syntax
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Validate tracked PowerShell scripts
+        shell: pwsh
+        run: |
+          $files = @(git ls-files -- '*.ps1')
+          if ($LASTEXITCODE -ne 0) {
+              exit $LASTEXITCODE
+          }
+          if ($files.Count -eq 0) {
+              throw 'No tracked PowerShell scripts found.'
+          }
+
+          $failed = $false
+          foreach ($file in $files) {
+              Write-Host "Checking $file"
+              $tokens = $null
+              $errors = $null
+              $path = (Resolve-Path -LiteralPath $file).Path
+              [System.Management.Automation.Language.Parser]::ParseFile(
+                  $path,
+                  [ref]$tokens,
+                  [ref]$errors
+              ) | Out-Null
+
+              foreach ($error in $errors) {
+                  Write-Host "ERROR ${file}:$($error.Extent.StartLineNumber):$($error.Extent.StartColumnNumber): $($error.Message)"
+                  $failed = $true
+              }
+          }
+
+          if ($failed) {
+              exit 1
+          }
+
+  repository-hygiene:
+    name: Repository hygiene
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Reject tracked generated artifacts and caches
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -d '' forbidden < <(
+            git ls-files -z |
+              grep -zE '(^|/)(\.pytest_cache|__pycache__|\.autodev-run|\.codex-run|\.benchmark-results)(/|$)|\.py[co]$' || true
+          )
+
+          if ((${#forbidden[@]} > 0)); then
+            printf 'Forbidden tracked artifact: %s\n' "${forbidden[@]}" >&2
+            exit 1
+          fi
