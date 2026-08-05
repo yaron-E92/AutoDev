@@ -71,16 +71,33 @@ Initialize-AuthFromState -State $state
 $issueNumber = [int]$state.IssueNumber
 $repoFullName = [string]$state.RepoFullName
 
+if ($issueNumber -eq 0) {
+    switch ($Status) {
+        "ReadyForReview" {
+            $state.Status = "ReadyForReview"
+            Write-State -State $state
+            Write-Host "MARKED_READY_FOR_REVIEW"
+            exit 0
+        }
+        "Blocked" {
+            $state.Status = "Blocked"
+            Write-State -State $state
+            Write-Host "MARKED_BLOCKED"
+            exit 0
+        }
+    }
+}
+
 switch ($Status) {
     "ReadyForReview" {
         gh issue edit $issueNumber `
             --repo $repoFullName `
-            --remove-label "codex:in-progress" `
-            --remove-label "codex:blocked" `
-            --add-label "codex:ready-for-review"
+            --remove-label "autodev:running" `
+            --remove-label "autodev:blocked" `
+            --add-label "autodev:done"
 
         $body = @"
-Codex automation completed.
+AutoDev automation completed.
 
 PR:
 $($state.PrUrl)
@@ -110,17 +127,17 @@ $Message
     "Blocked" {
         gh issue edit $issueNumber `
             --repo $repoFullName `
-            --remove-label "codex:in-progress" `
-            --add-label "codex:blocked"
+            --remove-label "autodev:running" `
+            --add-label "autodev:blocked"
 
         if ([string]::IsNullOrWhiteSpace($Message)) {
-            $Message = "Codex automation failed and needs manual review."
+            $Message = "AutoDev automation failed and needs manual review."
         }
 
         gh issue comment $issueNumber `
             --repo $repoFullName `
             --body @"
-Codex automation blocked.
+AutoDev automation blocked.
 
 Reason:
 

@@ -13,12 +13,73 @@ Do not duplicate common prompt, profile, or skill files under this directory.
 
 The Linux automation files checked into this repository are:
 
-- `linux/run-once.sh` for a timer-friendly one-shot automation run.
-- `linux/scripts/*.sh` for reusable Linux workflow scripts.
+- `linux/run-once.sh` for a timer-friendly single-command automation run using the configured agent command.
+- `linux/scripts/issue-to-pr-cycle.sh` for the script-based issue-to-PR workflow wrapper.
+- `linux/scripts/*.sh` for reusable Linux workflow primitives.
 - `linux/systemd/` for optional systemd unit templates.
 - `linux/config.example.env` as a sanitized project environment template.
 
-## Automation Prompt
+
+## Single-command equivalent
+
+The equivalent of pasting the legacy prompt into Codex Desktop connected to a Linux VM is now one command. From a checkout of this repository, run:
+
+```bash
+linux/scripts/issue-to-pr-cycle.sh \
+  --env ~/automation/state/PROJECT.env \
+  --mode Run \
+  --owner OWNER \
+  --repo REPO \
+  --base main \
+  --remote origin
+```
+
+For timer-style installed automation, `linux/run-once.sh` resolves `issue-to-pr-cycle.sh` relative to its own location, so it works both from this repository layout (`linux/scripts`) and from an installed `$AUTOMATION_ROOT/scripts` layout.
+
+## Script-based workflow
+
+Use `issue-to-pr-cycle.sh` for the trusted state transitions from the Codex Desktop workflow. The default `Run` mode performs deterministic prepare/finalize/mark steps and invokes the configured agent command on the rendered planner, implementer, repair, and verifier prompts at the points where agent work is needed.
+
+```bash
+~/automation/scripts/issue-to-pr-cycle.sh \
+  --env ~/automation/state/PROJECT.env \
+  --mode Run \
+  --owner OWNER \
+  --repo REPO \
+  --base main \
+  --remote origin
+```
+
+For a planner-only run with a reader-style command agent, use `--mode Plan` and optionally `--planner-agent-command`. Use `--agent-command` for implementation, repair, and verifier prompts. Both commands can use `{prompt_file}` or `{prompt}` placeholders for non-Codex runners. For provider mode, pass `--planner-provider command` / `--agent-provider command` with command strings when the tool returns stdout artifacts, or pass model names for Ollama. `--planner-model` and `--agent-model` imply the `ollama` provider and run `ollama run <model>` with the prompt on stdin. Provider-mode implementation and repair responses must return `NO_CHANGES_REQUIRED` or a marked unified diff that AutoDev applies with `git apply`.
+
+```bash
+~/automation/scripts/issue-to-pr-cycle.sh \
+  --env ~/automation/state/PROJECT.env \
+  --mode Run \
+  --owner OWNER \
+  --repo REPO \
+  --base main \
+  --remote origin \
+  --planner-model qwen35-9b-32k \
+  --agent-model devstral-small2-12k
+```
+
+For debugging or resuming a partially completed cycle, run an individual transition mode:
+
+```bash
+~/automation/scripts/issue-to-pr-cycle.sh --env ~/automation/state/PROJECT.env --mode Plan --planner-agent-command "reader-agent {prompt_file}"
+~/automation/scripts/issue-to-pr-cycle.sh --env ~/automation/state/PROJECT.env --mode RenderImplementerPrompt
+~/automation/scripts/issue-to-pr-cycle.sh --env ~/automation/state/PROJECT.env --mode LocalCheck
+~/automation/scripts/issue-to-pr-cycle.sh --env ~/automation/state/PROJECT.env --mode PrAndCi
+~/automation/scripts/issue-to-pr-cycle.sh --env ~/automation/state/PROJECT.env --mode RenderVerificationRepair
+~/automation/scripts/issue-to-pr-cycle.sh --env ~/automation/state/PROJECT.env --mode ReadyForReview
+```
+
+For input selection, omit `--issue` to process the next open issue labeled `autodev:ready`, pass `--issue NUMBER` for a specific GitHub issue, or pass `--description TEXT` / `--description-file FILE` for a local task description. For debugging, each deterministic transition is still available as an individual mode (`Plan`, `Prepare`, `RenderImplementerPrompt`, `LocalCheck`, `PrAndCi`, `RenderVerificationRepair`, `ReadyForReview`, and `Blocked`).
+
+`linux/run-once.sh` now runs the single-command cycle and logs the deterministic and agent-command phases.
+
+## Legacy automation prompt
 
 Use this as the Linux automation task, adjusting repo names and paths.
 

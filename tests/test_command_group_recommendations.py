@@ -161,6 +161,24 @@ class CommandGroupRecommendationTests(unittest.TestCase):
         self.assertNotIn("maui-android-doctor", result["recommended_command_groups"])
         self.assertNotIn("maui-android-build", result["recommended_command_groups"])
 
+    def test_documentation_only_issue_prefers_markdown_smoke_without_platform_builds(self):
+        result = recommend_command_groups(
+            issue_text=(
+                "Documentation-only architecture issue. Explain how backend decisions "
+                "are presented in web and MAUI/mobile surfaces, but change only docs."
+            ),
+            changed_paths=["docs/architecture.md"],
+            available_command_groups=ALL_COMMAND_GROUPS,
+            android_sdk_available=True,
+        )
+
+        self.assertEqual(result["recommended_command_groups"], ["env", "markdown-smoke"])
+        self.assertNotIn("dotnet-solution", result["recommended_command_groups"])
+        self.assertNotIn("node-root", result["recommended_command_groups"])
+        self.assertNotIn("web-app", result["recommended_command_groups"])
+        self.assertNotIn("maui-android-doctor", result["recommended_command_groups"])
+        self.assertNotIn("maui-android-build", result["recommended_command_groups"])
+
     def test_maui_text_build_scope_recommends_android_groups_when_sdk_available(self):
         result = recommend_command_groups(
             issue_text="Build the MAUI Android app locally.",
@@ -319,6 +337,29 @@ class CommandGroupRecommendationTests(unittest.TestCase):
         self.assertFalse(bench.area_for_file("apps/api/Controllers/FooController.cs", "api-client"))
         self.assertTrue(bench.area_for_file("packages/api-client/src/generated.ts", "api-client"))
         self.assertTrue(bench.area_for_file("apps/api/openapi.json", "api-client"))
+
+    def test_benchmark_model_only_command_provider_uses_ollama_run(self):
+        bench = load_area_reader_bench()
+        args = bench.parse_args(
+            [
+                "--repo",
+                ".",
+                "--issue",
+                "Issue",
+                "--out",
+                "out",
+                "--reader",
+                "reader-model",
+                "--coder",
+                "coder-model",
+            ]
+        )
+
+        reader = bench.model_config_from_args(args, "reader")
+        coder = bench.model_config_from_args(args, "coder")
+
+        self.assertEqual(reader.command, "ollama run reader-model")
+        self.assertEqual(coder.command, "ollama run coder-model")
 
 if __name__ == "__main__":
     unittest.main()

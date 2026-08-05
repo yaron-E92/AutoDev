@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-source "${AUTOMATION_ROOT:-~/automation}/scripts/lib.sh"
+source "${AUTOMATION_ROOT:-linux}/scripts/lib.sh"
 OWNER=""; REPO=""; INCLUDE=false
 while [[ $# -gt 0 ]]; do case "$1" in --owner) OWNER="$2"; shift 2;; --repo) REPO="$2"; shift 2;; --include-area-labels) INCLUDE=true; shift;; *) echo "Unknown arg: $1" >&2; exit 2;; esac; done
 FULL="$(repo_full_name "$OWNER" "$REPO")"; init_gh_env; require_cmd gh

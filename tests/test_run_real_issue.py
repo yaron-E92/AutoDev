@@ -1,4 +1,6 @@
 import io
+import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -31,6 +33,128 @@ class RunRealIssueTests(unittest.TestCase):
         self.assertIn("Labels: autodev:ready, area:python", issue_text)
         self.assertIn("Body text", issue_text)
 
+    def test_area_reader_planner_prompt_uses_synthesis_and_labels_as_hints(self):
+        prompt = run_real_issue.build_area_reader_planner_prompt(
+            issue_text="Fix expiring entries",
+            local_check="dotnet test",
+            labels=["area:maui", "area:api"],
+            profile_context_hints="MAUI profile text\nAPI profile text",
+            routed_areas={"areas": ["maui"]},
+            synthesized_handoff="Area-reader narrowed this to the MAUI list view.",
+            coder_plan="Inspect ExpiringEntriesPage.xaml and its view model.",
+            relevant_files=["src/App/ExpiringEntriesPage.xaml", "src/App/ExpiringEntriesViewModel.cs"],
+            recommended_command_groups={"recommended_command_groups": ["dotnet-test"]},
+            workspace_snapshot={"src/App/ExpiringEntriesPage.xaml": "abc", "src/App/ExpiringEntriesViewModel.cs": "def"},
+        )
+
+        self.assertIn("Area-reader synthesized handoff", prompt)
+        self.assertIn("Area-reader narrowed this to the MAUI list view.", prompt)
+        self.assertIn("Routing hints only", prompt)
+        self.assertIn("GitHub labels: area:maui, area:api", prompt)
+        self.assertIn("Treat labels and profile text as routing hints only", prompt)
+        self.assertIn("src/App/ExpiringEntriesPage.xaml", prompt)
+        self.assertIn("Workspace snapshot grounding", prompt)
+
+    def test_area_reader_relevant_files_are_grounded_in_workspace_snapshot(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            current = Path(temp_dir)
+            (current / "area-reader-summary.json").write_text(
+                json.dumps(
+                    {
+                        "area_metadata": {
+                            "maui": {
+                                "included_files": [
+                                    "src/App/ExpiringEntriesPage.xaml",
+                                    "src/App/Missing.xaml",
+                                ]
+                            }
+                        },
+                        "detected_facts": {"maui_projects": ["src/App/App.csproj"]},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (current / "detected-facts.json").write_text("{}", encoding="utf-8")
+            snapshot = {
+                "src/App/ExpiringEntriesPage.xaml": "abc",
+                "src/App/App.csproj": "def",
+            }
+
+            files = run_real_issue.collect_area_reader_relevant_files(current, snapshot)
+
+        self.assertEqual(files, ["src/App/App.csproj", "src/App/ExpiringEntriesPage.xaml"])
+
+    def test_linux_prepare_uses_area_reader_prompt_helper(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        script = (repo_root / "linux" / "scripts" / "prepare-next-ready-issue.sh").read_text(encoding="utf-8")
+
+        self.assertIn("prepare_planner_prompt.py", script)
+        self.assertIn("--labels-json", script)
+        self.assertIn("workspace-snapshot.json", script)
+        self.assertNotIn('render_file "$PROMPT_DIR/planner.md"', script)
+
+    def test_operational_outputs_sanitize_model_artifacts(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            area_out = root / "area"
+            current = root / "current"
+            area_out.mkdir()
+            (area_out / "routing.json").write_text('{"areas":["docs"]}', encoding="utf-8")
+            (area_out / "synthesis-brief.md").write_text(
+                "\x1b[?25lArea-reader selected documentation scope with repositor\nrepository facts.\x07",
+                encoding="utf-8",
+            )
+            (area_out / "coder-plan.md").write_text("Use interfa\ninterfaces only\x1b[0m\x00", encoding="utf-8")
+            (area_out / "recommended-command-groups.json").write_text(
+                '{"recommended_command_groups":["markdown-smoke"]}',
+                encoding="utf-8",
+            )
+
+            run_real_issue.write_operational_outputs("Issue", area_out, current, keep_debug=True)
+
+            self.assertEqual(
+                (current / "synthesized-handoff.md").read_text(encoding="utf-8"),
+                "Area-reader selected documentation scope with repository facts.\n",
+            )
+            self.assertEqual((current / "coder-plan.md").read_text(encoding="utf-8"), "Use interfaces only\n")
+
+    def test_invalid_synthesized_handoff_artifact_uses_fallback(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            area_out = root / "area"
+            current = root / "current"
+            area_out.mkdir()
+            (area_out / "routing.json").write_text('{"areas":["docs"]}', encoding="utf-8")
+            (area_out / "synthesis-brief.md").write_text("Thinking... The", encoding="utf-8")
+            (area_out / "coder-plan.md").write_text("Update docs/architecture.md only.", encoding="utf-8")
+            (area_out / "recommended-command-groups.json").write_text(
+                '{"recommended_command_groups":["markdown-smoke"]}',
+                encoding="utf-8",
+            )
+
+            run_real_issue.write_operational_outputs("Issue", area_out, current, keep_debug=True)
+
+            handoff = (current / "synthesized-handoff.md").read_text(encoding="utf-8")
+            self.assertIn("Area-reader synthesis unavailable", handoff)
+            self.assertNotIn("Thinking... The", handoff)
+
+    def test_invalid_synthesized_handoff_is_not_fed_to_planner(self):
+        prompt = run_real_issue.build_area_reader_planner_prompt(
+            issue_text="Document architecture boundary",
+            local_check="bash verify.sh",
+            labels=["area:maui", "area:docs"],
+            profile_context_hints="MAUI profile text",
+            routed_areas={"areas": ["docs"]},
+            synthesized_handoff="Thinking... The",
+            coder_plan="Update docs/architecture.md only.",
+            relevant_files=["docs/architecture.md"],
+            recommended_command_groups={"recommended_command_groups": ["markdown-smoke"]},
+            workspace_snapshot={"docs/architecture.md": "abc"},
+        )
+
+        self.assertIn("Area-reader synthesis unavailable", prompt)
+        self.assertNotIn("Thinking... The", prompt)
+        self.assertIn("Update docs/architecture.md only.", prompt)
     def test_build_run_summary_uses_routing_and_recommendations(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             out_dir = Path(temp_dir)
@@ -207,7 +331,21 @@ END_UNIFIED_DIFF"""
                 encoding="utf-8",
             )
             (out_dir / "verification-command-groups.json").write_text(
-                '[{"name":"fail","manual":false,"commands":[{"argv":["python3","-c","import sys; sys.exit(2)"],"cwd":".","optional":false}]}]',
+                json.dumps(
+                    [
+                        {
+                            "name": "fail",
+                            "manual": False,
+                            "commands": [
+                                {
+                                    "argv": [sys.executable, "-c", "import sys; sys.exit(2)"],
+                                    "cwd": ".",
+                                    "optional": False,
+                                }
+                            ],
+                        }
+                    ]
+                ),
                 encoding="utf-8",
             )
 
@@ -350,6 +488,73 @@ END_UNIFIED_DIFF"""
         self.assertEqual(reader.command, "reader-cli --model reader-custom")
         self.assertEqual(coder.model, "coder-custom")
         self.assertEqual(coder.command, "coder-cli --model coder-custom")
+
+    def test_linux_wrapper_delegates_to_script_workflow(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        root_wrapper = (repo_root / "scripts" / "run-real-issue.sh").read_text(encoding="utf-8")
+        linux_cycle = (repo_root / "linux" / "scripts" / "issue-to-pr-cycle.sh").read_text(encoding="utf-8")
+
+        self.assertIn("linux/scripts/issue-to-pr-cycle.sh", root_wrapper)
+        self.assertIn("Run one trusted issue-to-PR workflow without a hard-coded agent backend", linux_cycle)
+        self.assertIn("issue-to-pr-cycle.sh --env ENV_FILE [--mode Run]", linux_cycle)
+        self.assertIn("Plan                       Prepare one issue and write plan.md with the planner agent.", linux_cycle)
+        self.assertIn("--planner-agent-command CMD", linux_cycle)
+        self.assertIn("--planner-provider NAME", linux_cycle)
+        self.assertIn("--planner-model MODEL", linux_cycle)
+        self.assertIn("--agent-provider NAME", linux_cycle)
+        self.assertIn("--agent-model MODEL", linux_cycle)
+
+    def test_windows_planner_helper_documents_planner_agent_command(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        script = repo_root / "windows" / "scripts" / "codex-plan-current-issue.ps1"
+
+        text = script.read_text(encoding="utf-8")
+
+        self.assertIn("PlannerAgentCommand", text)
+        self.assertIn("{prompt_file}", text)
+        self.assertIn("plan.md", text)
+        self.assertIn("pwsh -NoProfile -Command", text)
+        self.assertNotIn("bash -lc", text)
+
+    def test_script_workflows_use_autodev_labels_and_description_input(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        linux_prepare = (repo_root / "linux" / "scripts" / "prepare-next-ready-issue.sh").read_text(encoding="utf-8")
+        linux_cycle = (repo_root / "linux" / "scripts" / "issue-to-pr-cycle.sh").read_text(encoding="utf-8")
+        windows_prepare = (repo_root / "windows" / "scripts" / "codex-prepare-next-ready-issue.ps1").read_text(encoding="utf-8")
+        windows_cycle = (repo_root / "windows" / "scripts" / "issue-to-pr-cycle.ps1").read_text(encoding="utf-8")
+
+        self.assertIn("autodev:ready", linux_prepare)
+        self.assertIn("autodev:running", linux_prepare)
+        self.assertIn("--description", linux_cycle)
+        self.assertIn("ISSUE_DESCRIPTION", linux_cycle)
+        self.assertNotIn("codex:ready", linux_prepare)
+        self.assertNotIn("codex:in-progress", linux_prepare)
+
+        self.assertIn("autodev:ready", windows_prepare)
+        self.assertIn("autodev:running", windows_prepare)
+        self.assertIn("[string]$Description", windows_prepare)
+        self.assertIn("PlannerAgentCommand", windows_cycle)
+        self.assertIn("AgentCommand", windows_cycle)
+
+    def test_windows_root_wrapper_delegates_to_native_workflow(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        script = repo_root / "scripts" / "run-real-issue.ps1"
+
+        text = script.read_text(encoding="utf-8")
+
+        self.assertIn("windows/scripts/issue-to-pr-cycle.ps1", text)
+        self.assertNotIn("linux/scripts/issue-to-pr-cycle.sh", text)
+        self.assertNotIn("Get-Command bash", text)
+
+    def test_linux_run_once_resolves_workflow_script_relative_to_itself(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        script = repo_root / "linux" / "run-once.sh"
+
+        text = script.read_text(encoding="utf-8")
+
+        self.assertIn("RUN_ONCE_DIR=", text)
+        self.assertIn("$RUN_ONCE_DIR/scripts/issue-to-pr-cycle.sh", text)
+        self.assertIn("$RUN_ONCE_DIR/linux/scripts/issue-to-pr-cycle.sh", text)
 
 
 if __name__ == "__main__":

@@ -4,7 +4,6 @@ import argparse
 import json
 import os
 import re
-import shlex
 import shutil
 import subprocess
 import sys
@@ -13,12 +12,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, TextIO
 
+from area_reader_v2 import runner as area_reader_runner
+from area_reader_v2.command_group_recommendations import documentation_only_command_groups, is_documentation_only_scope
+from automation.model_output_sanitizer import sanitize_model_output
 from automation.model_providers import (
     ModelConfig,
     ModelProvider,
     ProviderError,
     create_provider,
     load_provider_config,
+    ollama_command_for_model,
     resolve_model_config,
 )
 
@@ -31,8 +34,12 @@ DEFAULT_FAILED_LABEL = "autodev:failed"
 DEFAULT_DONE_LABEL = "autodev:done"
 DEFAULT_BLOCKED_LABEL = "autodev:blocked"
 RUNNER_ROOT = Path(__file__).resolve().parents[1]
-AREA_READER_SCRIPT = RUNNER_ROOT / "benchmarks" / "local-llm" / "area_reader_bench.py"
 PROMPT_TEMPLATE_DIR = RUNNER_ROOT / "promptTemplates"
+FALLBACK_SYNTHESIZED_HANDOFF = (
+    "Area-reader synthesis unavailable: synthesis output was empty, too short, "
+    "or contained model reasoning. Use routed areas, detected facts, relevant files, "
+    "recommended commands, and the coder plan below as the planning scope."
+)
 PATCH_START = "BEGIN_UNIFIED_DIFF"
 PATCH_END = "END_UNIFIED_DIFF"
 NO_CHANGES_REQUIRED = "NO_CHANGES_REQUIRED"
@@ -284,8 +291,8 @@ def validate_inputs(args: argparse.Namespace, repo: Path) -> None:
         raise RunnerError(f"--repo is not a directory: {repo}", 2)
     if "/" not in args.github_repo or args.github_repo.count("/") != 1:
         raise RunnerError("--github-repo must use owner/name format", 2)
-    if not AREA_READER_SCRIPT.is_file():
-        raise RunnerError(f"Missing area-reader script: {AREA_READER_SCRIPT}", 2)
+    if not Path(area_reader_runner.__file__).is_file():
+        raise RunnerError(f"Missing area-reader v2 runner module: {area_reader_runner.__file__}", 2)
     if args.mode == "plan-only" and args.dry_run_implementation:
         raise RunnerError("--dry-run-implementation is only valid for implement or pr mode", 2)
 
@@ -315,7 +322,7 @@ def default_ollama_command_config(model: str) -> dict[str, object]:
     return {
         "provider": "command",
         "model": model,
-        "command": f"ollama run {shlex.quote(model)}",
+        "command": ollama_command_for_model(model),
         "timeout_seconds": 600,
     }
 
@@ -355,7 +362,7 @@ def add_default_ollama_command(
         return
     model = cli_values.get("model") or role_values.get("model") or defaults.get("model")
     if model:
-        cli_values["command"] = f"ollama run {shlex.quote(str(model))}"
+        cli_values["command"] = ollama_command_for_model(str(model))
 
 
 def require_tools(tools: list[str]) -> None:
@@ -574,9 +581,7 @@ def run_area_reader(
 ) -> None:
     if out_dir.exists():
         shutil.rmtree(out_dir)
-    command = [
-        sys.executable,
-        str(AREA_READER_SCRIPT),
+    argv = [
         "--repo",
         str(repo),
         "--reader-provider",
@@ -596,9 +601,12 @@ def run_area_reader(
         "--out",
         str(out_dir),
     ]
-    append_provider_command_args(command, "reader", reader_config)
-    append_provider_command_args(command, "coder", coder_config)
-    run_command(command, cwd=RUNNER_ROOT, stream=stream)
+    append_provider_command_args(argv, "reader", reader_config)
+    append_provider_command_args(argv, "coder", coder_config)
+    print("Running shared area-reader v2 planner", file=stream)
+    exit_code = area_reader_runner.main(argv)
+    if exit_code:
+        raise RunnerError(f"area-reader v2 planner failed with exit code {exit_code}", exit_code)
 
 
 def append_provider_command_args(command: list[str], role: str, config: ModelConfig) -> None:
@@ -617,16 +625,43 @@ def write_operational_outputs(issue_text: str, area_out: Path, out_dir: Path, ke
         "coder-plan.md": "coder-plan.md",
         "recommended-command-groups.json": "recommended-command-groups.json",
         "verification-command-groups.json": "verification-command-groups.json",
+        "detected-facts.json": "detected-facts.json",
+        "summary.json": "area-reader-summary.json",
     }
     write_text(out_dir / "issue.md", issue_text)
     for source_name, target_name in copies.items():
         source = area_out / source_name
-        if source.is_file():
-            shutil.copyfile(source, out_dir / target_name)
+        if not source.is_file():
+            continue
+        target = out_dir / target_name
+        if source.suffix in {".md", ".txt"}:
+            content = sanitize_model_output(read_optional_text(source))
+            if target_name == "synthesized-handoff.md":
+                content = synthesized_handoff_or_fallback(content)
+            write_text(target, sanitize_model_output(content, ensure_trailing_newline=True))
+        else:
+            shutil.copyfile(source, target)
+    refine_recommendations_for_plan_scope(out_dir, issue_text)
     write_text(out_dir / "run-summary.md", build_run_summary(out_dir))
     if not keep_debug:
         shutil.rmtree(area_out, ignore_errors=True)
 
+
+def refine_recommendations_for_plan_scope(out_dir: Path, issue_text: str) -> None:
+    recommendations = read_json(out_dir / "recommended-command-groups.json")
+    if not isinstance(recommendations, dict):
+        return
+    available = recommendations.get("available_command_groups")
+    if not isinstance(available, list):
+        available = recommendations.get("recommended_command_groups", [])
+    available_set = {str(group) for group in available}
+    coder_plan = read_optional_text(out_dir / "coder-plan.md")
+    relevant_files = collect_area_reader_relevant_files(out_dir, {})
+    scope_text = f"{issue_text}\n{coder_plan}"
+    if not is_documentation_only_scope(scope_text.casefold(), relevant_files):
+        return
+    recommendations["recommended_command_groups"] = documentation_only_command_groups(relevant_files, available_set)
+    write_text(out_dir / "recommended-command-groups.json", json.dumps(recommendations, indent=2, sort_keys=True) + "\n")
 
 def build_run_summary(out_dir: Path) -> str:
     routing = read_json(out_dir / "routed-areas.json")
@@ -832,6 +867,188 @@ def render_verification_summary(result: VerificationResult) -> str:
         ]
     )
 
+
+def collect_area_reader_relevant_files(out_dir: Path, workspace_snapshot: object) -> list[str]:
+    workspace_paths = set(workspace_snapshot.keys()) if isinstance(workspace_snapshot, dict) else set()
+    files: set[str] = set()
+    summary = read_json(out_dir / "area-reader-summary.json")
+    if not summary:
+        summary = read_json(out_dir / "summary.json")
+    if isinstance(summary, dict):
+        area_metadata = summary.get("area_metadata")
+        if isinstance(area_metadata, dict):
+            for metadata in area_metadata.values():
+                if not isinstance(metadata, dict):
+                    continue
+                for path in metadata.get("included_files", []):
+                    add_workspace_path(files, str(path), workspace_paths)
+        collect_workspace_paths(summary.get("detected_facts"), files, workspace_paths)
+    collect_workspace_paths(read_json(out_dir / "detected-facts.json"), files, workspace_paths)
+    return sorted(files)
+
+
+def collect_workspace_paths(value: object, files: set[str], workspace_paths: set[str]) -> None:
+    if isinstance(value, dict):
+        for item in value.values():
+            collect_workspace_paths(item, files, workspace_paths)
+    elif isinstance(value, list):
+        for item in value:
+            collect_workspace_paths(item, files, workspace_paths)
+    elif isinstance(value, str):
+        add_workspace_path(files, value, workspace_paths)
+
+
+def add_workspace_path(files: set[str], path: str, workspace_paths: set[str]) -> None:
+    normalized = path.replace("\\", "/").strip()
+    if not normalized or normalized.startswith("/"):
+        return
+    if workspace_paths and normalized not in workspace_paths:
+        return
+    if any(marker in normalized for marker in ("\n", "\r", "*")):
+        return
+    if "/" in normalized or "." in Path(normalized).name:
+        files.add(normalized)
+
+
+def workspace_snapshot_summary(workspace_snapshot: object, limit: int = 200) -> str:
+    if not isinstance(workspace_snapshot, dict):
+        return "{}"
+    paths = sorted(str(path) for path in workspace_snapshot.keys())
+    return json.dumps(
+        {
+            "path_count": len(paths),
+            "paths": paths[:limit],
+            "truncated": len(paths) > limit,
+        },
+        indent=2,
+        sort_keys=True,
+    )
+
+
+def usable_synthesized_handoff(value: str) -> str:
+    cleaned = sanitize_model_output(value)
+    if not cleaned:
+        return ""
+    lowered = cleaned.casefold()
+    if lowered.startswith("thinking") or lowered.startswith("scratchpad") or lowered.startswith("reasoning"):
+        return ""
+    if len(cleaned) < 40:
+        return ""
+    return cleaned
+
+
+def synthesized_handoff_or_fallback(value: str) -> str:
+    return usable_synthesized_handoff(value) or FALLBACK_SYNTHESIZED_HANDOFF
+
+
+def planner_handoff_section(value: str) -> str:
+    return synthesized_handoff_or_fallback(value)
+
+def build_area_reader_planner_prompt(
+    *,
+    issue_text: str,
+    local_check: str,
+    labels: list[str],
+    profile_context_hints: str,
+    routed_areas: object,
+    synthesized_handoff: str,
+    coder_plan: str,
+    relevant_files: list[str],
+    recommended_command_groups: object,
+    workspace_snapshot: object,
+) -> str:
+    return f"""Use the issue-to-pr-automation skill.
+
+You are the Planner for this repository.
+
+Operating mode: PLAN ONLY - NO CODE.
+
+Area-reader routed areas:
+{json.dumps(routed_areas, indent=2, sort_keys=True)}
+
+Area-reader synthesized handoff:
+{planner_handoff_section(synthesized_handoff)}
+
+Area-reader coder / implementation plan:
+{sanitize_model_output(coder_plan)}
+
+Detected relevant files from area-reader facts:
+{json.dumps(relevant_files, indent=2, sort_keys=True)}
+
+Recommended command groups:
+{json.dumps(recommended_command_groups, indent=2, sort_keys=True)}
+
+Workspace snapshot grounding:
+{workspace_snapshot_summary(workspace_snapshot)}
+
+Routing hints only:
+- GitHub labels: {', '.join(labels) if labels else '(none)'}
+- Profile context hints: {profile_context_hints.strip() or '(none)'}
+
+Automation context:
+- The configured local verification command is: {local_check}
+- Build/run/tests are handled by the automation script unless explicitly stated otherwise.
+- Do not modify files.
+
+Goal:
+Plan the implementation of the issue below as a fast, localized change with minimal risk.
+
+Constraints:
+- Treat labels and profile text as routing hints only. Use area-reader synthesis and repository facts as the final planning scope.
+- Ground every file or path in the workspace snapshot and area-reader facts. Do not invent paths.
+- Let area-reader synthesis narrow touched areas/files based on the issue text and repository facts.
+- Do NOT over-decompose.
+- Use at most 4 implementation steps.
+- Touch as few files as possible, preferably 1-3 files.
+- Prefer editing existing code over creating new abstractions.
+- Avoid task stubs, TODO-only work, and speculative architecture.
+- Do not change domain logic, persistence, models, migrations, public APIs, schemas, scoring, task state logic, or unrelated behavior unless the issue explicitly requires it.
+- If something is unclear, make a reasonable assumption and call it out briefly.
+- If the issue is too broad for a localized change, say so clearly and propose the smallest safe slice.
+
+Output format:
+1) Where to look
+   - Exact search terms or likely files/components to inspect
+   - Max 6 bullets
+2) Files / areas likely to touch
+   - Best guess list, using only existing paths supported by the workspace snapshot or area-reader facts
+3) Assumptions
+   - Max 5 bullets
+4) Plan
+   - Max 4 bullets
+   - Fastest sensible implementation path
+5) Risks / gotchas
+   - Max 5 bullets
+6) Recommended implementation approach
+   - Option A: fastest / lowest-risk
+   - Option B: slightly cleaner, only if Option A is blocked or too messy
+
+Rules:
+- No code.
+- No pseudo-code.
+- No refactoring wishlist.
+- Keep the plan implementer-ready.
+- Output only the final plan. Do not include thinking, hidden reasoning, scratchpad text, or model preamble.
+
+Issue:
+{issue_text}
+"""
+
+
+def build_planner_prompt_from_area_reader(current_dir: Path, issue_text: str, local_check: str, labels: list[str], profile_context_hints: str) -> str:
+    workspace_snapshot = read_json(current_dir / "workspace-snapshot.json")
+    return build_area_reader_planner_prompt(
+        issue_text=issue_text,
+        local_check=local_check,
+        labels=labels,
+        profile_context_hints=profile_context_hints,
+        routed_areas=read_json(current_dir / "routed-areas.json"),
+        synthesized_handoff=read_optional_text(current_dir / "synthesized-handoff.md"),
+        coder_plan=read_optional_text(current_dir / "coder-plan.md"),
+        relevant_files=collect_area_reader_relevant_files(current_dir, workspace_snapshot),
+        recommended_command_groups=read_json(current_dir / "recommended-command-groups.json"),
+        workspace_snapshot=workspace_snapshot,
+    )
 
 def build_implementation_prompt(
     *,

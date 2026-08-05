@@ -8,12 +8,18 @@ require_cmd curl; require_cmd jq; init_gh_env; STATE=".codex-run/current/state.j
 [[ -n "${GH_TOKEN:-}" ]] || { echo "Missing GH_TOKEN" >&2; exit 1; }
 github_api(){ local method="$1" path="$2" data="${3:-}" args; args=(--fail-with-body --silent --show-error --connect-timeout 5 --max-time 15 --retry 2 --retry-delay 2 --retry-max-time 45 --request "$method" --header "Authorization: Bearer $GH_TOKEN" --header "Accept: application/vnd.github+json" --header "X-GitHub-Api-Version: 2022-11-28"); [[ -n "$data" ]] && args+=(--header "Content-Type: application/json" --data "$data"); curl "${args[@]}" "https://api.github.com/$path"; }
 issue="$(jq -r '.IssueNumber' "$STATE")"; repo="$(jq -r '.RepoFullName' "$STATE")"; pr_url="$(jq -r '.PrUrl // ""' "$STATE")"
+if [[ "$issue" == "0" ]]; then
+  case "$STATUS" in
+    ReadyForReview) jq '.Status="ReadyForReview"' "$STATE" > "$STATE.tmp" && mv "$STATE.tmp" "$STATE"; echo "MARKED_READY_FOR_REVIEW"; exit 0 ;;
+    Blocked) jq '.Status="Blocked"' "$STATE" > "$STATE.tmp" && mv "$STATE.tmp" "$STATE"; echo "MARKED_BLOCKED"; exit 0 ;;
+  esac
+fi
 case "$STATUS" in
   ReadyForReview)
-    github_api DELETE "repos/$repo/issues/$issue/labels/codex%3Ain-progress" >/dev/null 2>&1 || true
-    github_api DELETE "repos/$repo/issues/$issue/labels/codex%3Ablocked" >/dev/null 2>&1 || true
-    github_api POST "repos/$repo/issues/$issue/labels" '{"labels":["codex:ready-for-review"]}' >/dev/null
-    body="Codex automation completed.
+    github_api DELETE "repos/$repo/issues/$issue/labels/autodev%3Arunning" >/dev/null 2>&1 || true
+    github_api DELETE "repos/$repo/issues/$issue/labels/autodev%3Ablocked" >/dev/null 2>&1 || true
+    github_api POST "repos/$repo/issues/$issue/labels" '{"labels":["autodev:done"]}' >/dev/null
+    body="AutoDev automation completed.
 
 PR:
 $pr_url
@@ -28,10 +34,10 @@ $MESSAGE}"
     echo "MARKED_READY_FOR_REVIEW"
     ;;
   Blocked)
-    github_api DELETE "repos/$repo/issues/$issue/labels/codex%3Ain-progress" >/dev/null 2>&1 || true
-    github_api POST "repos/$repo/issues/$issue/labels" '{"labels":["codex:blocked"]}' >/dev/null
-    [[ -n "$MESSAGE" ]] || MESSAGE="Codex automation failed and needs manual review."
-    body="Codex automation blocked.
+    github_api DELETE "repos/$repo/issues/$issue/labels/autodev%3Arunning" >/dev/null 2>&1 || true
+    github_api POST "repos/$repo/issues/$issue/labels" '{"labels":["autodev:blocked"]}' >/dev/null
+    [[ -n "$MESSAGE" ]] || MESSAGE="AutoDev automation failed and needs manual review."
+    body="AutoDev automation blocked.
 
 Reason:
 

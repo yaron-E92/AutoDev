@@ -4,7 +4,7 @@ AUTOMATION_ROOT="${AUTOMATION_ROOT:-~/automation}"
 PROMPT_DIR="${PROMPT_DIR:-$AUTOMATION_ROOT/prompts}"
 PROFILES_PATH="${PROFILES_PATH:-$AUTOMATION_ROOT/codex-profiles.json}"
 require_cmd(){ command -v "$1" >/dev/null 2>&1 || { echo "ERROR: missing command: $1" >&2; exit 127; }; }
-init_gh_env(){ mkdir -p "${GH_CONFIG_DIR:-$AUTOMATION_ROOT/state/gh-config}"; export GH_CONFIG_DIR="${GH_CONFIG_DIR:-$AUTOMATION_ROOT/state/gh-config}"; export GH_PROMPT_DISABLED=1; }
+init_gh_env(){ if [[ -z "${GH_CONFIG_DIR:-}" && -z "${GH_TOKEN:-}" && -n "${SUDO_USER:-}" && "${SUDO_USER:-}" != "root" ]]; then local sudo_home; sudo_home="$(getent passwd "$SUDO_USER" | cut -d: -f6 || true)"; [[ -d "$sudo_home/.config/gh" ]] && GH_CONFIG_DIR="$sudo_home/.config/gh"; fi; if [[ -n "${GH_CONFIG_DIR:-}" ]]; then mkdir -p "$GH_CONFIG_DIR"; export GH_CONFIG_DIR; fi; export GH_PROMPT_DISABLED=1; }
 repo_full_name(){ [[ -n "$1" && -n "$2" ]] || { echo "owner/repo required" >&2; exit 2; }; echo "$1/$2"; }
 safe_slug(){ echo "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9._-]+/-/g; s/^-+//; s/-+$//; s/-{2,}/-/g' | cut -c1-120; }
 is_ignored_path(){ local p="${1#./}"; case "/$p/" in */.git/*|*/.codex-run/*|*/bin/*|*/obj/*|*/node_modules/*|*/dist/*|*/build/*|*/coverage/*|*/.vs/*|*/.idea/*|*/.vscode/*|*/.venv/*|*/venv/*|*/__pycache__/*) return 0;; esac; [[ "$p" == "memory.md" || "$p" == */memory.md ]]; }

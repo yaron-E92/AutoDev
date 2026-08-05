@@ -1,6 +1,40 @@
-# AutoDev Real-Issue Runner
+# Script-based issue-to-PR workflow
 
-`automation/run_real_issue.py` is the AutoDev orchestrator for running real GitHub issues through planning, model-proposed patches, deterministic verification, optional fix attempts, and optional draft PR creation.
+The preferred real-issue workflow is the trusted script flow. It mirrors the old Codex Desktop prompt as a single command: scripts perform GitHub/state transitions, then invoke configurable planner and coder agent commands or raw provider/model runners on each rendered prompt. Tool-capable command agents can edit the workspace directly. Explicit provider mode uses stdout artifacts and AutoDev patch mode for text providers such as command wrappers or Ollama.
+
+Linux command-agent mode:
+
+```bash
+scripts/run-real-issue.sh --env ~/automation/state/PROJECT.env --mode Run --owner owner --repo AutoDev --base main --remote origin --planner-agent-command "reader-agent {prompt_file}" --agent-command "coder-agent {prompt_file}"
+```
+
+Linux raw Ollama mode:
+
+```bash
+scripts/run-real-issue.sh --env ~/automation/state/PROJECT.env --mode Run --owner owner --repo AutoDev --base main --remote origin --planner-model qwen35-9b-32k --agent-model devstral-small2-12k
+```
+
+Windows PowerShell command-agent mode:
+
+```powershell
+scripts\run-real-issue.ps1 -Mode Run -Username owner -Repo AutoDev -PlannerAgentCommand "reader-agent {prompt_file}" -AgentCommand "coder-agent {prompt_file}"
+```
+
+Windows PowerShell raw Ollama mode:
+
+```powershell
+scripts\run-real-issue.ps1 -Mode Run -Username owner -Repo AutoDev -PlannerModel qwen35-9b-32k -AgentModel devstral-small2-12k
+```
+
+Both wrappers support the next `autodev:ready` issue by default, a specific GitHub issue (`--issue` on Linux, `-Issue` on Windows), or literal task text (`--description` / `--description-file` on Linux, `-Description` / `-DescriptionFile` on Windows). Supplying a planner or agent model without an explicit provider defaults that side to `ollama`, which runs `ollama run <model>` with the prompt on stdin. Explicit `command` provider mode runs the configured command as a stdout text provider instead of a direct-edit agent. Provider-mode implementer and repair responses must return `NO_CHANGES_REQUIRED` or a unified diff between `BEGIN_UNIFIED_DIFF` and `END_UNIFIED_DIFF`; AutoDev applies the diff with `git apply`.
+
+The same scripts expose `Plan` for the reader/planner-only portion, plus individual transition modes for debugging or resuming a partially completed cycle.
+
+---
+
+# Python AutoDev Runner
+
+`automation/run_real_issue.py` is the older provider-driven AutoDev orchestrator for running real GitHub issues through planning, model-proposed patches, deterministic verification, optional fix attempts, and optional draft PR creation. Use it directly when you specifically want the Python patch-contract flow instead of the script-based prompt-equivalent flow above.
 
 The runner is provider-agnostic. A provider is only a transport for sending a prompt and receiving text. The canonical HTTP provider name is `chat-completions` because it targets the OpenAI-compatible `/v1/chat/completions` protocol used by LM Studio, Ollama OpenAI-compatible mode, llama.cpp server, vLLM, OpenRouter, and similar servers. `openai-compatible` is accepted as a backwards-compatible alias.
 
@@ -29,7 +63,7 @@ windows\scripts\ensure-codex-labels.ps1 -Username owner -Repo AutoDev
 ## Specific Issue
 
 ```bash
-scripts/run-real-issue.sh \
+python automation/run_real_issue.py \
   --repo . \
   --github-repo owner/AutoDev \
   --issue 18 \
@@ -40,7 +74,7 @@ scripts/run-real-issue.sh \
 ## Next Issue
 
 ```bash
-scripts/run-real-issue.sh \
+python automation/run_real_issue.py \
   --repo . \
   --github-repo owner/AutoDev \
   --next \
@@ -219,16 +253,4 @@ The runner refuses dirty worktrees unless `--allow-dirty` is passed, creates new
 
 ## Wrappers
 
-Linux:
-
-```bash
-scripts/run-real-issue.sh --help
-```
-
-Windows PowerShell:
-
-```powershell
-scripts\run-real-issue.ps1 --help
-```
-
-The Windows wrapper does not require WSL.
+The root-level `scripts/run-real-issue.sh` and `scripts\run-real-issue.ps1` wrappers delegate to the preferred script-based workflow described at the top of this document. Use `automation/run_real_issue.py` directly only for the Python patch-contract runner CLI.

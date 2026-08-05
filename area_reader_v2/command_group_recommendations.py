@@ -89,6 +89,36 @@ API_CONTRACT_PATH_MARKERS = (
     "swagger",
     "generated",
 )
+DOCS_ONLY_TERMS = (
+    "documentation-only",
+    "docs-only",
+    "documentation only",
+    "docs only",
+)
+
+DOCS_SCOPE_TERMS = (
+    "document ",
+    "documentation",
+    "readme",
+    "architecture",
+    "architectural boundary",
+)
+
+DOC_PATH_SUFFIXES = (
+    ".md",
+    ".mdx",
+    ".rst",
+    ".adoc",
+    ".txt",
+)
+
+BACKEND_DOC_MARKERS = (
+    "/api/",
+    "apps/api/",
+    "backend",
+    "contract",
+    "contracts",
+)
 
 
 def recommend_command_groups(
@@ -108,6 +138,18 @@ def recommend_command_groups(
     normalized_paths = tuple(path.replace("\\", "/").casefold() for path in changed_paths)
     available = list(available_command_groups) if available_command_groups is not None else list(ALL_COMMAND_GROUPS)
     available_set = set(available)
+
+    if is_documentation_only_scope(normalized_issue, normalized_paths):
+        recommended = documentation_only_command_groups(normalized_paths, available_set)
+        return {
+            "available_command_groups": available,
+            "recommended_command_groups": _filter_unique(recommended, available_set),
+            "conditional_command_groups": {
+                name: reason
+                for name, reason in CONDITIONAL_COMMAND_GROUPS.items()
+                if name in available_set
+            },
+        }
 
     recommended = [
         group
@@ -142,6 +184,25 @@ def recommend_command_groups(
         },
     }
 
+
+def is_documentation_only_scope(issue_text: str, changed_paths: Iterable[str]) -> bool:
+    paths = tuple(path.replace("\\", "/").casefold() for path in changed_paths)
+    if paths:
+        return all(_is_documentation_path(path) for path in paths)
+    if _contains_any(issue_text, DOCS_ONLY_TERMS):
+        return True
+    if "do not implement" in issue_text and _contains_any(issue_text, DOCS_SCOPE_TERMS):
+        return True
+    return "document " in issue_text and not _contains_any(issue_text, ("implement ", "fix ", "build ", "test "))
+
+
+def documentation_only_command_groups(changed_paths: Iterable[str], available_set: set[str]) -> list[str]:
+    groups = ["env"]
+    paths = tuple(path.replace("\\", "/").casefold() for path in changed_paths)
+    if paths and any(_is_backend_owned_doc_path(path) for path in paths):
+        groups.append("dotnet-solution")
+    groups.append("markdown-smoke")
+    return [group for group in groups if group in available_set]
 
 def _api_client_relevant(
     issue_text: str,
@@ -192,6 +253,13 @@ def _maui_relevant(
 
     return _maui_text_relevant(scoped_issue_text)
 
+
+def _is_documentation_path(path: str) -> bool:
+    return path.startswith("docs/") or "/docs/" in path or path.endswith(DOC_PATH_SUFFIXES)
+
+
+def _is_backend_owned_doc_path(path: str) -> bool:
+    return _is_documentation_path(path) and _contains_any(path, BACKEND_DOC_MARKERS)
 
 def _is_api_contract_path(path: str) -> bool:
     if path.startswith("phoodab/packages/api-client/"):

@@ -2,6 +2,7 @@ import io
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -26,7 +27,7 @@ class ModelProviderTests(unittest.TestCase):
             handle.write("import sys\nprint('seen:' + sys.stdin.read())\n")
             script = handle.name
         try:
-            provider = CommandProvider(f"{subprocess.list2cmdline(['python3', script])}")
+            provider = CommandProvider(f"{subprocess.list2cmdline([sys.executable, script])}")
             response = provider.generate("prompt", model="unused", timeout_seconds=10)
         finally:
             Path(script).unlink(missing_ok=True)
