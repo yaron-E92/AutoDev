@@ -52,6 +52,7 @@ _INSERT_BEFORE = (
     "\nOutput contract:\n",
     "\nOutput only:\n",
 )
+_POLICY_HEADER = "Role-specific prompt policy ("
 
 
 def resolve_prompt_policies(file_config: dict[str, object]) -> dict[str, str]:
@@ -94,7 +95,7 @@ def compose_prompt(role: str, prompt: str, mode: str) -> str:
         raise ProviderError(f"unsupported prompt policy mode: {mode}")
 
     policy = _POLICY_TEXT[mode]
-    if not policy:
+    if not policy or _POLICY_HEADER in prompt:
         return prompt
 
     indexes = [prompt.find(marker) for marker in _INSERT_BEFORE]
