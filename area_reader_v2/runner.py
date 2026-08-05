@@ -14,9 +14,16 @@ from automation.model_roles import (
     safe_role_metadata,
     resolve_role_configs,
 )
+from automation.prompt_policies import (
+    compose_prompt,
+    resolve_prompt_policies,
+    role_policy_metadata,
+    safe_prompt_policy_metadata,
+)
 
 _ORIGINAL_PARSE_ARGS = _core.parse_args
 _ACTIVE_CONFIGS: dict[str, ModelConfig | None] = {}
+_ACTIVE_POLICIES: dict[str, str] = resolve_prompt_policies({})
 _ACTIVE_OUT: Path | None = None
 
 
@@ -60,6 +67,10 @@ def resolve_area_role_configs(args) -> dict[str, ModelConfig | None]:
     return configs
 
 
+def resolve_area_prompt_policies(args) -> dict[str, str]:
+    return resolve_prompt_policies(load_provider_config(args.provider_config))
+
+
 def _legacy_config(args, role: str, model: str | None) -> ModelConfig:
     if not model:
         raise RuntimeError(f"{role} model is required")
@@ -94,12 +105,16 @@ def call_provider(args, role, prompt, num_predict, model_override=None):
     if config is None:
         raise RuntimeError(f"provider role is disabled: {actual_role}")
     provider = create_provider(config)
+    effective_prompt = compose_prompt(actual_role, prompt, _ACTIVE_POLICIES[actual_role])
+    policy_metadata = role_policy_metadata(actual_role, _ACTIVE_POLICIES)
     try:
-        content, record = invoke_model(provider, config, prompt, role=actual_role)
+        content, record = invoke_model(provider, config, effective_prompt, role=actual_role)
     except ModelInvocationError as exc:
+        exc.record.update(policy_metadata)
         if _ACTIVE_OUT is not None:
             append_invocation_metadata(_ACTIVE_OUT / "model-invocations.json", exc.record)
         raise
+    record.update(policy_metadata)
     if _ACTIVE_OUT is not None:
         append_invocation_metadata(_ACTIVE_OUT / "model-invocations.json", record)
     return {
@@ -113,9 +128,10 @@ def call_provider(args, role, prompt, num_predict, model_override=None):
 
 
 def main(argv=None):
-    global _ACTIVE_CONFIGS, _ACTIVE_OUT
+    global _ACTIVE_CONFIGS, _ACTIVE_POLICIES, _ACTIVE_OUT
     args = parse_args(argv)
     _ACTIVE_CONFIGS = resolve_area_role_configs(args)
+    _ACTIVE_POLICIES = resolve_area_prompt_policies(args)
     _ACTIVE_OUT = Path(args.out).expanduser().resolve()
     original_parse = _core.parse_args
     original_call = _core.call_provider
@@ -134,6 +150,7 @@ def main(argv=None):
             summary = {}
         if isinstance(summary, dict):
             summary["roles"] = safe_role_metadata(_ACTIVE_CONFIGS)
+            summary["prompt_policy"] = safe_prompt_policy_metadata(_ACTIVE_POLICIES)
             summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return code
 
