@@ -81,6 +81,21 @@ def main(argv=None):
     return run(argv)
 
 
+def update_issue_labels(repo, github_repo, issue, *, add, remove, stream):
+    for label in add:
+        run_command(
+            ["gh", "issue", "edit", str(issue), "--repo", github_repo, "--add-label", label],
+            cwd=repo,
+            stream=stream,
+        )
+    for label in remove:
+        run_command(
+            ["gh", "issue", "edit", str(issue), "--repo", github_repo, "--remove-label", label],
+            cwd=repo,
+            stream=stream,
+        )
+
+
 def resolve_role_provider_configs(args) -> dict[str, ModelConfig | None]:
     file_config = load_provider_config(args.provider_config)
     defaults = {
