@@ -19,12 +19,7 @@ Implement the issue below using the Planner output as constraints.
 
 Hard constraints:
 
-- Speed > elegance.
-- No premature abstractions.
-- Do NOT over-decompose.
-- Touch as few files as possible.
-- Prefer editing existing files over creating new ones.
-- Implement the minimal viable complete solution.
+- Follow the injected role-specific prompt policy for reuse and minimal-change guidance.
 - Do not change domain logic, persistence, models, migrations, public APIs, schemas, scoring, task state logic, or unrelated behavior unless explicitly required.
 - If unsure, make a reasonable assumption and proceed.
 - Do not leave TODO-only implementations or empty stubs.
