@@ -1,3 +1,6 @@
 .benchmark-results/
+.autodev-run/
+.codex-run/
+.pytest_cache/
 __pycache__/
 *.py[cod]
