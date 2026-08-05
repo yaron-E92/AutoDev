@@ -1,0 +1,35 @@
+{
+  "version": 2,
+  "roles": {
+    "reader": {
+      "provider": "command",
+      "model": "nemotron-3-super:cloud",
+      "timeout_seconds": 1800
+    },
+    "synthesizer": {
+      "provider": "command",
+      "model": "nemotron-3-super:cloud",
+      "timeout_seconds": 1800
+    },
+    "planner": {
+      "provider": "command",
+      "model": "nemotron-3-super:cloud",
+      "timeout_seconds": 1800
+    },
+    "implementer": {
+      "provider": "command",
+      "model": "minimax-m3:cloud",
+      "timeout_seconds": 2400
+    },
+    "fixer": {
+      "provider": "command",
+      "model": "minimax-m3:cloud",
+      "timeout_seconds": 2400
+    },
+    "verifier": {
+      "provider": "command",
+      "model": "nemotron-3-super:cloud",
+      "timeout_seconds": 1800
+    }
+  }
+}
