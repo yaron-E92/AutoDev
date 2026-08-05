@@ -241,7 +241,9 @@ def run_implementation_loop(
 
 def call_coder(provider, config, prompt, out_dir, attempt, *, role="implementer"):
     metadata_path = out_dir / "model-invocations.json"
-    policy_metadata = role_policy_metadata(role, _policies_or_default())
+    policies = _policies_or_default()
+    prompt = compose_prompt(role, prompt, policies[role])
+    policy_metadata = role_policy_metadata(role, policies)
     try:
         response, record = invoke_model(provider, config, prompt, role=role, attempt=attempt)
     except ModelInvocationError as exc:
