@@ -19,9 +19,16 @@ from automation.model_roles import (
     resolve_role_configs,
     safe_role_metadata,
 )
+from automation.prompt_policies import (
+    compose_prompt,
+    resolve_prompt_policies,
+    role_policy_metadata,
+    safe_prompt_policy_metadata,
+)
 
 _ACTIVE_ROLES: ContextVar[dict[str, ModelConfig | None] | None] = ContextVar("active_roles", default=None)
 _ACTIVE_FACTORY: ContextVar[Callable[[ModelConfig], ModelProvider] | None] = ContextVar("active_factory", default=None)
+_ACTIVE_POLICIES: ContextVar[dict[str, str] | None] = ContextVar("active_policies", default=None)
 _CORE_WRITE_OPERATIONAL_OUTPUTS = _core.write_operational_outputs
 _CORE_CREATE_DRAFT_PR = _core.create_draft_pr
 
@@ -41,9 +48,11 @@ class _DeferredProvider(ModelProvider):
 def run(argv=None, *, stdout=None, stderr=None, provider_factory=None):
     args = _core.parse_args(argv)
     roles = resolve_role_provider_configs(args)
+    policies = resolve_prompt_policy_configs(args)
     actual_factory = provider_factory or create_provider
     role_token = _ACTIVE_ROLES.set(roles)
     factory_token = _ACTIVE_FACTORY.set(actual_factory)
+    policy_token = _ACTIVE_POLICIES.set(policies)
     originals = {
         "resolve_provider_configs": _core.resolve_provider_configs,
         "run_area_reader": _core.run_area_reader,
@@ -75,6 +84,7 @@ def run(argv=None, *, stdout=None, stderr=None, provider_factory=None):
             setattr(_core, name, value)
         _ACTIVE_ROLES.reset(role_token)
         _ACTIVE_FACTORY.reset(factory_token)
+        _ACTIVE_POLICIES.reset(policy_token)
 
 
 def main(argv=None):
@@ -109,6 +119,10 @@ def resolve_role_provider_configs(args) -> dict[str, ModelConfig | None]:
     return resolve_role_configs(defaults=defaults, file_config=file_config, cli_values=cli_values)
 
 
+def resolve_prompt_policy_configs(args) -> dict[str, str]:
+    return resolve_prompt_policies(load_provider_config(args.provider_config))
+
+
 def resolve_provider_configs(args):
     roles = _ACTIVE_ROLES.get() or resolve_role_provider_configs(args)
     reader = roles["reader"]
@@ -119,6 +133,7 @@ def resolve_provider_configs(args):
 
 def run_area_reader(repo, issue_text, reader_config, coder_config, out_dir, stream):
     roles = _roles_or_legacy(reader_config, coder_config)
+    policies = _policies_or_default()
     if out_dir.exists():
         shutil.rmtree(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -131,6 +146,10 @@ def run_area_reader(repo, issue_text, reader_config, coder_config, out_dir, stre
                     role: model_config_to_dict(config)
                     for role, config in roles.items()
                     if config is not None
+                },
+                "prompt_policy": {
+                    "enabled": any(mode != "off" for mode in policies.values()),
+                    "roles": policies,
                 },
             },
             indent=2,
@@ -167,6 +186,7 @@ def run_implementation_loop(
     max_fix_attempts, dry_run, stream,
 ):
     roles = _roles_or_legacy(None, coder_config)
+    policies = _policies_or_default()
     implementer_config = implementer_config or roles["implementer"] or coder_config
     fixer_config = fixer_config or roles["fixer"] or implementer_config
     factory = _ACTIVE_FACTORY.get() or create_provider
@@ -180,6 +200,7 @@ def run_implementation_loop(
         constraints=read_optional_text(PROMPT_TEMPLATE_DIR / "implementer.md"),  # noqa: F405
         branch_name=branch_name,
     )
+    prompt = compose_prompt("implementer", prompt, policies["implementer"])
     write_text(out_dir / "implementation-prompt.md", prompt)  # noqa: F405
     response = call_coder(implementer_provider, implementer_config, prompt, out_dir, 0, role="implementer")
     patch = process_model_response(response, out_dir, 0)  # noqa: F405
@@ -205,6 +226,7 @@ def run_implementation_loop(
             current_diff=current_diff(repo, stream),  # noqa: F405
             verification=verification,
         )
+        fix_prompt = compose_prompt("fixer", fix_prompt, policies["fixer"])
         write_text(out_dir / "fix-prompt.md", fix_prompt)  # noqa: F405
         response = call_coder(fixer_provider, fixer_config, fix_prompt, out_dir, attempt, role="fixer")
         patch = process_model_response(response, out_dir, attempt)  # noqa: F405
@@ -219,11 +241,14 @@ def run_implementation_loop(
 
 def call_coder(provider, config, prompt, out_dir, attempt, *, role="implementer"):
     metadata_path = out_dir / "model-invocations.json"
+    policy_metadata = role_policy_metadata(role, _policies_or_default())
     try:
         response, record = invoke_model(provider, config, prompt, role=role, attempt=attempt)
     except ModelInvocationError as exc:
+        exc.record.update(policy_metadata)
         append_invocation_metadata(metadata_path, exc.record)
         raise
+    record.update(policy_metadata)
     append_invocation_metadata(metadata_path, record)
     write_text(out_dir / "model-responses" / f"attempt-{attempt}.txt", response)  # noqa: F405
     return response
@@ -243,6 +268,8 @@ def build_pr_body(issue, issue_text, out_dir, reader_config, coder_config):
             read_optional_text(out_dir / "verification-result-summary.md").strip(),  # noqa: F405
             "", "## Provider Roles", "", "```json",
             json.dumps(safe_role_metadata(roles), indent=2, sort_keys=True),
+            "```", "", "## Prompt Policy", "", "```json",
+            json.dumps(safe_prompt_policy_metadata(_policies_or_default()), indent=2, sort_keys=True),
             "```", "",
         ]
     )
@@ -257,6 +284,7 @@ def write_provider_metadata(out_dir, reader_config, coder_config):
             "reader": reader_config.safe_metadata(),
             "coder": coder_config.safe_metadata(),
             "roles": safe_role_metadata(roles),
+            "prompt_policy": safe_prompt_policy_metadata(_policies_or_default()),
         },
     )
 
@@ -273,6 +301,10 @@ def _roles_or_legacy(reader_config, coder_config):
         "fixer": coder_config,
         "verifier": None,
     }
+
+
+def _policies_or_default() -> dict[str, str]:
+    return _ACTIVE_POLICIES.get() or resolve_prompt_policies({})
 
 
 if __name__ == "__main__":
