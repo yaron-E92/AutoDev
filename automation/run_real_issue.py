@@ -25,10 +25,25 @@ from automation.prompt_policies import (
     role_policy_metadata,
     safe_prompt_policy_metadata,
 )
+from automation.semantic_verifier import (
+    SemanticSettings,
+    SemanticVerifierError,
+    build_schema_repair_prompt,
+    build_semantic_prompt,
+    build_semantic_repair_prompt,
+    collect_changed_files,
+    collect_current_diff,
+    parse_semantic_output,
+    resolve_semantic_settings,
+    safe_semantic_metadata,
+    write_final_verdict,
+    write_semantic_result,
+)
 
 _ACTIVE_ROLES: ContextVar[dict[str, ModelConfig | None] | None] = ContextVar("active_roles", default=None)
 _ACTIVE_FACTORY: ContextVar[Callable[[ModelConfig], ModelProvider] | None] = ContextVar("active_factory", default=None)
 _ACTIVE_POLICIES: ContextVar[dict[str, str] | None] = ContextVar("active_policies", default=None)
+_ACTIVE_SEMANTIC: ContextVar[SemanticSettings | None] = ContextVar("active_semantic", default=None)
 _CORE_WRITE_OPERATIONAL_OUTPUTS = _core.write_operational_outputs
 _CORE_CREATE_DRAFT_PR = _core.create_draft_pr
 
@@ -52,10 +67,12 @@ def run(argv=None, *, stdout=None, stderr=None, provider_factory=None):
     args = _core.parse_args(argv)
     roles = resolve_role_provider_configs(args)
     policies = resolve_prompt_policy_configs(args)
+    semantic = resolve_semantic_verification_settings(args, roles)
     actual_factory = provider_factory or create_provider
     role_token = _ACTIVE_ROLES.set(roles)
     factory_token = _ACTIVE_FACTORY.set(actual_factory)
     policy_token = _ACTIVE_POLICIES.set(policies)
+    semantic_token = _ACTIVE_SEMANTIC.set(semantic)
     originals = {
         "resolve_provider_configs": _core.resolve_provider_configs,
         "run_area_reader": _core.run_area_reader,
@@ -88,6 +105,7 @@ def run(argv=None, *, stdout=None, stderr=None, provider_factory=None):
         _ACTIVE_ROLES.reset(role_token)
         _ACTIVE_FACTORY.reset(factory_token)
         _ACTIVE_POLICIES.reset(policy_token)
+        _ACTIVE_SEMANTIC.reset(semantic_token)
 
 
 def main(argv=None):
@@ -126,6 +144,16 @@ def resolve_prompt_policy_configs(args) -> dict[str, str]:
     return resolve_prompt_policies(load_provider_config(args.provider_config))
 
 
+def resolve_semantic_verification_settings(
+    args,
+    roles: dict[str, ModelConfig | None],
+) -> SemanticSettings:
+    return resolve_semantic_settings(
+        load_provider_config(args.provider_config),
+        verifier_configured=roles.get("verifier") is not None,
+    )
+
+
 def resolve_provider_configs(args):
     roles = _ACTIVE_ROLES.get() or resolve_role_provider_configs(args)
     reader = roles["reader"]
@@ -154,6 +182,7 @@ def run_area_reader(repo, issue_text, reader_config, coder_config, out_dir, stre
                     "enabled": any(mode != "off" for mode in policies.values()),
                     "roles": policies,
                 },
+                "semantic_verification": safe_semantic_metadata(_semantic_settings_or_disabled()),
             },
             indent=2,
             sort_keys=True,
@@ -210,39 +239,200 @@ def run_implementation_loop(
     if patch is None:
         verification = VerificationResult(0, 0, "no-change", "NO_CHANGES_REQUIRED", "", out_dir / "verification" / "attempt-0.md")  # noqa: F405
         write_verification_result(out_dir, verification)  # noqa: F405
-        return verification
-    if dry_run:
+    elif dry_run:
         return VerificationResult(0, 0, "dry-run", "Dry-run implementation did not apply patch.", "", out_dir / "verification" / "attempt-0.md")  # noqa: F405
-    apply_patch_file(repo, patch, stream)  # noqa: F405
-
-    verification = run_recommended_verification(out_dir, repo, 0, stream)  # noqa: F405
-    write_verification_result(out_dir, verification)  # noqa: F405
-    attempt = 1
-    while not verification.passed and attempt <= max_fix_attempts:
-        if fixer_provider is None:
-            fixer_provider = factory(fixer_config)
-        fix_prompt = build_fix_prompt(  # noqa: F405
-            issue_text=issue_text,
-            synthesized_handoff=read_optional_text(out_dir / "synthesized-handoff.md"),  # noqa: F405
-            coder_plan=read_optional_text(out_dir / "coder-plan.md"),  # noqa: F405
-            previous_response=read_optional_text(out_dir / "model-responses" / f"attempt-{attempt - 1}.txt"),  # noqa: F405
-            current_diff=current_diff(repo, stream),  # noqa: F405
-            verification=verification,
-        )
-        fix_prompt = compose_prompt("fixer", fix_prompt, policies["fixer"])
-        write_text(out_dir / "fix-prompt.md", fix_prompt)  # noqa: F405
-        response = call_coder(fixer_provider, fixer_config, fix_prompt, out_dir, attempt, role="fixer")
-        patch = process_model_response(response, out_dir, attempt)  # noqa: F405
-        if patch is None:
-            break
+    else:
         apply_patch_file(repo, patch, stream)  # noqa: F405
-        verification = run_recommended_verification(out_dir, repo, attempt, stream)  # noqa: F405
+        verification = run_recommended_verification(out_dir, repo, 0, stream)  # noqa: F405
         write_verification_result(out_dir, verification)  # noqa: F405
-        attempt += 1
+        attempt = 1
+        while not verification.passed and attempt <= max_fix_attempts:
+            if fixer_provider is None:
+                fixer_provider = factory(fixer_config)
+            fix_prompt = build_fix_prompt(  # noqa: F405
+                issue_text=issue_text,
+                synthesized_handoff=read_optional_text(out_dir / "synthesized-handoff.md"),  # noqa: F405
+                coder_plan=read_optional_text(out_dir / "coder-plan.md"),  # noqa: F405
+                previous_response=read_optional_text(out_dir / "model-responses" / f"attempt-{attempt - 1}.txt"),  # noqa: F405
+                current_diff=current_diff(repo, stream),  # noqa: F405
+                verification=verification,
+            )
+            fix_prompt = compose_prompt("fixer", fix_prompt, policies["fixer"])
+            write_text(out_dir / "fix-prompt.md", fix_prompt)  # noqa: F405
+            response = call_coder(fixer_provider, fixer_config, fix_prompt, out_dir, attempt, role="fixer")
+            patch = process_model_response(response, out_dir, attempt)  # noqa: F405
+            if patch is None:
+                break
+            apply_patch_file(repo, patch, stream)  # noqa: F405
+            verification = run_recommended_verification(out_dir, repo, attempt, stream)  # noqa: F405
+            write_verification_result(out_dir, verification)  # noqa: F405
+            attempt += 1
+
+    if not verification.passed:
+        return verification
+    return run_semantic_verification_gate(
+        repo=repo,
+        out_dir=out_dir,
+        issue_text=issue_text,
+        verification=verification,
+        roles=roles,
+        fixer_provider=fixer_provider,
+        fixer_config=fixer_config,
+        factory=factory,
+        stream=stream,
+    )
+
+
+def run_semantic_verification_gate(
+    *,
+    repo: Path,
+    out_dir: Path,
+    issue_text: str,
+    verification,
+    roles: dict[str, ModelConfig | None],
+    fixer_provider,
+    fixer_config,
+    factory,
+    stream,
+):
+    settings = _semantic_settings_or_disabled()
+    if not settings.enabled:
+        return verification
+
+    verifier_config = roles.get("verifier")
+    if verifier_config is None:
+        raise RunnerError("semantic verification is enabled but verifier role is unavailable")  # noqa: F405
+    verifier_provider = factory(verifier_config)
+    result = _invoke_semantic_attempt(
+        repo=repo,
+        out_dir=out_dir,
+        issue_text=issue_text,
+        verifier_provider=verifier_provider,
+        verifier_config=verifier_config,
+        semantic_attempt=0,
+        call_attempt=0,
+        settings=settings,
+    )
+    write_semantic_result(out_dir, 0, result)
+
+    if result["verdict"] == "pass":
+        write_final_verdict(out_dir, result)
+        return verification
+    if result["verdict"] == "blocked":
+        write_final_verdict(out_dir, result)
+        raise RunnerError("semantic verification blocked the run: " + str(result.get("repair_brief", "")))  # noqa: F405
+    if settings.max_repair_attempts < 1:
+        write_final_verdict(out_dir, result)
+        raise RunnerError("semantic verification requested repair but semantic repair is disabled")  # noqa: F405
+
+    repair_brief_path = out_dir / "verification" / "repair-brief.md"
+    write_text(repair_brief_path, str(result.get("repair_brief", "")).strip() + "\n")  # noqa: F405
+    changed_files = collect_changed_files(repo)
+    repair_prompt = build_semantic_repair_prompt(
+        issue_text=issue_text,
+        plan=read_optional_text(out_dir / "coder-plan.md"),  # noqa: F405
+        semantic_result=result,
+        changed_files=changed_files,
+        diff=collect_current_diff(repo, changed_files),
+        template=read_optional_text(PROMPT_TEMPLATE_DIR / "verification-repair.md"),  # noqa: F405
+    )
+    write_text(out_dir / "verification" / "semantic-repair-prompt.md", repair_prompt)  # noqa: F405
+    if fixer_provider is None:
+        fixer_provider = factory(fixer_config)
+    repair_response = call_coder(
+        fixer_provider,
+        fixer_config,
+        repair_prompt,
+        out_dir,
+        0,
+        role="fixer",
+        response_name="semantic-fixer-attempt-0.txt",
+    )
+    if parse_no_changes_required(repair_response) is not None:  # noqa: F405
+        write_final_verdict(out_dir, result)
+        raise RunnerError("semantic fixer returned NO_CHANGES_REQUIRED without a final semantic pass")  # noqa: F405
+    patch_text = extract_unified_diff(repair_response)  # noqa: F405
+    if not patch_text:
+        raise RunnerError("semantic fixer did not return a valid patch")  # noqa: F405
+    patch_path = out_dir / "verification" / "semantic-repair-attempt-0.patch"
+    write_text(patch_path, patch_text)  # noqa: F405
+    apply_patch_file(repo, patch_path, stream)  # noqa: F405
+
+    deterministic_attempt = int(getattr(verification, "attempt", 0)) + 1
+    verification = run_recommended_verification(out_dir, repo, deterministic_attempt, stream)  # noqa: F405
+    write_verification_result(out_dir, verification)  # noqa: F405
+    if not verification.passed:
+        blocked = dict(result)
+        blocked["verdict"] = "blocked"
+        blocked["repair_brief"] = "Deterministic verification failed after semantic repair."
+        write_final_verdict(out_dir, blocked)
+        return verification
+
+    final_result = _invoke_semantic_attempt(
+        repo=repo,
+        out_dir=out_dir,
+        issue_text=issue_text,
+        verifier_provider=verifier_provider,
+        verifier_config=verifier_config,
+        semantic_attempt=1,
+        call_attempt=settings.max_schema_retries + 1,
+        settings=settings,
+    )
+    write_semantic_result(out_dir, 1, final_result)
+    write_final_verdict(out_dir, final_result)
+    if final_result["verdict"] != "pass":
+        raise RunnerError("semantic verification did not pass after the targeted repair")  # noqa: F405
     return verification
 
 
-def call_coder(provider, config, prompt, out_dir, attempt, *, role="implementer"):
+def _invoke_semantic_attempt(
+    *,
+    repo: Path,
+    out_dir: Path,
+    issue_text: str,
+    verifier_provider,
+    verifier_config,
+    semantic_attempt: int,
+    call_attempt: int,
+    settings: SemanticSettings,
+) -> dict[str, object]:
+    changed_files = collect_changed_files(repo)
+    prompt = build_semantic_prompt(
+        issue_text=issue_text,
+        synthesized_handoff=read_optional_text(out_dir / "synthesized-handoff.md"),  # noqa: F405
+        plan=read_optional_text(out_dir / "coder-plan.md"),  # noqa: F405
+        changed_files=changed_files,
+        diff=collect_current_diff(repo, changed_files),
+        deterministic_evidence=(
+            read_optional_text(out_dir / "verification-result-summary.md")  # noqa: F405
+            + "\n\n"
+            + read_optional_text(out_dir / "recommended-command-groups.json")  # noqa: F405
+        ),
+        uncertainty_notes=read_optional_text(out_dir / "verification-notes.md"),  # noqa: F405
+        template=read_optional_text(PROMPT_TEMPLATE_DIR / "verifier.md"),  # noqa: F405
+    )
+    write_text(out_dir / "verification" / f"semantic-prompt-{semantic_attempt}.md", prompt)  # noqa: F405
+    current_prompt = prompt
+    for schema_attempt in range(settings.max_schema_retries + 1):
+        response = call_coder(
+            verifier_provider,
+            verifier_config,
+            current_prompt,
+            out_dir,
+            call_attempt + schema_attempt,
+            role="verifier",
+            response_name=f"semantic-verifier-{semantic_attempt}-schema-{schema_attempt}.txt",
+        )
+        try:
+            return parse_semantic_output(response)
+        except SemanticVerifierError as exc:
+            if schema_attempt >= settings.max_schema_retries:
+                raise RunnerError(f"semantic verifier output remained malformed: {exc}") from exc  # noqa: F405
+            current_prompt = build_schema_repair_prompt(prompt, response, str(exc))
+    raise RunnerError("semantic verifier did not return a valid verdict")  # noqa: F405
+
+
+def call_coder(provider, config, prompt, out_dir, attempt, *, role="implementer", response_name=None):
     metadata_path = out_dir / "model-invocations.json"
     policies = _policies_or_default()
     prompt = compose_prompt(role, prompt, policies[role])
@@ -255,7 +445,8 @@ def call_coder(provider, config, prompt, out_dir, attempt, *, role="implementer"
         raise
     record.update(policy_metadata)
     append_invocation_metadata(metadata_path, record)
-    write_text(out_dir / "model-responses" / f"attempt-{attempt}.txt", response)  # noqa: F405
+    name = response_name or f"attempt-{attempt}.txt"
+    write_text(out_dir / "model-responses" / name, response)  # noqa: F405
     return response
 
 
@@ -265,12 +456,15 @@ def create_draft_pr(repo, github_repo, issue, issue_text, out_dir, reader_config
 
 def build_pr_body(issue, issue_text, out_dir, reader_config, coder_config):
     roles = _roles_or_legacy(reader_config, coder_config)
+    semantic_verdict = read_optional_text(out_dir / "verification" / "final-verdict.json").strip()  # noqa: F405
     return "\n".join(
         [
             f"Closes #{issue}", "", "Generated by AutoDev.", "", "## Summary", "",
             read_optional_text(out_dir / "coder-plan.md").strip() or "See implementation diff.",  # noqa: F405
-            "", "## Verification", "",
+            "", "## Deterministic Verification", "",
             read_optional_text(out_dir / "verification-result-summary.md").strip(),  # noqa: F405
+            "", "## Semantic Verification", "",
+            "```json", semantic_verdict or json.dumps({"enabled": False}, indent=2), "```",
             "", "## Provider Roles", "", "```json",
             json.dumps(safe_role_metadata(roles), indent=2, sort_keys=True),
             "```", "", "## Prompt Policy", "", "```json",
@@ -290,6 +484,7 @@ def write_provider_metadata(out_dir, reader_config, coder_config):
             "coder": coder_config.safe_metadata(),
             "roles": safe_role_metadata(roles),
             "prompt_policy": safe_prompt_policy_metadata(_policies_or_default()),
+            "semantic_verification": safe_semantic_metadata(_semantic_settings_or_disabled()),
         },
     )
 
@@ -310,6 +505,10 @@ def _roles_or_legacy(reader_config, coder_config):
 
 def _policies_or_default() -> dict[str, str]:
     return _ACTIVE_POLICIES.get() or resolve_prompt_policies({})
+
+
+def _semantic_settings_or_disabled() -> SemanticSettings:
+    return _ACTIVE_SEMANTIC.get() or SemanticSettings(False)
 
 
 if __name__ == "__main__":
