@@ -98,8 +98,10 @@ done
 [[ -n "$env_file" ]] || { echo "Missing --env or ENV_FILE" >&2; usage >&2; exit 2; }
 [[ "$max_repair_attempts" =~ ^[0-9]+$ ]] || { echo "--max-repair-attempts must be a non-negative integer" >&2; exit 2; }
 [[ -n "$planner_agent_command" ]] || planner_agent_command="$agent_command"
-provider_mode=false
-[[ -n "$provider_profile$planner_provider$planner_model$agent_provider$agent_model" ]] && provider_mode=true
+planner_provider_mode=false
+agent_provider_mode=false
+[[ -n "$provider_profile$planner_provider$planner_model" ]] && planner_provider_mode=true
+[[ -n "$provider_profile$agent_provider$agent_model" ]] && agent_provider_mode=true
 with_env=("$automation_root/scripts/with-env.sh" "$env_file")
 
 run_python_module() {
@@ -113,6 +115,16 @@ run_prepare() {
   [[ -n "$description" ]] && args+=(--description "$description")
   [[ -n "$description_file" ]] && args+=(--description-file "$description_file")
   [[ -n "$provider_profile" ]] && args+=(--provider-profile "$provider_profile")
+  if [[ "$planner_provider_mode" == true && -z "$provider_profile" ]]; then
+    [[ -n "$planner_provider" ]] && args+=(--reader-provider "$planner_provider")
+    [[ -n "$planner_model" ]] && args+=(--reader-model "$planner_model")
+    [[ -n "$planner_provider" && -n "$planner_agent_command" ]] && args+=(--reader-command "$planner_agent_command")
+  fi
+  if [[ "$agent_provider_mode" == true && -z "$provider_profile" ]]; then
+    [[ -n "$agent_provider" ]] && args+=(--coder-provider "$agent_provider")
+    [[ -n "$agent_model" ]] && args+=(--coder-model "$agent_model")
+    [[ -n "$agent_provider" && -n "$agent_command" ]] && args+=(--coder-command "$agent_command")
+  fi
   "${with_env[@]}" "${args[@]}"
 }
 
@@ -179,7 +191,7 @@ run_provider_preflight() {
 }
 
 agent_write_plan() {
-  if [[ "$provider_mode" == true ]]; then
+  if [[ "$planner_provider_mode" == true ]]; then
     run_provider_prompt planner "$current_dir/plan.md" "" < "$current_dir/planner.md"
   else
     run_agent_prompt "$planner_agent_command" <<EOF
@@ -199,7 +211,7 @@ EOF
 }
 
 agent_implement() {
-  if [[ "$provider_mode" == true ]]; then
+  if [[ "$agent_provider_mode" == true ]]; then
     run_provider_prompt implementer "" "$current_dir/commit-message.txt" < "$current_dir/implementer.md"
   else
     run_agent_prompt "$agent_command" <<EOF
@@ -217,7 +229,7 @@ EOF
 
 agent_repair_file() {
   local prompt_file="$1"
-  if [[ "$provider_mode" == true ]]; then
+  if [[ "$agent_provider_mode" == true ]]; then
     run_provider_prompt fixer "" "" < "$prompt_file"
   else
     run_agent_prompt "$agent_command" <<EOF
@@ -232,7 +244,7 @@ EOF
 }
 
 agent_verify() {
-  if [[ "$provider_mode" == true ]]; then
+  if [[ "$agent_provider_mode" == true ]]; then
     run_provider_prompt verifier "$current_dir/verification-result.md" "" < "$current_dir/verifier.md"
   else
     run_agent_prompt "$agent_command" <<EOF
