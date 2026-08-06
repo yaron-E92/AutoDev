@@ -242,3 +242,113 @@ This is an AutoDev-native adaptation rather than a verbatim runtime copy. Differ
 - verifier guidance is review-only;
 - there is no `ultra` mode;
 - AutoDev's explicit issue requirements, safety rules, and machine-readable output contracts always take precedence.
+
+## Provider-neutral transports
+
+Version-2 role entries may use `transport` (preferred) or the backward-compatible `provider` field. Supported generic transports are:
+
+```text
+command
+openai-compatible-chat-completions
+openai-compatible-responses
+mock
+```
+
+The aliases `chat-completions`, `openai-compatible`, `responses`, and `ollama` remain accepted. `ollama` is normalized to the command transport and generates `ollama run <model>` when a command is omitted.
+
+A role may configure:
+
+```json
+{
+  "transport": "openai-compatible-chat-completions",
+  "model": "provider/model",
+  "base_url": "https://provider.example/v1",
+  "api_key_env": "PROVIDER_API_KEY",
+  "timeout_seconds": 1800,
+  "headers": {
+    "X-Title": "AutoDev"
+  },
+  "request_options": {
+    "temperature": 0.1
+  },
+  "output_limit": 4096,
+  "profile_name": "optional-name"
+}
+```
+
+API-key values are read only from the named environment variable. Safe metadata records the environment-variable name and header names, never resolved secrets or header values. `Authorization`, `X-Api-Key`, cookies, and other sensitive headers cannot be placed in committed profile headers.
+
+Chat Completions omits `max_tokens` by default. Responses omits `max_output_tokens` by default. Either field is added only when `output_limit` is explicitly configured. Provider response text is passed alone to the planner, unified-diff, and verifier parsers; usage, reported cost, model, timing, retries, and sanitized failure classification are written separately to `model-invocations.json`.
+
+### Checked-in profiles
+
+- `examples/providers/groq-openrouter-free.json`: Groq for reader, synthesizer, planner, and verifier; configurable OpenRouter `:free` model for implementer and fixer.
+- `examples/providers/ollama-local-all-roles.json`: local Ollama commands for all six roles.
+- `examples/providers/codex-command-profile.json`: Codex CLI profiles through the generic command transport. `direct_edit: true` is used only for implementer and fixer.
+- `examples/providers/ollama-cloud-nemotron-minimax.json`: the existing opt-in Ollama Cloud mapping.
+
+Before using the mixed profile, replace `REPLACE_WITH_OPENROUTER_MODEL:free` with a currently accessible OpenRouter model whose identifier still ends in `:free`, then set credentials without committing them:
+
+```powershell
+$env:GROQ_API_KEY = "..."
+$env:OPENROUTER_API_KEY = "..."
+```
+
+```bash
+export GROQ_API_KEY="..."
+export OPENROUTER_API_KEY="..."
+```
+
+When `free_only` is true, every configured model and fallback must end in `:free`, and AutoDev sends `provider.allow_fallbacks: false`. It never substitutes a paid model or automatic paid route. Configure additional fallbacks only through `fallback_models`, and keep every entry explicitly free.
+
+### Provider-neutral preflight
+
+The preflight validates profile structure, required environment variables, command executables, endpoint reachability, and model visibility when `/models` is available. It does not select an issue, change labels, create branches, or contact GitHub.
+
+```powershell
+python -m automation.provider_preflight `
+  --provider-profile examples/providers/groq-openrouter-free.json `
+  --out .codex-run/provider-preflight.json
+```
+
+```bash
+python3 -m automation.provider_preflight \
+  --provider-profile examples/providers/groq-openrouter-free.json \
+  --out .codex-run/provider-preflight.json
+```
+
+Failures are classified without persisting provider response bodies or secrets: missing credentials, unavailable command, authentication failure (`401`), payment/plan required (`402`), endpoint/model not found (`404`), rate limit/quota exhausted (`429`), malformed response, timeout, or transport error.
+
+### Existing issue-to-PR entrypoints
+
+Windows PowerShell:
+
+```powershell
+.\scripts\run-real-issue.ps1 `
+  -WorkingDirectory C:\src\target-repo `
+  -Mode Preflight `
+  -ProviderProfile .\examples\providers\groq-openrouter-free.json
+
+.\scripts\run-real-issue.ps1 `
+  -WorkingDirectory C:\src\target-repo `
+  -Issue 46 `
+  -ProviderProfile .\examples\providers\groq-openrouter-free.json
+```
+
+Linux:
+
+```bash
+linux/scripts/issue-to-pr-cycle.sh \
+  --env linux/config.env \
+  --mode Preflight \
+  --provider-profile examples/providers/groq-openrouter-free.json
+
+linux/scripts/issue-to-pr-cycle.sh \
+  --env linux/config.env \
+  --issue 46 \
+  --provider-profile examples/providers/groq-openrouter-free.json
+```
+
+Both wrappers pass role and profile references to `automation.prompt_runner`; provider validation, request construction, model invocation, failure classification, telemetry, and response parsing live in Python. Legacy planner/agent provider, model, and command flags remain accepted and are resolved by Python. Codex Desktop is optional and is not needed for a headless run.
+
+This provider work does not add semantic verification policy, Headroom compression, resumable manifests, or the evaluation harness; those remain separate issues.
