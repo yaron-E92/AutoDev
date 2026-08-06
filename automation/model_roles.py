@@ -5,7 +5,14 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from automation.model_providers import ModelConfig, ModelProvider, ProviderError, normalize_provider_name, ollama_command_for_model
+from automation.model_providers import (
+    ModelConfig,
+    ModelProvider,
+    ProviderError,
+    model_config_from_values,
+    normalize_provider_name,
+    ollama_command_for_model,
+)
 
 MODEL_ROLES = ("reader", "synthesizer", "planner", "implementer", "fixer", "verifier")
 ROLE_FALLBACKS = {
@@ -20,7 +27,12 @@ ROLE_FALLBACKS = {
 
 class ModelInvocationError(ProviderError):
     def __init__(self, record: dict[str, object]):
-        super().__init__(f"{record['role']} provider call failed ({record['error_type']})")
+        classification = str(record.get("failure_classification", "provider_error"))
+        super().__init__(
+            f"{record['role']} provider call failed ({classification})",
+            classification=classification,
+            status_code=record.get("status_code") if isinstance(record.get("status_code"), int) else None,
+        )
         self.record = record
 
 
@@ -32,15 +44,15 @@ def resolve_role_configs(
 ) -> dict[str, ModelConfig | None]:
     version = file_config.get("version")
     if version not in (None, 2):
-        raise ProviderError(f"unsupported provider config version: {version}")
+        raise ProviderError(f"unsupported provider config version: {version}", classification="invalid_config")
 
     if version == 2:
         explicit_roles = file_config.get("roles")
         if not isinstance(explicit_roles, dict):
-            raise ProviderError("provider config version 2 requires a roles object")
+            raise ProviderError("provider config version 2 requires a roles object", classification="invalid_config")
         unknown = sorted(set(explicit_roles) - set(MODEL_ROLES))
         if unknown:
-            raise ProviderError("unknown provider role(s): " + ", ".join(unknown))
+            raise ProviderError("unknown provider role(s): " + ", ".join(unknown), classification="invalid_config")
     else:
         explicit_roles = {
             role: file_config[role]
@@ -48,26 +60,27 @@ def resolve_role_configs(
             if role not in {"reader", "planner", "implementer", "fixer"} and role in file_config
         }
 
+    profile_name = str(file_config.get("name", file_config.get("profile_name", ""))).strip()
     cli_values = cli_values or {}
     resolved: dict[str, ModelConfig | None] = {}
     for role in MODEL_ROLES:
         explicit = explicit_roles.get(role)
         if explicit is not None and not isinstance(explicit, dict):
-            raise ProviderError(f"provider config section must be an object: {role}")
+            raise ProviderError(f"provider config section must be an object: {role}", classification="invalid_config")
         if role == "verifier" and explicit is None:
             resolved[role] = None
             continue
 
         fallback = ROLE_FALLBACKS[role]
         if fallback not in defaults:
-            raise ProviderError(f"missing default provider configuration: {fallback}")
+            raise ProviderError(f"missing default provider configuration: {fallback}", classification="invalid_config")
         merged = dict(defaults[fallback])
         overrides: dict[str, object] = {}
 
         legacy = file_config.get(fallback, {})
         if legacy:
             if not isinstance(legacy, dict):
-                raise ProviderError(f"provider config section must be an object: {fallback}")
+                raise ProviderError(f"provider config section must be an object: {fallback}", classification="invalid_config")
             merged.update(legacy)
             overrides.update(legacy)
 
@@ -80,50 +93,60 @@ def resolve_role_configs(
                     merged[key] = value
                     overrides[key] = value
 
+        if profile_name and not merged.get("profile_name") and not merged.get("profile"):
+            merged["profile_name"] = profile_name
         resolved[role] = _model_config(role, merged, overrides)
     return resolved
 
 
 def _model_config(role: str, values: dict[str, object], overrides: dict[str, object]) -> ModelConfig:
-    provider = normalize_provider_name(str(values.get("provider", "command")))
+    provider_value = values.get("transport", values.get("provider", "command"))
+    provider = normalize_provider_name(str(provider_value))
     model = str(values.get("model", "")).strip()
     command = str(values.get("command", "")).strip()
-    base_url = str(values.get("base_url", "")).strip()
-    api_key_env = str(values.get("api_key_env", "")).strip()
-    timeout_seconds = int(values.get("timeout_seconds", 600))
 
     if provider == "command":
-        if overrides.get("model") not in (None, "") and overrides.get("command") in (None, ""):
+        requested_provider = str(overrides.get("transport", overrides.get("provider", ""))).strip().casefold()
+        if requested_provider == "ollama":
+            command = command or ollama_command_for_model(model)
+        elif overrides.get("model") not in (None, "") and overrides.get("command") in (None, ""):
             command = ollama_command_for_model(model)
         if not command and model:
             command = ollama_command_for_model(model)
-        base_url = ""
-        api_key_env = ""
+        values = dict(values)
+        values["provider"] = provider
+        values["command"] = command
+        values["base_url"] = ""
+        values["api_key_env"] = ""
+        values["headers"] = {}
+        values["request_options"] = {}
+        values["output_limit"] = None
+        values["free_only"] = False
+        values["fallback_models"] = []
     else:
-        command = ""
-    if provider != "chat-completions":
-        base_url = ""
-        api_key_env = ""
+        values = dict(values)
+        values["provider"] = provider
+        values["command"] = ""
 
-    if timeout_seconds <= 0:
-        raise ProviderError(f"{role} timeout must be greater than zero")
-    if not model and provider != "command":
-        raise ProviderError(f"{role} provider requires a model")
-    if provider == "command" and not command:
-        raise ProviderError(f"{role} command provider requires a command")
-    if provider == "chat-completions" and not base_url:
-        raise ProviderError(f"{role} chat-completions provider requires a base URL")
-    return ModelConfig(provider, model, command, base_url, api_key_env, timeout_seconds)
+    return model_config_from_values(role, values)
 
 
 def model_config_to_dict(config: ModelConfig) -> dict[str, object]:
     return {
+        "transport": config.provider,
         "provider": config.provider,
         "model": config.model,
         "command": config.command,
         "base_url": config.base_url,
         "api_key_env": config.api_key_env,
         "timeout_seconds": config.timeout_seconds,
+        "headers": dict(config.headers),
+        "request_options": dict(config.request_options),
+        "output_limit": config.output_limit,
+        "profile_name": config.profile_name,
+        "free_only": config.free_only,
+        "fallback_models": list(config.fallback_models),
+        "direct_edit": config.direct_edit,
     }
 
 
@@ -143,26 +166,34 @@ def invoke_model(
     attempt: int = 0,
 ) -> tuple[str, dict[str, object]]:
     if role not in MODEL_ROLES:
-        raise ProviderError(f"unknown model role: {role}")
+        raise ProviderError(f"unknown model role: {role}", classification="invalid_config")
     started_at = datetime.now(timezone.utc)
     started = time.monotonic()
     record: dict[str, object] = {
         "role": role,
         "attempt": attempt,
+        "retry_count": attempt,
         **config.safe_metadata(),
         "started_at": started_at.isoformat(),
     }
     try:
-        response = provider.generate(prompt, model=config.model, timeout_seconds=config.timeout_seconds)
+        response = provider.invoke(prompt, model=config.model, timeout_seconds=config.timeout_seconds)
     except Exception as exc:
+        classification = exc.classification if isinstance(exc, ProviderError) else type(exc).__name__
         record.update(
             {
                 "ended_at": datetime.now(timezone.utc).isoformat(),
                 "elapsed_seconds": round(time.monotonic() - started, 6),
                 "status": "failure",
                 "error_type": type(exc).__name__,
+                "failure_classification": classification,
             }
         )
+        if isinstance(exc, ProviderError):
+            if exc.status_code is not None:
+                record["status_code"] = exc.status_code
+            if exc.retry_after:
+                record["retry_after"] = exc.retry_after
         raise ModelInvocationError(record) from exc
     record.update(
         {
@@ -171,7 +202,8 @@ def invoke_model(
             "status": "success",
         }
     )
-    return response, record
+    record.update(response.telemetry)
+    return response.text, record
 
 
 def append_invocation_metadata(path: Path, record: dict[str, object]) -> None:
