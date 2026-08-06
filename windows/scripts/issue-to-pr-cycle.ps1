@@ -62,9 +62,10 @@ $UsePromptRunnerModule = [string]::IsNullOrWhiteSpace($PromptRunner)
 if ([string]::IsNullOrWhiteSpace($PromptRunner)) { $PromptRunner = Join-Path $toolRoot "automation\prompt_runner.py" }
 $currentDir = Join-Path ".codex-run" "current"
 $telemetryFile = Join-Path $currentDir "model-invocations.json"
-$ProviderMode = -not [string]::IsNullOrWhiteSpace($ProviderProfile) -or
+$PlannerProviderMode = -not [string]::IsNullOrWhiteSpace($ProviderProfile) -or
     -not [string]::IsNullOrWhiteSpace($PlannerProvider) -or
-    -not [string]::IsNullOrWhiteSpace($PlannerModel) -or
+    -not [string]::IsNullOrWhiteSpace($PlannerModel)
+$AgentProviderMode = -not [string]::IsNullOrWhiteSpace($ProviderProfile) -or
     -not [string]::IsNullOrWhiteSpace($AgentProvider) -or
     -not [string]::IsNullOrWhiteSpace($AgentModel)
 if ([string]::IsNullOrWhiteSpace($PlannerAgentCommand)) { $PlannerAgentCommand = $AgentCommand }
@@ -237,7 +238,7 @@ function Invoke-PlanAgent {
     $plannerPath = Join-Path $currentDir "planner.md"
     $planPath = Join-Path $currentDir "plan.md"
     $plannerPrompt = Get-FileText -Path $plannerPath
-    if ($ProviderMode) {
+    if ($PlannerProviderMode) {
         Invoke-ProviderPrompt -Role "planner" -Prompt $plannerPrompt -OutputFile $planPath
     }
     else {
@@ -253,7 +254,7 @@ function Invoke-ImplementAgent {
     $implementerPath = Join-Path $currentDir "implementer.md"
     $commitMessagePath = Join-Path $currentDir "commit-message.txt"
     $implementerPrompt = Get-FileText -Path $implementerPath
-    if ($ProviderMode) {
+    if ($AgentProviderMode) {
         Invoke-ProviderPrompt -Role "implementer" -Prompt $implementerPrompt -CommitMessageFile $commitMessagePath
     }
     else {
@@ -268,7 +269,7 @@ function Invoke-ImplementAgent {
 function Invoke-RepairAgent {
     param([Parameter(Mandatory = $true)][string]$PromptPath)
     $repairPrompt = Get-FileText -Path $PromptPath
-    if ($ProviderMode) {
+    if ($AgentProviderMode) {
         Invoke-ProviderPrompt -Role "fixer" -Prompt $repairPrompt
     }
     else {
@@ -281,7 +282,7 @@ function Invoke-VerifyAgent {
     $verifierPath = Join-Path $currentDir "verifier.md"
     $resultPath = Join-Path $currentDir "verification-result.md"
     $verifierPrompt = Get-FileText -Path $verifierPath
-    if ($ProviderMode) {
+    if ($AgentProviderMode) {
         Invoke-ProviderPrompt -Role "verifier" -Prompt $verifierPrompt -OutputFile $resultPath
     }
     else {
