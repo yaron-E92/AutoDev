@@ -1,98 +1,372 @@
-# Script-based issue-to-PR workflow
+# Running the provider-agnostic issue-to-PR workflow
 
-The preferred real-issue workflow keeps deterministic GitHub and repository stages in the existing Windows/Linux scripts while delegating every configured model role to the shared Python provider layer.
+This is the canonical end-to-end guide for running AutoDev with Groq, OpenRouter, local Ollama, Codex CLI, or another supported provider.
+
+The normal workflow remains:
 
 ```text
-issue selection and state
-  -> reader
-  -> synthesizer
+GitHub issue
+  -> prepare and area-read the repository
   -> planner
   -> implementer
-  -> local/CI checks
+  -> deterministic local checks
   -> fixer when needed
+  -> pull request and CI
   -> verifier
-  -> ready-for-review state
+  -> ready-for-review status
 ```
 
-The six roles are independently configured in one version-2 provider profile. The shell scripts pass only role, profile, prompt, output, and telemetry paths to `automation.prompt_runner`.
+Provider selection is configured in one JSON profile. PowerShell and Bash only orchestrate stages; Python resolves roles, constructs requests, invokes providers, records telemetry, and parses model output.
 
-## Checked-in profiles
+Codex Desktop is optional. A complete run can be headless.
+
+## 1. Choose a checked-in provider profile
+
+AutoDev includes three examples:
 
 ```text
 examples/providers/groq-openrouter-free.json
 examples/providers/ollama-local-all-roles.json
-examples/providers/ollama-cloud-nemotron-minimax.json
 examples/providers/codex-command-profile.json
 ```
 
-The mixed Groq/OpenRouter example intentionally contains `REPLACE_WITH_OPENROUTER_MODEL:free`. Copy the file and replace that value with a currently accessible model that still ends in `:free`.
+### Mixed Groq and OpenRouter
 
-Set credentials in the environment, not in JSON:
+`examples/providers/groq-openrouter-free.json` maps:
+
+```text
+reader       -> Groq
+synthesizer  -> Groq
+planner      -> Groq
+implementer  -> OpenRouter :free model
+fixer        -> OpenRouter :free model
+verifier     -> Groq
+```
+
+Copy the example before editing it:
 
 ```powershell
-$env:GROQ_API_KEY = "..."
-$env:OPENROUTER_API_KEY = "..."
+Copy-Item examples\providers\groq-openrouter-free.json "$env:USERPROFILE\autodev-groq-openrouter.json"
 ```
 
 ```bash
-export GROQ_API_KEY="..."
-export OPENROUTER_API_KEY="..."
+cp examples/providers/groq-openrouter-free.json ~/autodev-groq-openrouter.json
 ```
 
-## Provider-neutral preflight
+Replace:
 
-Preflight checks configuration, required environment variables, command executables, endpoint reachability, and model visibility without selecting an issue or modifying GitHub/repository state.
+```text
+REPLACE_WITH_OPENROUTER_MODEL:free
+```
+
+with a currently available OpenRouter model whose identifier ends in `:free`.
+
+Do not remove:
+
+```json
+"free_only": true
+```
+
+With `free_only` enabled, AutoDev rejects paid models and paid fallbacks and sends provider routing options that disable silent fallback. If the selected free model is unavailable, the invocation fails instead of using a paid route.
+
+### Local Ollama
+
+`examples/providers/ollama-local-all-roles.json` runs all six roles through the generic command transport.
+
+Install Ollama, pull the configured models, and ensure the local service is available. The profile can then be used without API keys.
+
+### Codex CLI command profile
+
+`examples/providers/codex-command-profile.json` demonstrates Codex CLI as a generic command provider.
+
+The implementer and fixer entries use:
+
+```json
+"direct_edit": true
+```
+
+That means the command edits the workspace directly. HTTP providers and command providers without `direct_edit` must return AutoDev's exact patch contract instead.
+
+## 2. Configure credentials
+
+Profiles contain only environment-variable names. Never put API-key values in the JSON file.
+
+For the mixed profile, set:
+
+### Windows PowerShell
+
+```powershell
+$env:GROQ_API_KEY = "your-groq-key"
+$env:OPENROUTER_API_KEY = "your-openrouter-key"
+```
+
+### Linux
+
+```bash
+export GROQ_API_KEY="your-groq-key"
+export OPENROUTER_API_KEY="your-openrouter-key"
+```
+
+The resulting telemetry records only the variable names and whether they were configured. It does not persist the values.
+
+## 3. Run provider preflight first
+
+Preflight does not select an issue, change labels, create a branch, modify the target repository, or contact GitHub.
+
+It checks:
+
+- profile structure;
+- required environment variables;
+- command executables;
+- endpoint reachability;
+- model accessibility when the provider exposes a safe model endpoint;
+- free-only configuration validity.
+
+### Direct Python preflight
 
 Windows:
 
 ```powershell
-scripts\run-real-issue.ps1 `
-  -WorkingDirectory C:\src\target-repo `
-  -Mode Preflight `
-  -ProviderProfile C:\src\AutoDev\examples\providers\groq-openrouter-free.json
+python -m automation.provider_preflight `
+  --provider-profile "$env:USERPROFILE\autodev-groq-openrouter.json" `
+  --out .codex-run\provider-preflight.json
 ```
 
 Linux:
+
+```bash
+python3 -m automation.provider_preflight \
+  --provider-profile ~/autodev-groq-openrouter.json \
+  --out .codex-run/provider-preflight.json
+```
+
+### Through the existing Windows entrypoint
+
+From the AutoDev checkout:
+
+```powershell
+scripts\run-real-issue.ps1 `
+  -Mode Preflight `
+  -ProviderProfile "$env:USERPROFILE\autodev-groq-openrouter.json"
+```
+
+### Through the existing Linux entrypoint
+
+The Linux wrapper still loads the project environment file:
 
 ```bash
 scripts/run-real-issue.sh \
   --env ~/automation/state/PROJECT.env \
   --mode Preflight \
-  --provider-profile examples/providers/groq-openrouter-free.json
+  --provider-profile ~/autodev-groq-openrouter.json
 ```
 
-The default result is `.codex-run/provider-preflight.json`. It contains safe profile, role, transport, model, and failure-classification data only.
+A successful report ends with:
 
-## Run one issue
+```json
+"status": "success"
+```
 
-Windows:
+Do not start a full run until preflight succeeds.
+
+## 4. Run one complete issue-to-PR cycle
+
+The target repository must already use the trusted AutoDev scripts and labels. The workflow never merges the pull request.
+
+### Windows PowerShell
+
+Run from the AutoDev checkout and point `-WorkingDirectory` at the target repository:
 
 ```powershell
 scripts\run-real-issue.ps1 `
-  -WorkingDirectory C:\src\target-repo `
-  -Username owner `
-  -Repo repository `
-  -Issue 46 `
-  -ProviderProfile C:\src\AutoDev\examples\providers\groq-openrouter-free.json
+  -Mode Run `
+  -WorkingDirectory "C:\repos\TARGET_REPOSITORY" `
+  -Username "OWNER" `
+  -Repo "REPOSITORY" `
+  -Base "main" `
+  -Remote "origin" `
+  -ProviderProfile "$env:USERPROFILE\autodev-groq-openrouter.json"
 ```
 
-Linux:
+To process a specific issue:
+
+```powershell
+scripts\run-real-issue.ps1 `
+  -Mode Run `
+  -WorkingDirectory "C:\repos\TARGET_REPOSITORY" `
+  -Username "OWNER" `
+  -Repo "REPOSITORY" `
+  -Issue 46 `
+  -ProviderProfile "$env:USERPROFILE\autodev-groq-openrouter.json"
+```
+
+Without `-Issue`, AutoDev selects the next open issue labeled `autodev:ready` that is not already running or blocked.
+
+For a local task without a GitHub issue:
+
+```powershell
+scripts\run-real-issue.ps1 `
+  -Mode Run `
+  -WorkingDirectory "C:\repos\TARGET_REPOSITORY" `
+  -Username "OWNER" `
+  -Repo "REPOSITORY" `
+  -DescriptionFile "C:\temp\task.md" `
+  -ProviderProfile "$env:USERPROFILE\autodev-groq-openrouter.json"
+```
+
+### Linux
+
+Run from the target repository, using the AutoDev wrapper path:
 
 ```bash
-scripts/run-real-issue.sh \
+~/repos/AutoDev/scripts/run-real-issue.sh \
   --env ~/automation/state/PROJECT.env \
   --mode Run \
-  --owner owner \
-  --repo repository \
-  --issue 46 \
-  --provider-profile examples/providers/groq-openrouter-free.json
+  --owner OWNER \
+  --repo REPOSITORY \
+  --base main \
+  --remote origin \
+  --provider-profile ~/autodev-groq-openrouter.json
 ```
 
-Omit the issue number to select the next eligible `autodev:ready` issue. Literal task text remains supported through description flags.
+For a specific issue:
 
-## Transport contract
+```bash
+~/repos/AutoDev/scripts/run-real-issue.sh \
+  --env ~/automation/state/PROJECT.env \
+  --mode Run \
+  --owner OWNER \
+  --repo REPOSITORY \
+  --issue 46 \
+  --provider-profile ~/autodev-groq-openrouter.json
+```
 
-Supported transport names are:
+For literal task text:
+
+```bash
+~/repos/AutoDev/scripts/run-real-issue.sh \
+  --env ~/automation/state/PROJECT.env \
+  --mode Run \
+  --owner OWNER \
+  --repo REPOSITORY \
+  --description-file /tmp/task.md \
+  --provider-profile ~/autodev-groq-openrouter.json
+```
+
+## 5. Run only one workflow stage
+
+The existing transition modes remain available:
+
+```text
+Preflight
+Prepare
+Plan
+RenderImplementerPrompt
+LocalCheck
+PrAndCi
+RenderVerificationRepair
+ReadyForReview
+Blocked
+```
+
+Examples:
+
+```powershell
+scripts\run-real-issue.ps1 `
+  -Mode Plan `
+  -WorkingDirectory "C:\repos\TARGET_REPOSITORY" `
+  -Username OWNER `
+  -Repo REPOSITORY `
+  -ProviderProfile "$env:USERPROFILE\autodev-groq-openrouter.json"
+```
+
+```bash
+~/repos/AutoDev/scripts/run-real-issue.sh \
+  --env ~/automation/state/PROJECT.env \
+  --mode Plan \
+  --owner OWNER \
+  --repo REPOSITORY \
+  --provider-profile ~/autodev-groq-openrouter.json
+```
+
+## 6. Understand the two command-provider modes
+
+### Raw text or patch mode
+
+HTTP transports and ordinary command transports return text to AutoDev.
+
+Implementer output must be either:
+
+```text
+NO_CHANGES_REQUIRED
+<optional explanation>
+```
+
+or:
+
+```text
+COMMIT_MESSAGE: concise imperative commit message
+BEGIN_UNIFIED_DIFF
+<unified diff applicable with git apply>
+END_UNIFIED_DIFF
+```
+
+Fixer output uses the same format without requiring `COMMIT_MESSAGE`.
+
+Verifier output must start with exactly:
+
+```text
+PASS
+```
+
+or:
+
+```text
+FAIL
+```
+
+Provider metadata, token usage, cost, HTTP diagnostics, and reasoning summaries are recorded separately and never enter these parsers.
+
+### Direct-edit command mode
+
+A command profile may set:
+
+```json
+"direct_edit": true
+```
+
+for implementer or fixer roles. The command then edits the workspace itself rather than returning a unified diff.
+
+A direct-edit implementer must also write the requested commit-message file, or return a `COMMIT_MESSAGE:` line that AutoDev can extract.
+
+Do not use `direct_edit` for HTTP transports.
+
+## 7. Provider-profile schema
+
+A version-2 profile uses independent role entries:
+
+```json
+{
+  "version": 2,
+  "name": "my-provider-profile",
+  "roles": {
+    "reader": {
+      "transport": "openai-compatible-chat-completions",
+      "model": "provider/model",
+      "base_url": "https://provider.example/v1",
+      "api_key_env": "PROVIDER_API_KEY",
+      "timeout_seconds": 600,
+      "headers": {
+        "HTTP-Referer": "https://example.invalid/autodev",
+        "X-Title": "AutoDev"
+      },
+      "request_options": {}
+    }
+  }
+}
+```
+
+Supported transports:
 
 ```text
 command
@@ -101,98 +375,200 @@ openai-compatible-responses
 mock
 ```
 
-Backward-compatible aliases remain accepted:
+Backward-compatible aliases include:
 
 ```text
-ollama
 chat-completions
 openai-compatible
 responses
+ollama
 ```
 
-`ollama` is implemented through the command transport. A model-only legacy override generates `ollama run <model>` in Python.
-
-For HTTP transports, configure `base_url`, `model`, and optionally `api_key_env`, allowlisted `headers`, `request_options`, and `output_limit`. API-key values and sensitive headers are never written to metadata.
-
-Chat Completions omits `max_tokens` unless `output_limit` is explicit. Responses omits `max_output_tokens` unless `output_limit` is explicit.
-
-## Text providers versus direct-edit commands
-
-HTTP providers and normal command providers return pure text. Implementer/fixer text must satisfy the existing patch contract:
+Optional role fields:
 
 ```text
-NO_CHANGES_REQUIRED
+transport or provider
+model
+base_url
+api_key_env
+timeout_seconds
+headers
+request_options
+output_limit
+command
+profile_name
+free_only
+fallback_models
+direct_edit
 ```
 
-or:
+`headers` are allowlisted. Authorization, cookies, API-key headers, and other secret-bearing headers are rejected.
+
+Chat Completions omits `max_tokens` unless `output_limit` is explicitly configured. Responses omits `max_output_tokens` unless explicitly configured.
+
+## 8. Legacy command-line compatibility
+
+The existing planner and agent flags remain accepted:
+
+Windows:
 
 ```text
-BEGIN_UNIFIED_DIFF
-<applicable unified diff>
-END_UNIFIED_DIFF
+-PlannerProvider
+-PlannerModel
+-PlannerAgentCommand
+-AgentProvider
+-AgentModel
+-AgentCommand
 ```
 
-Implementer responses may additionally provide:
+Linux:
 
 ```text
-COMMIT_MESSAGE: concise imperative message
+--planner-provider
+--planner-model
+--planner-agent-command
+--agent-provider
+--agent-model
+--agent-command
 ```
 
-Command profiles may set `direct_edit: true` for implementer/fixer. In that mode the command edits the workspace directly; the implementer must also write the requested commit-message file. The checked-in Codex command profile uses direct-edit only for these two roles.
-
-## OpenRouter free-only safety
-
-When `free_only` is true:
-
-- the primary model and every configured fallback must end in `:free`;
-- AutoDev sends `provider.allow_fallbacks: false`;
-- a non-free model causes configuration failure;
-- AutoDev does not silently replace the requested model with a paid route.
-
-The example does not claim that any specific free model is permanently available.
-
-## Telemetry and errors
-
-`model-invocations.json` is separate from model response text. The parsers see only the response text. Safe records may contain:
+Supplying only a model retains the historical Ollama behavior and derives:
 
 ```text
-profile name
+ollama run <model>
+```
+
+The shells no longer validate provider names. Python performs provider validation and error classification.
+
+Use a provider profile for new configurations. Legacy flags are primarily for backward compatibility and temporary overrides.
+
+## 9. Outputs and telemetry
+
+The trusted script workflow writes its current state beneath:
+
+```text
+.codex-run/current/
+```
+
+Important files include:
+
+```text
+issue.md
+planner.md
+plan.md
+implementer.md
+commit-message.txt
+verification-result.md
+model-invocations.json
+provider-preflight.json
+state.json
+```
+
+`model-invocations.json` records safe per-call information where available:
+
+```text
 role
 transport
-requested and provider-reported model
-timeout
-timestamps and elapsed seconds
-attempt/retry count
-numeric usage and reported cost
-HTTP status and retry-after
+profile name
+configured model
+reported model
+start and end timestamps
+elapsed time
+success or failure
+retry count
+token usage
+reported cost
 sanitized failure classification
-prompt-policy mode/version
 ```
 
-Authentication values, authorization headers, provider response bodies, exception diagnostics, and arbitrary environment values are not persisted.
+AutoDev does not invent usage or cost when the provider does not report them.
 
-Failures distinguish invalid configuration, missing credentials, unavailable command, authentication failure, payment/plan required, not found, timeout, rate limit/quota exhaustion, malformed response, and transport failure.
+## 10. Troubleshooting
 
-## Legacy flags
+### Authentication failure
 
-The existing planner/agent provider, model, and command flags remain accepted by Windows and Linux wrappers. The wrappers no longer restrict or interpret provider names; Python resolves and validates the overrides. When no profile or provider/model override is supplied, the existing direct-agent command path remains available.
+```text
+authentication_failed
+HTTP 401
+```
 
-Repair calls are normalized to the `fixer` role.
+Check the environment-variable name in the profile and confirm the variable is available to the process running AutoDev.
 
-## Python operational runner
+### Payment or plan required
 
-`automation.run_real_issue` continues to support the provider-config file directly:
+```text
+payment_required
+HTTP 402
+```
+
+The provider rejected the account or route for plan or billing reasons. AutoDev does not switch to a paid fallback automatically.
+
+### Endpoint or model missing
+
+```text
+not_found
+HTTP 404
+```
+
+Check `base_url`, the selected transport endpoint, and the exact model identifier.
+
+### Rate limit or quota exhausted
+
+```text
+rate_limited
+HTTP 429
+```
+
+Retry later or explicitly configure another eligible fallback. For `free_only` profiles, every configured fallback must also end in `:free`.
+
+### Malformed response
+
+```text
+malformed_response
+```
+
+The provider returned invalid JSON or omitted the expected assistant/output text field.
+
+### Timeout or unreachable endpoint
+
+```text
+timeout
+transport_error
+```
+
+Check connectivity and increase `timeout_seconds` only when the provider is otherwise healthy.
+
+### Command unavailable
+
+```text
+command_unavailable
+```
+
+Install the configured executable or correct the command template. Preflight checks the first executable in the command.
+
+## 11. Python patch-contract runner
+
+`automation.run_real_issue` remains available for users who specifically want the older Python-owned planning, implementation, verification, and PR flow:
 
 ```bash
-python -m automation.run_real_issue \
-  --repo . \
-  --github-repo owner/repository \
+python3 -m automation.run_real_issue \
+  --repo /path/to/repository \
+  --github-repo OWNER/REPOSITORY \
   --issue 46 \
-  --mode implement \
-  --provider-config examples/providers/ollama-local-all-roles.json \
-  --out .autodev-runs/issue-46
+  --mode plan-only \
+  --provider-config ~/autodev-groq-openrouter.json \
+  --out /tmp/autodev-run
 ```
 
-Its `plan-only`, `implement`, `pr`, skip, dry-run, label, branch, patch, and verification behavior is unchanged. Provider roles and prompt policies are shared with the script workflow.
+For the normal trusted Windows or Linux issue-to-PR workflow, use `scripts/run-real-issue.ps1` or `scripts/run-real-issue.sh` as documented above.
 
-See `docs/model-roles.md` for the complete version-2 schema and role-policy configuration.
+## Scope boundaries
+
+This provider work does not implement:
+
+- semantic verification policy from issue #35;
+- Headroom compression from issue #36;
+- resumable run manifests from issue #37;
+- the evaluation harness from issue #38.
+
+Those features remain separate from provider selection and invocation.
