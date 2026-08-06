@@ -1,168 +1,77 @@
-# Windows Scripts
+# Windows scripts
 
-Windows PowerShell automation scripts belong here.
+Windows PowerShell automation scripts belong here. Common prompts, skills, and provider profiles remain at the repository root; do not duplicate them under this directory.
 
-Common files remain at the repository root:
+## Trusted issue-to-PR workflow
 
-- `agentFiles/`
-- `promptTemplates/`
-- `skill/`
-- `codex-profiles.json`
+`scripts/run-real-issue.ps1` delegates to `windows/scripts/issue-to-pr-cycle.ps1`, which preserves the existing prepare, branch, planning, implementation, local-check, repair, PR/CI, verification, and issue-status stages.
 
-Do not duplicate common prompt, profile, or skill files under this directory.
-## Single-command workflow
+Provider resolution and model invocation are delegated to the shared Python modules. The PowerShell orchestrator does not implement Groq, OpenRouter, Ollama, Codex, Chat Completions, or Responses semantics.
 
-Use `issue-to-pr-cycle.ps1` for the native Windows equivalent of the old prompt-driven flow. It composes the Windows prepare/finalize/mark scripts and invokes configurable planner and coder agent commands or raw provider/model runners at the points where agent work is needed.
+## Provider profile
+
+Set API keys in the current environment without committing them:
 
 ```powershell
-pwsh -File "C:\Users\you\codex-tools\issue-to-pr-cycle.ps1" `
-  -Mode Run `
+$env:GROQ_API_KEY = "..."
+$env:OPENROUTER_API_KEY = "..."
+```
+
+Copy `examples/providers/groq-openrouter-free.json` and replace `REPLACE_WITH_OPENROUTER_MODEL:free` with a currently accessible OpenRouter model that still ends in `:free`.
+
+Run the non-mutating preflight:
+
+```powershell
+.\scripts\run-real-issue.ps1 `
+  -WorkingDirectory C:\src\target-repo `
+  -Mode Preflight `
+  -ProviderProfile C:\src\AutoDev\examples\providers\groq-openrouter-free.json
+```
+
+Run one issue through the existing workflow:
+
+```powershell
+.\scripts\run-real-issue.ps1 `
+  -WorkingDirectory C:\src\target-repo `
   -Username owner `
-  -Repo AutoDev `
-  -PlannerAgentCommand "reader-agent {prompt_file}" `
-  -AgentCommand "coder-agent {prompt_file}"
+  -Repo repository `
+  -Issue 46 `
+  -ProviderProfile C:\src\AutoDev\examples\providers\groq-openrouter-free.json
 ```
 
-For provider mode, pass `-PlannerProvider command` / `-AgentProvider command` with command strings when the tool returns stdout artifacts, or pass model names for Ollama. Supplying `-PlannerModel` or `-AgentModel` without an explicit provider defaults that side to `ollama` and runs `ollama run <model>` with the prompt on stdin. Provider-mode implementation and repair responses must return `NO_CHANGES_REQUIRED` or a marked unified diff that AutoDev applies with `git apply`.
+The same profile independently configures `reader`, `synthesizer`, `planner`, `implementer`, `fixer`, and `verifier`. Model response text is parsed separately from `.codex-run/current/model-invocations.json` telemetry.
 
-```powershell
-pwsh -File "C:\Users\you\codex-tools\issue-to-pr-cycle.ps1" `
-  -Mode Run `
-  -Username owner `
-  -Repo AutoDev `
-  -PlannerModel qwen35-9b-32k `
-  -AgentModel devstral-small2-12k
-```
+## Other checked-in profiles
 
-Omit `-Issue` to process the next open issue labeled `autodev:ready`, pass `-Issue 123` for a specific GitHub issue, or pass `-Description "..."` / `-DescriptionFile ideas.md` for a local task description. `-Mode Plan` runs only prepare plus the planner agent; individual transition modes are available for debugging and resuming.
+- `examples/providers/ollama-local-all-roles.json`: local Ollama for all roles.
+- `examples/providers/ollama-cloud-nemotron-minimax.json`: opt-in Ollama Cloud mapping.
+- `examples/providers/codex-command-profile.json`: Codex CLI profiles through the generic command transport.
 
-## Planner-only helper
+The Codex Desktop application is optional. A complete run can execute headlessly through PowerShell and Python.
 
-Use `codex-plan-current-issue.ps1` after `codex-prepare-next-ready-issue.ps1` when the planning phase should be run by a dedicated reader/planner agent before implementation starts. It reads `.codex-run/current/planner.md`, invokes the configured planner agent, and requires `.codex-run/current/plan.md` to be written.
+## Legacy compatibility
 
-```powershell
-pwsh -File "C:\Users\you\codex-tools\codex-plan-current-issue.ps1" `
-  -PlannerAgentCommand "reader-agent {prompt_file}"
-```
+Existing `-PlannerProvider`, `-PlannerModel`, `-AgentProvider`, `-AgentModel`, `-PlannerAgentCommand`, and `-AgentCommand` parameters remain accepted. PowerShell forwards them to Python rather than validating provider names itself. Supplying only a legacy model still uses Ollama compatibility in Python.
 
-If `-PlannerAgentCommand` is omitted, the script uses `$env:PLANNER_AGENT_COMMAND` or falls back to `codex exec`. Commands can use `{prompt_file}` or `{prompt}` placeholders for area-reader-style prompt runners and are executed through PowerShell, not bash.
+When no provider profile or legacy provider/model override is supplied, the established direct-agent command workflow remains available and defaults to `codex exec`.
 
-## Automation Prompt
+## Individual transition modes
 
-Use this as the Windows automation task, adjusting repo names and paths.
+`issue-to-pr-cycle.ps1` supports:
 
 ```text
-Use the issue-to-pr-automation skill.
-
-Run exactly one issue-to-PR cycle.
-
-Important:
-- Do not call `codex exec`.
-- You are the Codex agent. Do the planning, implementation, repair, and verification yourself.
-- Never merge to main.
-- Process only one issue.
-- Keep all changes issue-scoped.
-- Do not perform unrelated refactors.
-
-Step 1 — Prepare
-
-Run:
-
-pwsh -File "C:\Users\yaref92\codex-tools\codex-prepare-next-ready-issue.ps1" -Username "yaron-E92" -Repo "PHOODAB" -Base main -Remote origin -KeePassCliPath "C:\Program Files\KeePassXC\keepassxc-cli.exe" -KeePassDatabasePath "C:\Users\yaref92\Documents\CodexSecrets\codex-automation.kdbx" -KeePassKeyFilePath "C:\Users\yaref92\Documents\CodexSecretsKey\codex-automation.keyx" -KeePassEntryPath "PHOODAB_CODEX_EXPIRES28MAY2027" -KeePassNoPassword -GhConfigDir ".codex-run\gh-config"
-
-If it prints NO_READY_ISSUE, stop.
-
-Step 2 — Plan
-
-Read `.codex-run/current/planner.md`.
-
-Write the plan to:
-
-.codex-run/current/plan.md
-
-Step 3 — Render implementer prompt
-
-Run:
-
-pwsh -File "C:\Users\yaref92\codex-tools\codex-finalize-current-issue.ps1" -Mode RenderImplementerPrompt
-
-Step 4 — Implement
-
-Read `.codex-run/current/implementer.md`.
-
-Implement the issue directly in the workspace.
-
-After implementing the issue, write a concise Git commit message to:
-
-.codex-run/current/commit-message.txt
-
-Rules for the commit message:
-- One short first line.
-- Prefer imperative mood.
-- Mention the affected area or behavior.
-- Do not include markdown.
-- Do not include quotes around the message.
-
-Example:
-Show item names in expiring entry lists
-
-Step 5 — Local check
-
-Run:
-
-pwsh -File "C:\Users\yaref92\codex-tools\codex-finalize-current-issue.ps1" -Mode LocalCheck
-
-If it prints LOCAL_CHECK_FAILED:
-- Read `.codex-run/current/local-repair.md`.
-- Fix only the local-check failure.
-- Rerun LocalCheck.
-- Repeat at most 3 times.
-
-Step 6 — PR and CI
-
-Run:
-
-pwsh -File "C:\Users\yaref92\codex-tools\codex-finalize-current-issue.ps1" -Mode PrAndCi
-
-If it prints CI_FAILED:
-- Read `.codex-run/current/ci-repair.md`.
-- Fix only the CI failure.
-- Run LocalCheck again.
-- Then rerun PrAndCi.
-- Repeat at most 3 times.
-
-Step 7 — Verify
-
-When PrAndCi prints CI_PASSED:
-- Read `.codex-run/current/verifier.md`.
-- Verify whether the implementation fully satisfies the issue.
-- If it passes, write exactly `PASS` to `.codex-run/current/verification-result.md`.
-- If it fails, write `FAIL` plus the concrete gaps to `.codex-run/current/verification-result.md`.
-
-If verification fails:
-- Run:
-
-pwsh -File "C:\Users\yaref92\codex-tools\codex-finalize-current-issue.ps1" -Mode RenderVerificationRepair
-
-- Read `.codex-run/current/verification-repair.md`.
-- Fix only the verifier gaps.
-- Rerun LocalCheck.
-- Rerun PrAndCi.
-- Verify again.
-
-Step 8 — Mark ready
-
-When verification passes, run:
-
-pwsh -File "C:\Users\yaref92\codex-tools\codex-mark-current-issue.ps1" -Status ReadyForReview
-
-If you must give up, run:
-
-pwsh -File "C:\Users\yaref92\codex-tools\codex-mark-current-issue.ps1" -Status Blocked -Message "Automation could not complete after repair attempts."
-
-Rules:
-- Never merge to main.
-- Do not bypass the trusted scripts for GitHub state changes.
-- Do not perform unrelated refactors.
-- Do not expand the issue scope.
+Run
+Plan
+Prepare
+Preflight
+RenderImplementerPrompt
+LocalCheck
+PrAndCi
+RenderVerificationRepair
+ReadyForReview
+Blocked
 ```
+
+Use individual modes only for debugging or resuming the trusted workflow. Existing `codex-*` script names remain for compatibility.
+
+See `docs/model-roles.md` for the provider schema, safe headers, request options, explicit output limits, OpenRouter free-only rules, failure classification, and telemetry fields.
