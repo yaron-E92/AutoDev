@@ -1,0 +1,44 @@
+{
+  "version": 2,
+  "name": "codex-command-profile",
+  "roles": {
+    "reader": {
+      "transport": "command",
+      "model": "autodev-reader",
+      "command": "codex exec --profile autodev-reader {prompt}",
+      "timeout_seconds": 1800
+    },
+    "synthesizer": {
+      "transport": "command",
+      "model": "autodev-reader",
+      "command": "codex exec --profile autodev-reader {prompt}",
+      "timeout_seconds": 1800
+    },
+    "planner": {
+      "transport": "command",
+      "model": "autodev-planner",
+      "command": "codex exec --profile autodev-planner {prompt}",
+      "timeout_seconds": 1800
+    },
+    "implementer": {
+      "transport": "command",
+      "model": "autodev-implementer",
+      "command": "codex exec --profile autodev-implementer {prompt}",
+      "timeout_seconds": 2400,
+      "direct_edit": true
+    },
+    "fixer": {
+      "transport": "command",
+      "model": "autodev-fixer",
+      "command": "codex exec --profile autodev-fixer {prompt}",
+      "timeout_seconds": 2400,
+      "direct_edit": true
+    },
+    "verifier": {
+      "transport": "command",
+      "model": "autodev-verifier",
+      "command": "codex exec --profile autodev-verifier {prompt}",
+      "timeout_seconds": 1800
+    }
+  }
+}
