@@ -4,12 +4,7 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Run one trusted issue-to-PR workflow without a hard-coded agent backend.
-
-The default Run mode performs the deterministic workflow steps and invokes a
-configurable agent command on each rendered prompt at the point where agent work
-is needed. The default agent command is `codex exec`; override it with
---agent-command or AGENT_COMMAND to use another tool-capable prompt runner.
-Raw Ollama models are supported through provider/model patch mode.
+Provider resolution is delegated to Python.
 
 Usage:
   issue-to-pr-cycle.sh --env ENV_FILE [--mode Run] [options]
@@ -18,6 +13,7 @@ Modes:
   Run                        Prepare, plan, implement, check, PR/CI, verify, mark ready.
   Plan                       Prepare one issue and write plan.md with the planner agent.
   Prepare                    Select one ready issue and render planner.md.
+  Preflight                  Validate the configured provider profile without repository mutation.
   RenderImplementerPrompt    Render implementer.md after plan.md exists.
   LocalCheck                 Run local verification and render local-repair.md on failure.
   PrAndCi                    Commit via GitHub API, open/update PR, and watch CI.
@@ -27,24 +23,23 @@ Modes:
 
 Options:
   --env FILE                  Project environment file. Required unless ENV_FILE is set.
-  --owner OWNER               GitHub owner. Defaults to GITHUB_OWNER from env.
-  --repo REPO                 GitHub repo. Defaults to GITHUB_REPO from env.
+  --provider-profile FILE     Version-2 role provider profile.
+  --provider-preflight-out F  Preflight JSON path. Default: .codex-run/provider-preflight.json.
+  --owner OWNER               GitHub owner. Defaults to GITHUB_OWNER.
+  --repo REPO                 GitHub repo. Defaults to GITHUB_REPO.
   --base BRANCH               Base branch. Defaults to BASE_BRANCH or main.
   --remote NAME               Remote name. Defaults to REMOTE_NAME or origin.
   --issue NUMBER              Prepare a specific issue instead of the next ready issue.
   --description TEXT          Use literal issue text instead of a GitHub issue.
   --description-file FILE     Read literal issue text from a file.
   --message TEXT              Blocked status message.
-  --max-repair-attempts N     Repair attempts for local, CI, and verifier failures. Default: 3.
-  --planner-provider NAME     Planner provider: command or ollama.
-  --planner-model MODEL       Planner model. Implies --planner-provider ollama if omitted.
-  --agent-provider NAME       Implementer/repair/verifier provider: command or ollama.
-  --agent-model MODEL         Agent model. Implies --agent-provider ollama if omitted.
-  --agent-command COMMAND     Prompt runner for command-mode implementation/repair/verification.
-                               Default: AGENT_COMMAND or `codex exec`.
-  --planner-agent-command CMD Prompt runner for command-mode planning. Defaults to
-                               PLANNER_AGENT_COMMAND or --agent-command. Use
-                               {prompt_file} or {prompt} placeholders for non-Codex runners.
+  --max-repair-attempts N     Repair attempts. Default: 3.
+  --planner-provider NAME     Legacy planner transport override; Python validates it.
+  --planner-model MODEL       Legacy planner model override.
+  --agent-provider NAME       Legacy implementer/fixer/verifier transport override.
+  --agent-model MODEL         Legacy agent model override.
+  --agent-command COMMAND     Direct command when no provider profile is selected.
+  --planner-agent-command CMD Direct planner command when no provider profile is selected.
 EOF
 }
 
@@ -63,18 +58,17 @@ issue="${ISSUE_NUMBER:-}"
 description="${ISSUE_DESCRIPTION:-}"
 description_file="${ISSUE_DESCRIPTION_FILE:-}"
 message=""
+provider_profile="${PROVIDER_PROFILE:-}"
+provider_preflight_out="${PROVIDER_PREFLIGHT_OUT:-.codex-run/provider-preflight.json}"
 agent_command="${AGENT_COMMAND:-codex exec}"
 planner_agent_command="${PLANNER_AGENT_COMMAND:-}"
 planner_provider="${PLANNER_PROVIDER:-}"
 planner_model="${PLANNER_MODEL:-}"
 agent_provider="${AGENT_PROVIDER:-}"
 agent_model="${AGENT_MODEL:-}"
-planner_provider_mode=false
-agent_provider_mode=false
-[[ -n "$planner_provider" ]] && planner_provider_mode=true
-[[ -n "$agent_provider" ]] && agent_provider_mode=true
 max_repair_attempts="${MAX_REPAIR_ATTEMPTS:-3}"
 current_dir=".codex-run/current"
+telemetry_file="$current_dir/model-invocations.json"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -88,11 +82,13 @@ while [[ $# -gt 0 ]]; do
     --description) description="$2"; shift 2 ;;
     --description-file) description_file="$2"; shift 2 ;;
     --message) message="$2"; shift 2 ;;
+    --provider-profile) provider_profile="$2"; shift 2 ;;
+    --provider-preflight-out) provider_preflight_out="$2"; shift 2 ;;
     --max-repair-attempts) max_repair_attempts="$2"; shift 2 ;;
-    --planner-provider) planner_provider="$2"; planner_provider_mode=true; shift 2 ;;
-    --planner-model) planner_model="$2"; planner_provider_mode=true; shift 2 ;;
-    --agent-provider) agent_provider="$2"; agent_provider_mode=true; shift 2 ;;
-    --agent-model) agent_model="$2"; agent_provider_mode=true; shift 2 ;;
+    --planner-provider) planner_provider="$2"; shift 2 ;;
+    --planner-model) planner_model="$2"; shift 2 ;;
+    --agent-provider) agent_provider="$2"; shift 2 ;;
+    --agent-model) agent_model="$2"; shift 2 ;;
     --agent-command) agent_command="$2"; shift 2 ;;
     --planner-agent-command) planner_agent_command="$2"; shift 2 ;;
     --help|-h) usage; exit 0 ;;
@@ -102,32 +98,31 @@ done
 
 [[ -n "$env_file" ]] || { echo "Missing --env or ENV_FILE" >&2; usage >&2; exit 2; }
 [[ "$max_repair_attempts" =~ ^[0-9]+$ ]] || { echo "--max-repair-attempts must be a non-negative integer" >&2; exit 2; }
-[[ -n "$planner_model" ]] && planner_provider_mode=true
-[[ -n "$agent_model" ]] && agent_provider_mode=true
-[[ -n "$planner_model" && -z "$planner_provider" ]] && planner_provider="ollama"
-[[ -n "$agent_model" && -z "$agent_provider" ]] && agent_provider="ollama"
-[[ -n "$planner_provider" ]] || planner_provider="command"
-[[ -n "$agent_provider" ]] || agent_provider="command"
-[[ "$planner_provider" == "command" || "$planner_provider" == "ollama" ]] || { echo "--planner-provider must be command or ollama" >&2; exit 2; }
-[[ "$agent_provider" == "command" || "$agent_provider" == "ollama" ]] || { echo "--agent-provider must be command or ollama" >&2; exit 2; }
-[[ "$planner_provider" != "ollama" || -n "$planner_model" ]] || { echo "--planner-provider ollama requires --planner-model" >&2; exit 2; }
-[[ "$agent_provider" != "ollama" || -n "$agent_model" ]] || { echo "--agent-provider ollama requires --agent-model" >&2; exit 2; }
 [[ -n "$planner_agent_command" ]] || planner_agent_command="$agent_command"
-
+planner_provider_mode=false
+agent_provider_mode=false
+[[ -n "$provider_profile$planner_provider$planner_model" ]] && planner_provider_mode=true
+[[ -n "$provider_profile$agent_provider$agent_model" ]] && agent_provider_mode=true
 with_env=("$automation_root/scripts/with-env.sh" "$env_file")
+
+run_python_module() {
+  local module="$1"; shift
+  "${with_env[@]}" env PYTHONPATH="$tool_root${PYTHONPATH:+:$PYTHONPATH}" "$python_bin" -m "$module" "$@"
+}
 
 run_prepare() {
   local args=("$automation_root/scripts/prepare-next-ready-issue.sh" --owner "$owner" --repo "$repo" --base "$base" --remote "$remote")
   [[ -n "$issue" ]] && args+=(--issue "$issue")
   [[ -n "$description" ]] && args+=(--description "$description")
   [[ -n "$description_file" ]] && args+=(--description-file "$description_file")
-  if [[ "$planner_provider_mode" == true ]]; then
-    args+=(--reader-provider "$planner_provider")
+  [[ -n "$provider_profile" ]] && args+=(--provider-profile "$provider_profile")
+  if [[ "$planner_provider_mode" == true && -z "$provider_profile" ]]; then
+    [[ -n "$planner_provider" ]] && args+=(--reader-provider "$planner_provider")
     [[ -n "$planner_model" ]] && args+=(--reader-model "$planner_model")
     [[ "$planner_provider" == "command" && -n "$planner_agent_command" ]] && args+=(--reader-command "$planner_agent_command")
   fi
-  if [[ "$agent_provider_mode" == true ]]; then
-    args+=(--coder-provider "$agent_provider")
+  if [[ "$agent_provider_mode" == true && -z "$provider_profile" ]]; then
+    [[ -n "$agent_provider" ]] && args+=(--coder-provider "$agent_provider")
     [[ -n "$agent_model" ]] && args+=(--coder-model "$agent_model")
     [[ "$agent_provider" == "command" && -n "$agent_command" ]] && args+=(--coder-command "$agent_command")
   fi
@@ -138,14 +133,14 @@ run_finalize() {
   "${with_env[@]}" "$automation_root/scripts/finalize-current-issue.sh" --mode "$1"
 }
 
-mark_blocked() {
-  local reason="$1"
-  "${with_env[@]}" "$automation_root/scripts/mark-current-issue.sh" --status Blocked --message "$reason" || true
+mark_status() {
+  local status="$1" reason="${2:-}"
+  local args=("$automation_root/scripts/mark-current-issue.sh" --status "$status")
+  [[ -n "$reason" ]] && args+=(--message "$reason")
+  "${with_env[@]}" "${args[@]}" || true
 }
 
-shell_quote() {
-  printf "%q" "$1"
-}
+shell_quote() { printf "%q" "$1"; }
 
 run_agent_prompt() {
   local command="$1" prompt_file prompt rendered_command
@@ -159,39 +154,49 @@ run_agent_prompt() {
     rendered_command="${command//\{prompt\}/$(shell_quote "$prompt")}"
     "${with_env[@]}" bash -lc "$rendered_command"
   else
-    # Codex-compatible default: append the prompt as the final argv value.
     "${with_env[@]}" bash -lc "$command \"\$@\"" _ "$prompt"
   fi
   rm -f "$prompt_file"
 }
 
 run_provider_prompt() {
-  local role="$1" provider="$2" model="$3" command="$4" output_file="${5:-}" commit_file="${6:-}" prompt_file args=()
+  local role="$1" output_file="${2:-}" commit_file="${3:-}" prompt_file args=()
   prompt_file="$(mktemp)"
   cat > "$prompt_file"
-  args=("$prompt_runner" --role "$role" --provider "$provider" --prompt-file "$prompt_file")
-  [[ -n "$model" ]] && args+=(--model "$model")
-  [[ -n "$command" ]] && args+=(--command "$command")
+  args=(--role "$role" --prompt-file "$prompt_file" --telemetry-file "$telemetry_file")
+  [[ -n "$provider_profile" ]] && args+=(--provider-profile "$provider_profile")
+
+  local legacy_provider legacy_model legacy_command
+  if [[ "$role" == "planner" ]]; then
+    legacy_provider="$planner_provider"; legacy_model="$planner_model"; legacy_command="$planner_agent_command"
+  else
+    legacy_provider="$agent_provider"; legacy_model="$agent_model"; legacy_command="$agent_command"
+  fi
+  if [[ -n "$legacy_model" && ( -z "$legacy_provider" || "$legacy_provider" == "ollama" ) ]]; then
+    legacy_command=""
+  fi
+  [[ -n "$legacy_provider" ]] && args+=(--provider "$legacy_provider")
+  [[ -n "$legacy_model" ]] && args+=(--model "$legacy_model")
+  [[ -z "$provider_profile" && -n "$legacy_command" ]] && args+=(--command "$legacy_command")
   [[ -n "$output_file" ]] && args+=(--output-file "$output_file")
   [[ -n "$commit_file" ]] && args+=(--commit-message-file "$commit_file")
+
   if [[ -n "${PROMPT_RUNNER:-}" ]]; then
-    "${with_env[@]}" "$python_bin" "${args[@]}"
+    "${with_env[@]}" "$python_bin" "$prompt_runner" "${args[@]}"
   else
-    "${with_env[@]}" env PYTHONPATH="$tool_root${PYTHONPATH:+:$PYTHONPATH}" "$python_bin" -m automation.prompt_runner "${args[@]:1}"
+    run_python_module automation.prompt_runner "${args[@]}"
   fi
   rm -f "$prompt_file"
 }
 
+run_provider_preflight() {
+  [[ -n "$provider_profile" ]] || { echo "Preflight requires --provider-profile or PROVIDER_PROFILE" >&2; return 2; }
+  run_python_module automation.provider_preflight --provider-profile "$provider_profile" --out "$provider_preflight_out"
+}
+
 agent_write_plan() {
   if [[ "$planner_provider_mode" == true ]]; then
-    run_provider_prompt planner "$planner_provider" "$planner_model" "$planner_agent_command" "$current_dir/plan.md" "" <<EOF
-You are planning an AutoDev issue-to-PR run.
-
-Return only the complete implementation plan as markdown. Do not edit files.
-
---- PLANNER PROMPT ---
-$(cat "$current_dir/planner.md")
-EOF
+    run_provider_prompt planner "$current_dir/plan.md" "" < "$current_dir/planner.md"
   else
     run_agent_prompt "$planner_agent_command" <<EOF
 Use the issue-to-pr-automation skill.
@@ -211,73 +216,30 @@ EOF
 
 agent_implement() {
   if [[ "$agent_provider_mode" == true ]]; then
-    run_provider_prompt implementer "$agent_provider" "$agent_model" "$agent_command" "" "$current_dir/commit-message.txt" <<EOF
-You are implementing an AutoDev issue-to-PR task as a raw text model.
-
-You cannot edit files directly. Return exactly one of these forms:
-
-NO_CHANGES_REQUIRED
-
-or:
-
-COMMIT_MESSAGE: concise imperative commit message
-BEGIN_UNIFIED_DIFF
-<unified diff applicable with git apply>
-END_UNIFIED_DIFF
-
---- IMPLEMENTER PROMPT ---
-$(cat "$current_dir/implementer.md")
-EOF
+    run_provider_prompt implementer "" "$current_dir/commit-message.txt" < "$current_dir/implementer.md"
   else
     run_agent_prompt "$agent_command" <<EOF
 Use the issue-to-pr-automation skill.
 
 Run the implementer prompt below. Edit the workspace directly.
-
-Also write a concise commit message to:
-
-$current_dir/commit-message.txt
-
-Commit message rules:
-- One short first line.
-- Imperative mood.
-- Mention the affected behavior or area.
-- No markdown.
-- No quotes around the message.
+Write a concise imperative commit message to $current_dir/commit-message.txt.
 
 --- IMPLEMENTER PROMPT ---
 $(cat "$current_dir/implementer.md")
 EOF
   fi
-  if [[ "$agent_provider_mode" != true ]]; then
-    [[ -s "$current_dir/commit-message.txt" ]] || { echo "Implementer did not write $current_dir/commit-message.txt" >&2; return 1; }
-  fi
+  [[ -s "$current_dir/commit-message.txt" ]] || { echo "Implementer did not write $current_dir/commit-message.txt" >&2; return 1; }
 }
 
 agent_repair_file() {
   local prompt_file="$1"
   if [[ "$agent_provider_mode" == true ]]; then
-    run_provider_prompt repair "$agent_provider" "$agent_model" "$agent_command" "" "" <<EOF
-You are repairing an AutoDev issue-to-PR task as a raw text model.
-
-You cannot edit files directly. Return exactly one of these forms:
-
-NO_CHANGES_REQUIRED
-
-or:
-
-BEGIN_UNIFIED_DIFF
-<unified diff applicable with git apply>
-END_UNIFIED_DIFF
-
---- REPAIR PROMPT ---
-$(cat "$prompt_file")
-EOF
+    run_provider_prompt fixer "" "" < "$prompt_file"
   else
     run_agent_prompt "$agent_command" <<EOF
 Use the issue-to-pr-automation skill.
 
-Run the repair prompt below. Fix only the failure described by the prompt, and edit the workspace directly.
+Run the repair prompt below. Fix only the described failure and edit the workspace directly.
 
 --- REPAIR PROMPT ---
 $(cat "$prompt_file")
@@ -287,22 +249,13 @@ EOF
 
 agent_verify() {
   if [[ "$agent_provider_mode" == true ]]; then
-    run_provider_prompt verifier "$agent_provider" "$agent_model" "$agent_command" "$current_dir/verification-result.md" "" <<EOF
-You are verifying an AutoDev issue-to-PR task.
-
-Return only the verification result. The first line must be exactly PASS or FAIL.
-
---- VERIFIER PROMPT ---
-$(cat "$current_dir/verifier.md")
-EOF
+    run_provider_prompt verifier "$current_dir/verification-result.md" "" < "$current_dir/verifier.md"
   else
     run_agent_prompt "$agent_command" <<EOF
 Use the issue-to-pr-automation skill.
 
 Run the verifier prompt below. Write only the verification result to:
-
 $current_dir/verification-result.md
-
 The file must start with exactly PASS or FAIL.
 
 --- VERIFIER PROMPT ---
@@ -315,10 +268,7 @@ EOF
 local_check_with_repairs() {
   local attempt=0 code
   while true; do
-    set +e
-    run_finalize LocalCheck
-    code=$?
-    set -e
+    set +e; run_finalize LocalCheck; code=$?; set -e
     [[ $code -eq 0 ]] && return 0
     [[ $code -eq 10 && $attempt -lt $max_repair_attempts ]] || return "$code"
     attempt=$((attempt + 1))
@@ -329,10 +279,7 @@ local_check_with_repairs() {
 pr_and_ci_with_repairs() {
   local attempt=0 code
   while true; do
-    set +e
-    run_finalize PrAndCi
-    code=$?
-    set -e
+    set +e; run_finalize PrAndCi; code=$?; set -e
     [[ $code -eq 0 ]] && return 0
     [[ $code -eq 20 && $attempt -lt $max_repair_attempts ]] || return "$code"
     attempt=$((attempt + 1))
@@ -342,102 +289,50 @@ pr_and_ci_with_repairs() {
 }
 
 prepare_and_plan() {
-  [[ -n "$owner" ]] || { echo "Missing --owner or GITHUB_OWNER" >&2; exit 2; }
-  [[ -n "$repo" ]] || { echo "Missing --repo or GITHUB_REPO" >&2; exit 2; }
-
-  local prepare_log prepare_code restore_errexit=false
+  [[ -n "$owner" ]] || { echo "Missing --owner or GITHUB_OWNER" >&2; return 2; }
+  [[ -n "$repo" ]] || { echo "Missing --repo or GITHUB_REPO" >&2; return 2; }
+  local prepare_log prepare_code
   prepare_log="$(mktemp)"
-  case $- in *e*) restore_errexit=true; set +e ;; esac
-  run_prepare | tee "$prepare_log"
-  prepare_code=$?
-  [[ "$restore_errexit" == true ]] && set -e
-  if [[ $prepare_code -ne 0 ]]; then
-    rm -f "$prepare_log"
-    return "$prepare_code"
-  fi
-  if grep -q '^NO_READY_ISSUE$' "$prepare_log"; then
-    rm -f "$prepare_log"
-    return 2
-  fi
+  set +e; run_prepare | tee "$prepare_log"; prepare_code=${PIPESTATUS[0]}; set -e
+  if [[ $prepare_code -ne 0 ]]; then rm -f "$prepare_log"; return "$prepare_code"; fi
+  if grep -q '^NO_READY_ISSUE$' "$prepare_log"; then rm -f "$prepare_log"; return 2; fi
   rm -f "$prepare_log"
-  agent_write_plan || { mark_blocked "Planner did not produce plan.md."; return 1; }
+  agent_write_plan
 }
 
-run_full_cycle() {
-  local verification_attempt=0 verification_first_line plan_code
-  set +e
-  prepare_and_plan
-  plan_code=$?
-  set -e
-  [[ $plan_code -eq 2 ]] && return 0
-  [[ $plan_code -eq 0 ]] || return "$plan_code"
+run_cycle() {
+  local code verification_attempt=0 first_line
+  set +e; prepare_and_plan; code=$?; set -e
+  [[ $code -eq 2 ]] && return 0
+  [[ $code -eq 0 ]] || return "$code"
   run_finalize RenderImplementerPrompt
-  agent_implement || { mark_blocked "Implementer did not produce commit-message.txt."; return 1; }
-  local_check_with_repairs || { mark_blocked "Automation could not complete after local repair attempts."; return 1; }
+  agent_implement || { mark_status Blocked "Implementer did not produce commit-message.txt."; return 1; }
+  local_check_with_repairs || { code=$?; mark_status Blocked "Automation could not complete after local repair attempts."; return "$code"; }
 
   while true; do
-    pr_and_ci_with_repairs || { mark_blocked "Automation could not complete after CI repair attempts."; return 1; }
-    agent_verify || { mark_blocked "Verifier did not produce verification-result.md."; return 1; }
-    verification_first_line="$(head -n1 "$current_dir/verification-result.md" | tr -d '\r')"
-    if [[ "$verification_first_line" == "PASS" ]]; then
-      "${with_env[@]}" "$automation_root/scripts/mark-current-issue.sh" --status ReadyForReview
-      return 0
-    fi
-    [[ "$verification_first_line" == "FAIL" ]] || { mark_blocked "Verifier result must start with PASS or FAIL."; return 1; }
-    [[ $verification_attempt -lt $max_repair_attempts ]] || { mark_blocked "Automation could not complete after verification repair attempts."; return 1; }
+    pr_and_ci_with_repairs || { code=$?; mark_status Blocked "Automation could not complete after CI repair attempts."; return "$code"; }
+    agent_verify || { mark_status Blocked "Verifier did not produce verification-result.md."; return 1; }
+    first_line="$(head -n 1 "$current_dir/verification-result.md" | tr -d '\r')"
+    [[ "$first_line" == PASS ]] && { mark_status ReadyForReview; return 0; }
+    [[ "$first_line" == FAIL ]] || { mark_status Blocked "Verifier result must start with PASS or FAIL."; return 1; }
+    [[ $verification_attempt -lt $max_repair_attempts ]] || { mark_status Blocked "Automation could not complete after verification repair attempts."; return 1; }
     verification_attempt=$((verification_attempt + 1))
     run_finalize RenderVerificationRepair
     agent_repair_file "$current_dir/verification-repair.md"
-    local_check_with_repairs || { mark_blocked "Automation could not complete after verification local-check repairs."; return 1; }
+    local_check_with_repairs || { code=$?; mark_status Blocked "Automation could not complete after verification local-check repairs."; return "$code"; }
   done
 }
 
 case "$mode" in
-  Run)
-    run_full_cycle
-    ;;
-  Plan)
-    set +e
-    prepare_and_plan
-    code=$?
-    set -e
-    [[ $code -eq 2 ]] && exit 0
-    exit "$code"
-    ;;
-  Prepare)
-    [[ -n "$owner" ]] || { echo "Missing --owner or GITHUB_OWNER" >&2; exit 2; }
-    [[ -n "$repo" ]] || { echo "Missing --repo or GITHUB_REPO" >&2; exit 2; }
-    run_prepare
-    echo "NEXT_ACTION: If PREPARED was printed, read $current_dir/planner.md and write $current_dir/plan.md."
-    ;;
-  RenderImplementerPrompt)
-    run_finalize RenderImplementerPrompt
-    echo "NEXT_ACTION: Read $current_dir/implementer.md, implement directly, and write $current_dir/commit-message.txt."
-    ;;
-  LocalCheck)
-    set +e; run_finalize LocalCheck; code=$?; set -e
-    echo "NEXT_ACTION: If LOCAL_CHECK_FAILED was printed, read $current_dir/local-repair.md and fix only that failure."
-    exit "$code"
-    ;;
-  PrAndCi)
-    set +e; run_finalize PrAndCi; code=$?; set -e
-    echo "NEXT_ACTION: If CI_PASSED was printed, read $current_dir/verifier.md and write $current_dir/verification-result.md. If CI_FAILED was printed, read $current_dir/ci-repair.md."
-    exit "$code"
-    ;;
-  RenderVerificationRepair)
-    run_finalize RenderVerificationRepair
-    echo "NEXT_ACTION: Read $current_dir/verification-repair.md and fix only verifier gaps."
-    ;;
-  ReadyForReview)
-    "${with_env[@]}" "$automation_root/scripts/mark-current-issue.sh" --status ReadyForReview
-    ;;
-  Blocked)
-    [[ -n "$message" ]] || message="Automation could not complete after repair attempts."
-    "${with_env[@]}" "$automation_root/scripts/mark-current-issue.sh" --status Blocked --message "$message"
-    ;;
-  *)
-    echo "Unknown mode: $mode" >&2
-    usage >&2
-    exit 2
-    ;;
+  Run) run_cycle ;;
+  Plan) set +e; prepare_and_plan; code=$?; set -e; [[ $code -eq 2 ]] && exit 0; exit "$code" ;;
+  Prepare) run_prepare ;;
+  Preflight) run_provider_preflight ;;
+  RenderImplementerPrompt) run_finalize RenderImplementerPrompt ;;
+  LocalCheck) run_finalize LocalCheck ;;
+  PrAndCi) run_finalize PrAndCi ;;
+  RenderVerificationRepair) run_finalize RenderVerificationRepair ;;
+  ReadyForReview) mark_status ReadyForReview "$message" ;;
+  Blocked) mark_status Blocked "${message:-Automation could not complete after repair attempts.}" ;;
+  *) echo "Unsupported mode: $mode" >&2; usage >&2; exit 2 ;;
 esac

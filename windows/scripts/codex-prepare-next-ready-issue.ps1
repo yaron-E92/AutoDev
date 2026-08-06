@@ -14,6 +14,15 @@ param(
 
     [string]$PromptDir = "$env:USERPROFILE\codex-tools\prompts",
     [string]$ProfilesPath = "$env:USERPROFILE\codex-tools\codex-profiles.json",
+    [string]$ProviderProfile = "",
+    [string]$ReaderProvider = "command",
+    [string]$ReaderModel = "",
+    [string]$ReaderCommand = "",
+    [string]$CoderProvider = "command",
+    [string]$CoderModel = "",
+    [string]$CoderCommand = "",
+    [string]$Python = $(if ($env:PYTHON) { $env:PYTHON } else { "python" }),
+    [string]$PlannerHelper = $env:AUTODEV_PLANNER_HELPER,
 
     [string]$GitHubTokenSecretName = "",
     [string]$KeePassCliPath = "keepassxc-cli",
@@ -145,6 +154,54 @@ function Get-GitHubBaseInfo {
     return @{
         BaseSha = $baseSha
         BaseTreeSha = [string]$baseCommit.tree.sha
+    }
+}
+
+function Invoke-RoleAwarePlannerPreparation {
+    param(
+        [Parameter(Mandatory = $true)][string]$CurrentDir,
+        [Parameter(Mandatory = $true)][string]$IssuePath,
+        [Parameter(Mandatory = $true)][string]$LabelsJson,
+        [Parameter(Mandatory = $true)][string]$ResolvedLocalCheck,
+        [Parameter(Mandatory = $true)][string]$ResolvedStackContext
+    )
+
+    if ([string]::IsNullOrWhiteSpace($PlannerHelper)) {
+        $toolRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+        $script:PlannerHelper = Join-Path $toolRoot "automation\prepare_planner_prompt.py"
+    }
+    if (-not (Test-Path -LiteralPath $PlannerHelper)) {
+        throw "Missing planner preparation helper: $PlannerHelper"
+    }
+
+    $args = @(
+        $PlannerHelper,
+        "--repo", [System.IO.Path]::GetFullPath("."),
+        "--current-dir", $CurrentDir,
+        "--issue-file", $IssuePath,
+        "--labels-json", $LabelsJson,
+        "--local-check", $ResolvedLocalCheck,
+        "--stack-context", $ResolvedStackContext,
+        "--reader-provider", $ReaderProvider,
+        "--coder-provider", $CoderProvider
+    )
+    if (-not [string]::IsNullOrWhiteSpace($ProviderProfile)) { $args += @("--provider-profile", $ProviderProfile) }
+    if (-not [string]::IsNullOrWhiteSpace($ReaderModel)) { $args += @("--reader-model", $ReaderModel) }
+    if (-not [string]::IsNullOrWhiteSpace($ReaderCommand)) { $args += @("--reader-command", $ReaderCommand) }
+    if (-not [string]::IsNullOrWhiteSpace($CoderModel)) { $args += @("--coder-model", $CoderModel) }
+    if (-not [string]::IsNullOrWhiteSpace($CoderCommand)) { $args += @("--coder-command", $CoderCommand) }
+
+    $toolRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+    $oldPythonPath = $env:PYTHONPATH
+    try {
+        $env:PYTHONPATH = if ([string]::IsNullOrWhiteSpace($oldPythonPath)) { $toolRoot } else { "$toolRoot$([IO.Path]::PathSeparator)$oldPythonPath" }
+        & $Python @args
+        if ($LASTEXITCODE -ne 0) {
+            throw "Role-aware planner preparation failed with exit code $LASTEXITCODE."
+        }
+    }
+    finally {
+        $env:PYTHONPATH = $oldPythonPath
     }
 }
 
@@ -302,16 +359,33 @@ $($issueData.body)
         ConvertTo-Json -Depth 30 |
         Set-Content -Path (Join-Path $currentDir "workspace-snapshot.json") -Encoding UTF8
 
-    $plannerPrompt = New-PromptFromTemplate `
-        -PromptDir $PromptDir `
-        -TemplateName "planner.md" `
-        -Values @{
-            IssueText = $issueText
-            LocalCheck = $resolvedLocalCheck
-            StackContext = $resolvedStackContext
-        }
+    $roleAwarePreparation = -not [string]::IsNullOrWhiteSpace($ProviderProfile) -or
+        -not [string]::IsNullOrWhiteSpace($ReaderModel) -or
+        -not [string]::IsNullOrWhiteSpace($ReaderCommand) -or
+        -not [string]::IsNullOrWhiteSpace($CoderModel) -or
+        -not [string]::IsNullOrWhiteSpace($CoderCommand)
 
-    Set-Content -Path (Join-Path $currentDir "planner.md") -Encoding UTF8 -Value $plannerPrompt
+    if ($roleAwarePreparation) {
+        $labelsJson = ConvertTo-Json -Compress -InputObject @($labelNames)
+        Invoke-RoleAwarePlannerPreparation `
+            -CurrentDir $currentDir `
+            -IssuePath $issuePath `
+            -LabelsJson $labelsJson `
+            -ResolvedLocalCheck $resolvedLocalCheck `
+            -ResolvedStackContext $resolvedStackContext
+    }
+    else {
+        $plannerPrompt = New-PromptFromTemplate `
+            -PromptDir $PromptDir `
+            -TemplateName "planner.md" `
+            -Values @{
+                IssueText = $issueText
+                LocalCheck = $resolvedLocalCheck
+                StackContext = $resolvedStackContext
+            }
+
+        Set-Content -Path (Join-Path $currentDir "planner.md") -Encoding UTF8 -Value $plannerPrompt
+    }
 
     $state = [ordered]@{
         Status = "Prepared"
@@ -344,6 +418,7 @@ $($issueData.body)
 
         PromptDir = $PromptDir
         ProfilesPath = $ProfilesPath
+        ProviderProfile = $ProviderProfile
 
         RunDir = [System.IO.Path]::GetFullPath($currentDir)
 

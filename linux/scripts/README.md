@@ -1,28 +1,39 @@
-# Linux Scripts
+# Linux scripts
 
-Linux-specific automation scripts belong here.
+Linux-specific automation scripts belong here. Common prompts, skills, and provider profiles remain at the repository root.
 
-Common files remain at the repository root:
+The Linux workflow consists of:
 
-- `agentFiles/`
-- `promptTemplates/`
-- `skill/`
-- `codex-profiles.json`
+- `linux/run-once.sh` for timer-friendly execution.
+- `linux/scripts/issue-to-pr-cycle.sh` for the complete trusted workflow.
+- `linux/scripts/*.sh` for deterministic prepare, finalize, mark, and environment primitives.
+- `linux/config.example.env` for sanitized project configuration.
+- `linux/systemd/` for optional service and timer templates.
 
-Do not duplicate common prompt, profile, or skill files under this directory.
+## Provider profile workflow
 
-The Linux automation files checked into this repository are:
+The shell script owns workflow stages only. Provider validation, role resolution, HTTP/command invocation, policy composition, output parsing, failure classification, and telemetry are delegated to Python.
 
-- `linux/run-once.sh` for a timer-friendly single-command automation run using the configured agent command.
-- `linux/scripts/issue-to-pr-cycle.sh` for the script-based issue-to-PR workflow wrapper.
-- `linux/scripts/*.sh` for reusable Linux workflow primitives.
-- `linux/systemd/` for optional systemd unit templates.
-- `linux/config.example.env` as a sanitized project environment template.
+Set credentials in the environment file or process environment without committing their values:
 
+```bash
+GROQ_API_KEY=...
+OPENROUTER_API_KEY=...
+PROVIDER_PROFILE=/path/to/AutoDev/examples/providers/groq-openrouter-free.json
+```
 
-## Single-command equivalent
+Copy the mixed profile and replace `REPLACE_WITH_OPENROUTER_MODEL:free` with a currently accessible OpenRouter model that still ends in `:free`.
 
-The equivalent of pasting the legacy prompt into Codex Desktop connected to a Linux VM is now one command. From a checkout of this repository, run:
+Run the non-mutating preflight:
+
+```bash
+linux/scripts/issue-to-pr-cycle.sh \
+  --env ~/automation/state/PROJECT.env \
+  --mode Preflight \
+  --provider-profile examples/providers/groq-openrouter-free.json
+```
+
+Run one complete issue-to-PR cycle:
 
 ```bash
 linux/scripts/issue-to-pr-cycle.sh \
@@ -31,179 +42,45 @@ linux/scripts/issue-to-pr-cycle.sh \
   --owner OWNER \
   --repo REPO \
   --base main \
-  --remote origin
-```
-
-For timer-style installed automation, `linux/run-once.sh` resolves `issue-to-pr-cycle.sh` relative to its own location, so it works both from this repository layout (`linux/scripts`) and from an installed `$AUTOMATION_ROOT/scripts` layout.
-
-## Script-based workflow
-
-Use `issue-to-pr-cycle.sh` for the trusted state transitions from the Codex Desktop workflow. The default `Run` mode performs deterministic prepare/finalize/mark steps and invokes the configured agent command on the rendered planner, implementer, repair, and verifier prompts at the points where agent work is needed.
-
-```bash
-~/automation/scripts/issue-to-pr-cycle.sh \
-  --env ~/automation/state/PROJECT.env \
-  --mode Run \
-  --owner OWNER \
-  --repo REPO \
-  --base main \
-  --remote origin
-```
-
-For a planner-only run with a reader-style command agent, use `--mode Plan` and optionally `--planner-agent-command`. Use `--agent-command` for implementation, repair, and verifier prompts. Both commands can use `{prompt_file}` or `{prompt}` placeholders for non-Codex runners. For provider mode, pass `--planner-provider command` / `--agent-provider command` with command strings when the tool returns stdout artifacts, or pass model names for Ollama. `--planner-model` and `--agent-model` imply the `ollama` provider and run `ollama run <model>` with the prompt on stdin. Provider-mode implementation and repair responses must return `NO_CHANGES_REQUIRED` or a marked unified diff that AutoDev applies with `git apply`.
-
-```bash
-~/automation/scripts/issue-to-pr-cycle.sh \
-  --env ~/automation/state/PROJECT.env \
-  --mode Run \
-  --owner OWNER \
-  --repo REPO \
-  --base main \
   --remote origin \
-  --planner-model qwen35-9b-32k \
-  --agent-model devstral-small2-12k
+  --issue 46 \
+  --provider-profile examples/providers/groq-openrouter-free.json
 ```
 
-For debugging or resuming a partially completed cycle, run an individual transition mode:
+Omit `--issue` to select the next eligible `autodev:ready` issue. `--description` and `--description-file` remain available for local task descriptions.
 
-```bash
-~/automation/scripts/issue-to-pr-cycle.sh --env ~/automation/state/PROJECT.env --mode Plan --planner-agent-command "reader-agent {prompt_file}"
-~/automation/scripts/issue-to-pr-cycle.sh --env ~/automation/state/PROJECT.env --mode RenderImplementerPrompt
-~/automation/scripts/issue-to-pr-cycle.sh --env ~/automation/state/PROJECT.env --mode LocalCheck
-~/automation/scripts/issue-to-pr-cycle.sh --env ~/automation/state/PROJECT.env --mode PrAndCi
-~/automation/scripts/issue-to-pr-cycle.sh --env ~/automation/state/PROJECT.env --mode RenderVerificationRepair
-~/automation/scripts/issue-to-pr-cycle.sh --env ~/automation/state/PROJECT.env --mode ReadyForReview
-```
+The profile independently configures `reader`, `synthesizer`, `planner`, `implementer`, `fixer`, and `verifier`. Linux preparation forwards the profile to the shared area-reader planner. Invocation telemetry is written separately to `.codex-run/current/model-invocations.json`.
 
-For input selection, omit `--issue` to process the next open issue labeled `autodev:ready`, pass `--issue NUMBER` for a specific GitHub issue, or pass `--description TEXT` / `--description-file FILE` for a local task description. For debugging, each deterministic transition is still available as an individual mode (`Plan`, `Prepare`, `RenderImplementerPrompt`, `LocalCheck`, `PrAndCi`, `RenderVerificationRepair`, `ReadyForReview`, and `Blocked`).
+## Checked-in profiles
 
-`linux/run-once.sh` now runs the single-command cycle and logs the deterministic and agent-command phases.
+- `examples/providers/groq-openrouter-free.json`: Groq reasoning roles plus an explicit OpenRouter `:free` implementation model.
+- `examples/providers/ollama-local-all-roles.json`: local Ollama for all roles.
+- `examples/providers/ollama-cloud-nemotron-minimax.json`: opt-in Ollama Cloud mapping.
+- `examples/providers/codex-command-profile.json`: Codex CLI profiles through the command transport.
 
-## Legacy automation prompt
+Codex Desktop is optional; the workflow can run headlessly through Bash and Python.
 
-Use this as the Linux automation task, adjusting repo names and paths.
+## Legacy compatibility
 
-This prompt assumes the Linux automation scripts are installed under `~/automation/scripts`, and the target project has an environment file under `~/automation/state`.
+`--planner-provider`, `--planner-model`, `--agent-provider`, `--agent-model`, `--planner-agent-command`, and `--agent-command` remain accepted. Bash forwards them to Python instead of restricting provider names. Supplying only a legacy model continues to use Ollama compatibility in Python.
+
+When no profile or legacy provider/model override is selected, the existing direct-agent command path remains available and defaults to `codex exec`.
+
+## Individual modes
 
 ```text
-Use the issue-to-pr-automation skill.
-
-Run exactly one issue-to-PR cycle in this Linux project.
-
-Important:
-- Do not call `codex exec`.
-- You are the Codex agent. Do the planning, implementation, repair, and verification yourself.
-- Never merge to main.
-- Process only one issue.
-- Keep all changes issue-scoped.
-- Do not perform unrelated refactors.
-- Do not use local git commands that write `.git` metadata.
-- Use only the trusted automation scripts for GitHub issue/PR/CI state changes.
-
-Environment file:
-
-~/automation/state/PROJECT.env
-
-Step 1 — Prepare
-
-Run:
-
-~/automation/scripts/with-env.sh ~/automation/state/PROJECT.env ~/automation/scripts/prepare-next-ready-issue.sh --owner OWNER --repo REPO --base main --remote origin
-
-If it prints NO_READY_ISSUE, stop.
-
-Step 2 — Plan
-
-Read:
-
-.codex-run/current/planner.md
-
-Write the plan to:
-
-.codex-run/current/plan.md
-
-Step 3 — Render implementer prompt
-
-Run:
-
-~/automation/scripts/with-env.sh ~/automation/state/PROJECT.env ~/automation/scripts/finalize-current-issue.sh --mode RenderImplementerPrompt
-
-Step 4 — Implement
-
-Read:
-
-.codex-run/current/implementer.md
-
-Implement the issue directly in the workspace.
-
-Also write a concise commit message to:
-
-.codex-run/current/commit-message.txt
-
-Commit message rules:
-- One short first line.
-- Imperative mood.
-- Mention the affected behavior or area.
-- No markdown.
-- No quotes around the message.
-
-Step 5 — Local check
-
-Run:
-
-~/automation/scripts/with-env.sh ~/automation/state/PROJECT.env ~/automation/scripts/finalize-current-issue.sh --mode LocalCheck
-
-If it prints LOCAL_CHECK_FAILED:
-- Read `.codex-run/current/local-repair.md`.
-- Fix only the local-check failure.
-- Rerun LocalCheck.
-- Repeat at most 3 times.
-
-Step 6 — PR and CI
-
-Run:
-
-~/automation/scripts/with-env.sh ~/automation/state/PROJECT.env ~/automation/scripts/finalize-current-issue.sh --mode PrAndCi
-
-If it prints CI_FAILED:
-- Read `.codex-run/current/ci-repair.md`.
-- Fix only the CI failure.
-- Run LocalCheck again.
-- Then rerun PrAndCi.
-- Repeat at most 3 times.
-
-Step 7 — Verify
-
-When PrAndCi prints CI_PASSED:
-- Read `.codex-run/current/verifier.md`.
-- Verify whether the implementation fully satisfies the issue.
-- If it passes, write exactly `PASS` to `.codex-run/current/verification-result.md`.
-- If it fails, write `FAIL` plus the concrete gaps to `.codex-run/current/verification-result.md`.
-
-If verification fails:
-- Run:
-
-~/automation/scripts/with-env.sh ~/automation/state/PROJECT.env ~/automation/scripts/finalize-current-issue.sh --mode RenderVerificationRepair
-
-- Read `.codex-run/current/verification-repair.md`.
-- Fix only the verifier gaps.
-- Rerun LocalCheck.
-- Rerun PrAndCi.
-- Verify again.
-
-Step 8 — Mark ready
-
-When verification passes, run:
-
-~/automation/scripts/with-env.sh ~/automation/state/PROJECT.env ~/automation/scripts/mark-current-issue.sh --status ReadyForReview
-
-If you must give up, run:
-
-~/automation/scripts/with-env.sh ~/automation/state/PROJECT.env ~/automation/scripts/mark-current-issue.sh --status Blocked --message "Automation could not complete after repair attempts."
-
-Rules:
-- Never merge to main.
-- Do not bypass the trusted scripts for GitHub state changes.
-- Do not perform unrelated refactors.
-- Do not expand the issue scope.
+Run
+Plan
+Prepare
+Preflight
+RenderImplementerPrompt
+LocalCheck
+PrAndCi
+RenderVerificationRepair
+ReadyForReview
+Blocked
 ```
+
+Use individual modes for debugging or resuming the deterministic workflow. `linux/run-once.sh` continues to resolve `issue-to-pr-cycle.sh` relative to its installation and can be used by the existing systemd timer.
+
+See `docs/model-roles.md` for the profile schema, safe headers, output-limit behavior, free-only safeguards, provider-neutral preflight, telemetry fields, and failure classifications.
