@@ -154,6 +154,9 @@ function Invoke-ProviderPrompt {
         $legacyProvider = if ($isPlanner) { $PlannerProvider } else { $AgentProvider }
         $legacyModel = if ($isPlanner) { $PlannerModel } else { $AgentModel }
         $legacyCommand = if ($isPlanner) { $PlannerAgentCommand } else { $AgentCommand }
+        if (-not [string]::IsNullOrWhiteSpace($legacyModel) -and ([string]::IsNullOrWhiteSpace($legacyProvider) -or $legacyProvider -eq "ollama")) {
+            $legacyCommand = ""
+        }
         if (-not [string]::IsNullOrWhiteSpace($legacyProvider)) { $args += @("--provider", $legacyProvider) }
         if (-not [string]::IsNullOrWhiteSpace($legacyModel)) { $args += @("--model", $legacyModel) }
         if ([string]::IsNullOrWhiteSpace($ProviderProfile) -and -not [string]::IsNullOrWhiteSpace($legacyCommand)) { $args += @("--command", $legacyCommand) }
@@ -200,7 +203,8 @@ function Invoke-Prepare {
         "-Base", $Base,
         "-Remote", $Remote,
         "-PromptDir", $PromptDir,
-        "-ProfilesPath", $ProfilesPath
+        "-ProfilesPath", $ProfilesPath,
+        "-Python", $Python
     )
     if ($Issue -ne 0) { $args += @("-Issue", [string]$Issue) }
     if (-not [string]::IsNullOrWhiteSpace($Description)) { $args += @("-Description", $Description) }
@@ -208,6 +212,17 @@ function Invoke-Prepare {
     if (-not [string]::IsNullOrWhiteSpace($Profiles)) { $args += @("-Profiles", $Profiles) }
     if (-not [string]::IsNullOrWhiteSpace($LocalCheck)) { $args += @("-LocalCheck", $LocalCheck) }
     if (-not [string]::IsNullOrWhiteSpace($StackContext)) { $args += @("-StackContext", $StackContext) }
+    if (-not [string]::IsNullOrWhiteSpace($ProviderProfile)) {
+        $args += @("-ProviderProfile", $ProviderProfile)
+    }
+    elseif ($PlannerProviderMode -or $AgentProviderMode) {
+        if (-not [string]::IsNullOrWhiteSpace($PlannerProvider)) { $args += @("-ReaderProvider", $PlannerProvider) }
+        if (-not [string]::IsNullOrWhiteSpace($PlannerModel)) { $args += @("-ReaderModel", $PlannerModel) }
+        if ($PlannerProvider -eq "command" -and -not [string]::IsNullOrWhiteSpace($PlannerAgentCommand)) { $args += @("-ReaderCommand", $PlannerAgentCommand) }
+        if (-not [string]::IsNullOrWhiteSpace($AgentProvider)) { $args += @("-CoderProvider", $AgentProvider) }
+        if (-not [string]::IsNullOrWhiteSpace($AgentModel)) { $args += @("-CoderModel", $AgentModel) }
+        if ($AgentProvider -eq "command" -and -not [string]::IsNullOrWhiteSpace($AgentCommand)) { $args += @("-CoderCommand", $AgentCommand) }
+    }
     if (-not [string]::IsNullOrWhiteSpace($GitHubTokenSecretName)) { $args += @("-GitHubTokenSecretName", $GitHubTokenSecretName) }
     if (-not [string]::IsNullOrWhiteSpace($KeePassCliPath)) { $args += @("-KeePassCliPath", $KeePassCliPath) }
     if (-not [string]::IsNullOrWhiteSpace($KeePassDatabasePath)) { $args += @("-KeePassDatabasePath", $KeePassDatabasePath) }
