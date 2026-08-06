@@ -118,12 +118,12 @@ run_prepare() {
   if [[ "$planner_provider_mode" == true && -z "$provider_profile" ]]; then
     [[ -n "$planner_provider" ]] && args+=(--reader-provider "$planner_provider")
     [[ -n "$planner_model" ]] && args+=(--reader-model "$planner_model")
-    [[ -n "$planner_provider" && -n "$planner_agent_command" ]] && args+=(--reader-command "$planner_agent_command")
+    [[ "$planner_provider" == "command" && -n "$planner_agent_command" ]] && args+=(--reader-command "$planner_agent_command")
   fi
   if [[ "$agent_provider_mode" == true && -z "$provider_profile" ]]; then
     [[ -n "$agent_provider" ]] && args+=(--coder-provider "$agent_provider")
     [[ -n "$agent_model" ]] && args+=(--coder-model "$agent_model")
-    [[ -n "$agent_provider" && -n "$agent_command" ]] && args+=(--coder-command "$agent_command")
+    [[ "$agent_provider" == "command" && -n "$agent_command" ]] && args+=(--coder-command "$agent_command")
   fi
   "${with_env[@]}" "${args[@]}"
 }
@@ -170,6 +170,9 @@ run_provider_prompt() {
     legacy_provider="$planner_provider"; legacy_model="$planner_model"; legacy_command="$planner_agent_command"
   else
     legacy_provider="$agent_provider"; legacy_model="$agent_model"; legacy_command="$agent_command"
+  fi
+  if [[ -n "$legacy_model" && ( -z "$legacy_provider" || "$legacy_provider" == "ollama" ) ]]; then
+    legacy_command=""
   fi
   [[ -n "$legacy_provider" ]] && args+=(--provider "$legacy_provider")
   [[ -n "$legacy_model" ]] && args+=(--model "$legacy_model")
