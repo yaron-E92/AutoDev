@@ -8,7 +8,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from automation import run_real_issue
-from automation.model_providers import ModelConfig, ollama_command_for_model
+from automation.model_providers import ModelConfig, load_provider_config, ollama_command_for_model
+from automation.model_roles import resolve_role_configs
+from automation.prompt_policies import resolve_prompt_policies
 
 
 DEFAULT_READER_MODEL = run_real_issue.DEFAULT_READER_MODEL
@@ -23,6 +25,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--local-check", default="")
     parser.add_argument("--stack-context", default="")
     parser.add_argument("--labels-json", default="[]")
+    parser.add_argument("--provider-profile", "--provider-config", dest="provider_profile", default="")
     parser.add_argument("--reader-provider", default="command")
     parser.add_argument("--reader-model", default=DEFAULT_READER_MODEL)
     parser.add_argument("--reader-command", default="")
@@ -54,15 +57,47 @@ def parse_labels(value: str) -> list[str]:
     return [str(label) for label in parsed if str(label).strip()]
 
 
+def resolve_configs(args: argparse.Namespace) -> tuple[
+    ModelConfig,
+    ModelConfig,
+    dict[str, ModelConfig | None] | None,
+    dict[str, str] | None,
+]:
+    reader = text_provider_config("reader", args.reader_provider, args.reader_model, args.reader_command)
+    coder = text_provider_config("coder", args.coder_provider, args.coder_model, args.coder_command)
+    if not args.provider_profile:
+        return reader, coder, None, None
+
+    file_config = load_provider_config(args.provider_profile)
+    roles = resolve_role_configs(
+        defaults={
+            "reader": run_real_issue.model_config_to_dict(reader),
+            "coder": run_real_issue.model_config_to_dict(coder),
+        },
+        file_config=file_config,
+    )
+    resolved_reader = roles.get("reader")
+    resolved_coder = roles.get("planner") or roles.get("implementer")
+    if resolved_reader is None or resolved_coder is None:
+        raise RuntimeError("provider profile must enable reader and planner roles")
+    return resolved_reader, resolved_coder, roles, resolve_prompt_policies(file_config)
+
+
 def run(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     repo = Path(args.repo).resolve()
     current_dir = Path(args.current_dir)
     issue_text = Path(args.issue_file).read_text(encoding="utf-8")
-    reader_config = text_provider_config("reader", args.reader_provider, args.reader_model, args.reader_command)
-    coder_config = text_provider_config("coder", args.coder_provider, args.coder_model, args.coder_command)
 
+    role_token = None
+    policy_token = None
     try:
+        reader_config, coder_config, roles, policies = resolve_configs(args)
+        if roles is not None:
+            role_token = run_real_issue._ACTIVE_ROLES.set(roles)
+        if policies is not None:
+            policy_token = run_real_issue._ACTIVE_POLICIES.set(policies)
+
         area_out = current_dir / "area-reader-debug"
         run_real_issue.run_area_reader(repo, issue_text, reader_config, coder_config, area_out, sys.stdout)
         run_real_issue.write_operational_outputs(issue_text, area_out, current_dir, keep_debug=False)
@@ -78,6 +113,11 @@ def run(argv: list[str] | None = None) -> int:
     except Exception as exc:
         print(f"area-reader planner preparation failed: {exc}", file=sys.stderr)
         return 1
+    finally:
+        if policy_token is not None:
+            run_real_issue._ACTIVE_POLICIES.reset(policy_token)
+        if role_token is not None:
+            run_real_issue._ACTIVE_ROLES.reset(role_token)
 
 
 def main() -> int:
