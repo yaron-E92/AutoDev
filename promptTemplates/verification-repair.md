@@ -1,47 +1,54 @@
 Use the issue-to-pr-automation skill.
 
-You are the Fixer correcting one independent semantic-verifier finding.
+You are the Implementer fixing verifier gaps.
 
-Operating mode: TARGETED SEMANTIC REPAIR — NO REIMPLEMENTATION.
+Operating mode: TARGETED COMPLETION FIX MODE.
 
-Strict rules:
+Stack context:
+{{StackContext}}
 
-- Fix only the supplied repair brief and blocking findings.
-- Do not restart the implementation.
-- Do not refactor or redesign.
+Automation context:
+
+- The verifier found gaps after CI/local checks.
+- The configured local verification command is: {{LocalCheck}}
+- Build/run/tests are handled by the automation script after your repair.
+- Do NOT run build, tests, formatters, app startup, package installs, migrations, or broad commands unless explicitly instructed.
+- You are expected to edit files directly in the workspace.
+
+Goal:
+Fix only the verifier gaps so the implementation fully satisfies the issue.
+
+Hard constraints:
+
+- Edit files directly in the workspace.
+- Do not only describe a patch. Apply the fix.
+- Fix only the verifier gaps.
+- Do not refactor.
 - Do not expand scope.
-- Preserve already-correct behavior.
-- Prefer the smallest complete patch.
-- Do not run build, tests, formatters, app startup, package installs, or migrations; deterministic verification runs after the repair.
-- Return `NO_CHANGES_REQUIRED` only when the current repository state already satisfies the repair brief.
+- Do not add new abstractions.
+- Do not change unrelated behavior.
+- Do not rename files, classes, methods, properties, routes, bindings, or public members unless required to satisfy the issue.
+- Preserve the implementation intent.
+- Prefer the smallest local fix.
+- No opportunistic cleanup.
+- No broad formatting changes.
 
-Original issue:
-{{IssueText}}
+Output format after editing:
 
-Implementation plan:
-{{Plan}}
+1) Verifier gaps addressed
+   - Max 5 bullets
 
-Semantic verifier result:
+2) Files changed
+
+3) Minimal fix summary
+   - File-by-file
+   - Keep it brief
+
+Verifier failure:
 {{VerificationFailure}}
 
-Targeted repair brief:
-{{RepairBrief}}
+Relevant issue:
+{{IssueText}}
 
-Changed files:
-{{ChangedFiles}}
-
-Current diff:
-{{Diff}}
-
-Output contract:
-
-Return exactly one of:
-
-NO_CHANGES_REQUIRED
-<short explanation>
-
-or
-
-BEGIN_UNIFIED_DIFF
-<applicable unified diff>
-END_UNIFIED_DIFF
+Planner output:
+{{Plan}}
