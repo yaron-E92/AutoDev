@@ -9,7 +9,7 @@ from typing import Callable, TextIO
 
 from automation import run_real_issue_core as _core
 from automation.run_real_issue_core import *  # noqa: F401,F403
-from automation.model_providers import ModelConfig, ModelProvider, create_provider, load_provider_config
+from automation.model_providers import ModelConfig, ModelProvider, ProviderResponse, create_provider, load_provider_config
 from automation.model_roles import (
     MODEL_ROLES,
     ModelInvocationError,
@@ -39,10 +39,13 @@ class _DeferredProvider(ModelProvider):
         self.factory = factory
         self.provider: ModelProvider | None = None
 
-    def generate(self, prompt: str, *, model: str, timeout_seconds: int) -> str:
+    def invoke(self, prompt: str, *, model: str, timeout_seconds: int) -> ProviderResponse:
         if self.provider is None:
             self.provider = self.factory(self.config)
-        return self.provider.generate(prompt, model=model, timeout_seconds=timeout_seconds)
+        return self.provider.invoke(prompt, model=model, timeout_seconds=timeout_seconds)
+
+    def generate(self, prompt: str, *, model: str, timeout_seconds: int) -> str:
+        return self.invoke(prompt, model=model, timeout_seconds=timeout_seconds).text
 
 
 def run(argv=None, *, stdout=None, stderr=None, provider_factory=None):
