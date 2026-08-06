@@ -3,14 +3,15 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Run one trusted issue-to-PR workflow with provider resolution delegated to Python.
+Run one trusted issue-to-PR workflow without a hard-coded agent backend.
+Provider resolution is delegated to Python.
 
 Usage:
   issue-to-pr-cycle.sh --env ENV_FILE [--mode Run] [options]
 
 Modes:
   Run                        Prepare, plan, implement, check, PR/CI, verify, mark ready.
-  Plan                       Prepare one issue and write plan.md.
+  Plan                       Prepare one issue and write plan.md with the planner agent.
   Prepare                    Select one ready issue and render planner.md.
   Preflight                  Validate the configured provider profile without repository mutation.
   RenderImplementerPrompt    Render implementer.md after plan.md exists.
