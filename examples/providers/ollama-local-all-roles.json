@@ -1,0 +1,36 @@
+{
+  "version": 2,
+  "name": "ollama-local-all-roles",
+  "roles": {
+    "reader": {
+      "transport": "command",
+      "model": "qwen35-9b-32k",
+      "timeout_seconds": 1800
+    },
+    "synthesizer": {
+      "transport": "command",
+      "model": "qwen35-9b-32k",
+      "timeout_seconds": 1800
+    },
+    "planner": {
+      "transport": "command",
+      "model": "qwen35-9b-32k",
+      "timeout_seconds": 1800
+    },
+    "implementer": {
+      "transport": "command",
+      "model": "devstral-small2-12k",
+      "timeout_seconds": 2400
+    },
+    "fixer": {
+      "transport": "command",
+      "model": "devstral-small2-12k",
+      "timeout_seconds": 2400
+    },
+    "verifier": {
+      "transport": "command",
+      "model": "qwen35-9b-32k",
+      "timeout_seconds": 1800
+    }
+  }
+}
