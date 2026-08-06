@@ -80,6 +80,10 @@ class ProviderAgnosticTests(unittest.TestCase):
             self.assertEqual(records[0]["profile_name"], "mixed-test")
             self.assertEqual(records[0]["usage"]["output_tokens"], 20)
 
+    def test_repair_alias_normalizes_to_fixer(self):
+        self.assertEqual(prompt_runner.normalize_role("repair"), "fixer")
+        self.assertEqual(prompt_runner.normalize_role("implementer"), "implementer")
+
     def test_preflight_reports_missing_credentials_without_network_access(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             profile = Path(temp_dir) / "profile.json"
@@ -152,6 +156,23 @@ class ProviderAgnosticTests(unittest.TestCase):
             self.assertNotIn("must be command or ollama", script.casefold())
         self.assertIn('Role "fixer"', windows)
         self.assertIn("run_provider_prompt fixer", linux)
+        self.assertIn("PlannerProviderMode", windows)
+        self.assertIn("AgentProviderMode", windows)
+        self.assertIn("planner_provider_mode", linux)
+        self.assertIn("agent_provider_mode", linux)
+
+    def test_windows_and_linux_prepare_forward_the_provider_profile(self):
+        windows_prepare = (
+            REPO_ROOT / "windows" / "scripts" / "codex-prepare-next-ready-issue.ps1"
+        ).read_text(encoding="utf-8")
+        linux_prepare = (
+            REPO_ROOT / "linux" / "scripts" / "prepare-next-ready-issue.sh"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("prepare_planner_prompt.py", windows_prepare)
+        self.assertIn("ProviderProfile", windows_prepare)
+        self.assertIn("--provider-profile", linux_prepare)
+        self.assertIn("prepare_planner_prompt.py", linux_prepare)
 
 
 if __name__ == "__main__":
