@@ -9,6 +9,7 @@ from automation.model_providers import (
     ModelConfig,
     ModelProvider,
     ProviderError,
+    ProviderResponse,
     model_config_from_values,
     normalize_provider_name,
     ollama_command_for_model,
@@ -177,7 +178,13 @@ def invoke_model(
         "started_at": started_at.isoformat(),
     }
     try:
-        response = provider.invoke(prompt, model=config.model, timeout_seconds=config.timeout_seconds)
+        if "generate" in type(provider).__dict__ and "invoke" not in type(provider).__dict__:
+            response = ProviderResponse(
+                provider.generate(prompt, model=config.model, timeout_seconds=config.timeout_seconds),
+                {},
+            )
+        else:
+            response = provider.invoke(prompt, model=config.model, timeout_seconds=config.timeout_seconds)
     except Exception as exc:
         classification = exc.classification if isinstance(exc, ProviderError) else type(exc).__name__
         record.update(
