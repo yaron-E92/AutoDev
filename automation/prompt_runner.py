@@ -14,12 +14,31 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from automation.model_output_sanitizer import sanitize_model_output
+from automation.model_providers import (
+    ModelConfig,
+    ProviderError,
+    create_provider,
+    load_provider_config,
+    model_config_from_values,
+    ollama_command_for_model,
+)
+from automation.model_roles import (
+    MODEL_ROLES,
+    ROLE_FALLBACKS,
+    ModelInvocationError,
+    append_invocation_metadata,
+    invoke_model,
+    resolve_role_configs,
+)
+from automation.prompt_policies import compose_prompt, resolve_prompt_policies, role_policy_metadata
 
 
 PATCH_START = "BEGIN_UNIFIED_DIFF"
 PATCH_END = "END_UNIFIED_DIFF"
 NO_CHANGES_REQUIRED = "NO_CHANGES_REQUIRED"
 DEFAULT_COMMIT_MESSAGE = "Implement AutoDev task"
+DEFAULT_READER_MODEL = "qwen35-9b-32k"
+DEFAULT_CODER_MODEL = "devstral-small2-12k"
 REQUIRED_PLAN_HEADINGS = (
     "1) Where to look",
     "2) Files / areas likely to touch",
@@ -36,6 +55,7 @@ REASONING_MARKERS = (
     "the prompt says",
     "final check",
 )
+
 
 class PromptRunnerError(RuntimeError):
     pass
@@ -269,39 +289,175 @@ def handle_patch_output(
     return True
 
 
+def normalize_role(role: str) -> str:
+    return "fixer" if role == "repair" else role
+
+
+def legacy_role_config(args: argparse.Namespace, role: str) -> ModelConfig:
+    provider = (args.provider or "").strip()
+    model = args.model.strip()
+    command = args.command.strip()
+    if not provider and model:
+        provider = "ollama"
+    provider = provider or "command"
+    if provider == "ollama":
+        if not model:
+            raise ProviderError("ollama compatibility mode requires --model", classification="invalid_config")
+        provider = "command"
+        command = command or ollama_command_for_model(model)
+    return model_config_from_values(
+        role,
+        {
+            "provider": provider,
+            "model": model,
+            "command": command,
+            "timeout_seconds": args.timeout_seconds,
+        },
+    )
+
+
+def resolve_prompt_role_config(args: argparse.Namespace, role: str) -> tuple[ModelConfig, dict[str, object]]:
+    file_config = load_provider_config(args.provider_profile)
+    if not file_config:
+        return legacy_role_config(args, role), file_config
+
+    defaults = {
+        "reader": {
+            "provider": "command",
+            "model": DEFAULT_READER_MODEL,
+            "command": ollama_command_for_model(DEFAULT_READER_MODEL),
+        },
+        "coder": {
+            "provider": "command",
+            "model": DEFAULT_CODER_MODEL,
+            "command": ollama_command_for_model(DEFAULT_CODER_MODEL),
+        },
+    }
+    fallback = ROLE_FALLBACKS[role]
+    overrides: dict[str, object] = {}
+    if args.provider:
+        overrides["provider"] = args.provider
+    if args.model:
+        overrides["model"] = args.model
+    if args.command:
+        overrides["command"] = args.command
+    if args.timeout_seconds != 600:
+        overrides["timeout_seconds"] = args.timeout_seconds
+    configs = resolve_role_configs(
+        defaults=defaults,
+        file_config=file_config,
+        cli_values={fallback: overrides},
+    )
+    config = configs.get(role)
+    if config is None:
+        raise ProviderError(f"provider role is disabled: {role}", classification="invalid_config")
+    return config, file_config
+
+
+def build_role_prompt(
+    role: str,
+    prompt: str,
+    config: ModelConfig,
+    commit_message_file: Path | None,
+) -> str:
+    direct_edit = config.provider == "command" and config.direct_edit and role in {"implementer", "fixer"}
+    if role == "planner":
+        contract = "Return only the complete six-section implementation plan as markdown. Do not edit files."
+    elif role == "verifier":
+        contract = "Return only the verification result. The first line must be exactly PASS or FAIL."
+    elif direct_edit and role == "implementer":
+        commit_instruction = (
+            f" Write a concise imperative commit message to {commit_message_file}."
+            if commit_message_file is not None
+            else ""
+        )
+        contract = "Edit the workspace directly and implement the task." + commit_instruction
+    elif direct_edit:
+        contract = "Edit the workspace directly and fix only the described failure."
+    elif role == "implementer":
+        contract = (
+            "Return exactly NO_CHANGES_REQUIRED, or COMMIT_MESSAGE followed by "
+            "BEGIN_UNIFIED_DIFF, an applicable unified diff, and END_UNIFIED_DIFF."
+        )
+    else:
+        contract = (
+            "Return exactly NO_CHANGES_REQUIRED, or BEGIN_UNIFIED_DIFF, "
+            "an applicable unified diff, and END_UNIFIED_DIFF."
+        )
+    return f"{prompt.rstrip()}\n\nOutput contract:\n{contract}\n"
+
+
+def invoke_configured_role(
+    args: argparse.Namespace,
+    role: str,
+    prompt: str,
+    commit_message_file: Path | None,
+) -> tuple[str, ModelConfig]:
+    config, file_config = resolve_prompt_role_config(args, role)
+    policies = resolve_prompt_policies(file_config)
+    effective_prompt = build_role_prompt(role, prompt, config, commit_message_file)
+    effective_prompt = compose_prompt(role, effective_prompt, policies[role])
+    provider = create_provider(config)
+    telemetry_path = Path(args.telemetry_file) if args.telemetry_file else None
+    try:
+        output, record = invoke_model(provider, config, effective_prompt, role=role)
+    except ModelInvocationError as exc:
+        exc.record.update(role_policy_metadata(role, policies))
+        if telemetry_path is not None:
+            append_invocation_metadata(telemetry_path, exc.record)
+        raise
+    record.update(role_policy_metadata(role, policies))
+    if telemetry_path is not None:
+        append_invocation_metadata(telemetry_path, record)
+    return output, config
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run one AutoDev prompt through a command or Ollama text provider.")
-    parser.add_argument("--role", choices=["planner", "implementer", "repair", "verifier"], required=True)
-    parser.add_argument("--provider", choices=["command", "ollama"], required=True)
+    parser = argparse.ArgumentParser(description="Run one AutoDev prompt through the shared provider layer.")
+    parser.add_argument("--role", choices=[*MODEL_ROLES, "repair"], required=True)
+    parser.add_argument("--provider-profile", "--provider-config", dest="provider_profile", default="")
+    parser.add_argument("--provider", default="")
     parser.add_argument("--model", default="")
     parser.add_argument("--command", default="")
+    parser.add_argument("--timeout-seconds", type=int, default=600)
     parser.add_argument("--prompt-file", required=True)
     parser.add_argument("--output-file", default="")
     parser.add_argument("--commit-message-file", default="")
+    parser.add_argument("--telemetry-file", default="")
     return parser
 
 
 def run(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    role = normalize_role(args.role)
     prompt_file = Path(args.prompt_file)
     output_file = Path(args.output_file) if args.output_file else None
     commit_message_file = Path(args.commit_message_file) if args.commit_message_file else None
 
     try:
         prompt = read_text(prompt_file)
-        output = run_provider(args.provider, prompt, model=args.model, command=args.command, prompt_file=prompt_file)
-        if args.role == "planner":
+        output, config = invoke_configured_role(args, role, prompt, commit_message_file)
+        direct_edit = config.provider == "command" and config.direct_edit and role in {"implementer", "fixer"}
+        if role == "planner":
             if output_file is None:
                 raise PromptRunnerError("planner role requires --output-file")
             handle_planner_output(output, output_file)
-        elif args.role == "verifier":
+        elif role == "verifier":
             if output_file is None:
                 raise PromptRunnerError("verifier role requires --output-file")
             handle_verifier_output(output, output_file)
+        elif direct_edit:
+            if role == "implementer" and commit_message_file is not None:
+                if not commit_message_file.is_file() or not read_text(commit_message_file).strip():
+                    commit_message = extract_commit_message(output)
+                    if commit_message:
+                        write_text(commit_message_file, commit_message)
+                    else:
+                        raise PromptRunnerError("direct-edit implementer did not write a commit message")
         else:
-            handle_patch_output(output, role=args.role, commit_message_file=commit_message_file)
+            handle_patch_output(output, role=role, commit_message_file=commit_message_file)
         return 0
-    except PromptRunnerError as exc:
+    except (PromptRunnerError, ProviderError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
 
