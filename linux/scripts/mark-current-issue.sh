@@ -1,52 +1,39 @@
 #!/usr/bin/env bash
 set -euo pipefail
+
 source "${AUTOMATION_ROOT:-~/automation}/scripts/lib.sh"
-STATUS=""; MESSAGE=""
-while [[ $# -gt 0 ]]; do case "$1" in --status) STATUS="$2"; shift 2;; --message) MESSAGE="$2"; shift 2;; *) echo "Unknown arg: $1" >&2; exit 2;; esac; done
-[[ -n "$STATUS" ]] || { echo "Missing --status" >&2; exit 2; }
-require_cmd curl; require_cmd jq; init_gh_env; STATE=".codex-run/current/state.json"; [[ -f "$STATE" ]] || { echo "Missing state: $STATE" >&2; exit 1; }
-[[ -n "${GH_TOKEN:-}" ]] || { echo "Missing GH_TOKEN" >&2; exit 1; }
-github_api(){ local method="$1" path="$2" data="${3:-}" args; args=(--fail-with-body --silent --show-error --connect-timeout 5 --max-time 15 --retry 2 --retry-delay 2 --retry-max-time 45 --request "$method" --header "Authorization: Bearer $GH_TOKEN" --header "Accept: application/vnd.github+json" --header "X-GitHub-Api-Version: 2022-11-28"); [[ -n "$data" ]] && args+=(--header "Content-Type: application/json" --data "$data"); curl "${args[@]}" "https://api.github.com/$path"; }
-issue="$(jq -r '.IssueNumber' "$STATE")"; repo="$(jq -r '.RepoFullName' "$STATE")"; pr_url="$(jq -r '.PrUrl // ""' "$STATE")"
-if [[ "$issue" == "0" ]]; then
-  case "$STATUS" in
-    ReadyForReview) jq '.Status="ReadyForReview"' "$STATE" > "$STATE.tmp" && mv "$STATE.tmp" "$STATE"; echo "MARKED_READY_FOR_REVIEW"; exit 0 ;;
-    Blocked) jq '.Status="Blocked"' "$STATE" > "$STATE.tmp" && mv "$STATE.tmp" "$STATE"; echo "MARKED_BLOCKED"; exit 0 ;;
+
+STATUS=""
+MESSAGE=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --status) STATUS="$2"; shift 2 ;;
+    --message) MESSAGE="$2"; shift 2 ;;
+    *) echo "Unknown arg: $1" >&2; exit 2 ;;
   esac
-fi
+done
+
 case "$STATUS" in
-  ReadyForReview)
-    github_api DELETE "repos/$repo/issues/$issue/labels/autodev%3Arunning" >/dev/null 2>&1 || true
-    github_api DELETE "repos/$repo/issues/$issue/labels/autodev%3Ablocked" >/dev/null 2>&1 || true
-    github_api POST "repos/$repo/issues/$issue/labels" '{"labels":["autodev:done"]}' >/dev/null
-    body="AutoDev automation completed.
-
-PR:
-$pr_url
-
-Status:
-Ready for review/merge.${MESSAGE:+
-
-Notes:
-$MESSAGE}"
-    github_api POST "repos/$repo/issues/$issue/comments" "$(jq -n --arg body "$body" '{body:$body}')" >/dev/null
-    jq '.Status="ReadyForReview"' "$STATE" > "$STATE.tmp" && mv "$STATE.tmp" "$STATE"
-    echo "MARKED_READY_FOR_REVIEW"
-    ;;
-  Blocked)
-    github_api DELETE "repos/$repo/issues/$issue/labels/autodev%3Arunning" >/dev/null 2>&1 || true
-    github_api POST "repos/$repo/issues/$issue/labels" '{"labels":["autodev:blocked"]}' >/dev/null
-    [[ -n "$MESSAGE" ]] || MESSAGE="AutoDev automation failed and needs manual review."
-    body="AutoDev automation blocked.
-
-Reason:
-
-\`\`\`text
-$MESSAGE
-\`\`\`"
-    github_api POST "repos/$repo/issues/$issue/comments" "$(jq -n --arg body "$body" '{body:$body}')" >/dev/null
-    jq '.Status="Blocked"' "$STATE" > "$STATE.tmp" && mv "$STATE.tmp" "$STATE"
-    echo "MARKED_BLOCKED"
-    ;;
-  *) echo "Unsupported status: $STATUS" >&2; exit 2;;
+  ReadyForReview) stage="ready" ;;
+  Blocked) stage="blocked" ;;
+  "") echo "Missing --status" >&2; exit 2 ;;
+  *) echo "Unsupported status: $STATUS" >&2; exit 2 ;;
 esac
+
+require_cmd gh
+require_cmd python3
+init_gh_env
+
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+tool_root="${AUTODEV_ROOT:-$(cd -- "$script_dir/../.." && pwd)}"
+old_pythonpath="${PYTHONPATH:-}"
+if [[ -n "$old_pythonpath" ]]; then
+  export PYTHONPATH="$tool_root:$old_pythonpath"
+else
+  export PYTHONPATH="$tool_root"
+fi
+
+exec python3 -m automation.workflow_stages "$stage" \
+  --repo "$(pwd)" \
+  --autodev-root "$tool_root" \
+  --reason "$MESSAGE"
