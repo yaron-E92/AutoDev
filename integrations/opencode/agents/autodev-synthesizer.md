@@ -2,7 +2,9 @@
 description: Isolated AutoDev cross-area synthesizer
 mode: subagent
 permission:
-  read: allow
+  read:
+    "*": deny
+    ".codex-run/current/**": allow
   glob: deny
   grep: deny
   list: deny
