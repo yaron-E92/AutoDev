@@ -179,10 +179,10 @@ class SemanticVerifierTests(unittest.TestCase):
                     ]
                 )
 
-        self.assertEqual(semantic_code, 0)
-        self.assertEqual(legacy_code, 0)
-        self.assertEqual(json.loads(semantic_output.read_text(encoding="utf-8"))["verdict"], "pass")
-        self.assertTrue(legacy_output.read_text(encoding="utf-8").startswith("PASS"))
+            self.assertEqual(semantic_code, 0)
+            self.assertEqual(legacy_code, 0)
+            self.assertEqual(json.loads(semantic_output.read_text(encoding="utf-8"))["verdict"], "pass")
+            self.assertTrue(legacy_output.read_text(encoding="utf-8").startswith("PASS"))
 
     def test_operational_gate_uses_independent_verifier_and_writes_final_verdict(self):
         with tempfile.TemporaryDirectory() as temp_dir:
