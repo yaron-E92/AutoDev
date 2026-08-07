@@ -12,7 +12,8 @@ permission:
   edit: deny
   bash:
     "*": deny
-    "pwsh -NoProfile -File .opencode/autodev.ps1 *": allow
+    "python .opencode/autodev.py *": allow
+    "python3 .opencode/autodev.py *": allow
     "git status*": allow
     "git diff*": allow
   task:
@@ -28,9 +29,11 @@ Coordinate exactly one AutoDev issue-to-PR run. You own ordering and decisions o
 
 Use only concise bridge JSON plus durable `.codex-run/current` artifacts as cross-role state. Never ask a child agent to return its full prompt, diff, reasoning, or transcript. Child Task responses should be limited to success/failure and the artifact path they produced.
 
-For every bridge stage, run:
+For every bridge stage, run the installed portable bridge with the available Python command:
 
-`pwsh -NoProfile -File .opencode/autodev.ps1 stage --name <stage> ...`
+`python .opencode/autodev.py stage --name <stage> ...`
+
+Use `python3` instead of `python` on systems where that is the available Python command. Do not route normal OpenCode execution through the Windows PowerShell workflow.
 
 Treat the returned JSON `state` as authoritative:
 
@@ -40,7 +43,7 @@ Treat the returned JSON `state` as authoritative:
 - `FAILED`: call the bridge `failed` stage with the concise reason, then finish `FAILED`.
 - `PR_READY`: finish `PR_READY`.
 
-Do not call PowerShell `Run` mode. Do not invoke another custom command from this command. Use the Task tool only for the six allowlisted AutoDev role agents.
+Do not invoke another custom command from this command. Use the Task tool only for the six allowlisted AutoDev role agents.
 
 Workflow:
 
@@ -62,7 +65,7 @@ Workflow:
    - On Task failure, mark `failed` and finish `FAILED`.
 
 5. Implementer
-   - Run `stage --name render-implementer` so the existing AutoDev boundary owns implementer-prompt rendering.
+   - Run `stage --name render-implementer` so the shared AutoDev Python stage boundary owns implementer-prompt rendering.
    - Task `autodev-implementer` with this bounded instruction: read only the generated AutoDev implementer prompt and bounded artifacts it names, edit the target repository as required, write `.codex-run/current/commit-message.txt`, and run `accept --role implementer`. Do not branch, commit, push, create/update a PR, or mutate issue state. Return only success/failure and the commit-message artifact path.
    - On Task failure, mark `failed` and finish `FAILED`.
 
@@ -86,7 +89,7 @@ Workflow:
 8. Commit, PR, CI, and CI repair
    - Set `ciRepairAttempt = 0`.
    - Run `stage --name pr-and-ci --attempt <ciRepairAttempt>`.
-   - This existing AutoDev boundary owns commit creation, branch ref updates/push-equivalent behavior, PR creation/reuse, required-check waiting, and CI repair artifact generation. Never reproduce those operations yourself.
+   - The shared AutoDev Python stage boundary owns commit creation, branch ref updates/push-equivalent behavior, PR creation/reuse, required-check waiting, and CI repair artifact generation. Never reproduce those operations yourself.
    - On `REPAIR`, Task `autodev-fixer` with this bounded instruction: run bridge `prepare --role fixer --arguments ci`, follow `.codex-run/current/fixer.md`, and apply only that CI repair. Increment `ciRepairAttempt`, run a fresh deterministic verification cycle, run a fresh semantic verification cycle, then retry `pr-and-ci`.
    - On `BLOCKED`, mark blocked and finish `BLOCKED`.
    - On Task/bridge failure, mark failed and finish `FAILED`.
