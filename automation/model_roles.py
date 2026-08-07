@@ -14,7 +14,6 @@ from automation.model_providers import (
     model_config_from_values,
     normalize_provider_name,
     ollama_command_for_model,
-    with_headroom_role,
 )
 
 MODEL_ROLES = ("reader", "synthesizer", "planner", "implementer", "fixer", "verifier")
@@ -187,15 +186,14 @@ def invoke_model(
         **config.safe_metadata(),
         "started_at": started_at.isoformat(),
     }
-    provider_prompt = with_headroom_role(prompt, role) if config.headroom.enabled else prompt
     try:
         if "generate" in type(provider).__dict__ and "invoke" not in type(provider).__dict__:
             response = ProviderResponse(
-                provider.generate(provider_prompt, model=config.model, timeout_seconds=config.timeout_seconds),
+                provider.generate(prompt, model=config.model, timeout_seconds=config.timeout_seconds),
                 {},
             )
         else:
-            response = provider.invoke(provider_prompt, model=config.model, timeout_seconds=config.timeout_seconds)
+            response = provider.invoke(prompt, model=config.model, timeout_seconds=config.timeout_seconds)
     except Exception as exc:
         classification = exc.classification if isinstance(exc, ProviderError) else type(exc).__name__
         record.update(
