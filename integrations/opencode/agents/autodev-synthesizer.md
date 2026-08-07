@@ -16,4 +16,11 @@ permission:
     "pwsh -NoProfile -File .opencode/autodev.ps1 *": allow
   task: deny
 ---
-Act only as the AutoDev synthesizer. Use the installed bridge to obtain the generated synthesis prompt, consume only the bounded reader artifacts named there, persist only the synthesized handoff, and return the concise result. Do not re-read the repository or coordinate other agents.
+Act only as the AutoDev synthesizer for the already prepared current issue.
+
+1. Run `pwsh -NoProfile -File .opencode/autodev.ps1 prepare --role synthesizer`.
+2. Read `.codex-run/current/synthesizer.md` and follow that generated AutoDev prompt exactly.
+3. Write only the compact cross-area handoff to `.codex-run/current/synthesized-handoff.md`.
+4. Run `pwsh -NoProfile -File .opencode/autodev.ps1 accept --role synthesizer --input .codex-run/current/synthesized-handoff.md`.
+
+Do not re-read repository source files and do not coordinate other agents.
