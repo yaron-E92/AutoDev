@@ -1,31 +1,143 @@
 # OpenCode frontend
 
-AutoDev's OpenCode integration is an optional role frontend. It does not replace the existing PowerShell or Python workflow engines.
+AutoDev's OpenCode integration is an optional frontend over the existing AutoDev workflow. OpenCode owns isolated model conversations; AutoDev remains the source of truth for issue preparation, `.codex-run/current` artifacts, deterministic verification, semantic-verification contracts, repair limits, commits, CI, pull requests, and issue status.
 
-OpenCode owns only the isolated model conversation for a selected role. AutoDev continues to own issue preparation, durable `.codex-run/current` artifacts, branch and issue state, deterministic verification, semantic-verification contracts, repair gates, commits, CI, pull requests, and resumability.
+## Windows quick start
 
-## Install into a target repository
-
-From an AutoDev checkout on Windows:
+Install or sync the adapter from an AutoDev checkout:
 
 ```powershell
 pwsh -File .\scripts\install-opencode.ps1 `
-  -TargetRepository C:\src\TARGET_REPOSITORY
+  -TargetRepository C:\source\repos\TARGET_REPOSITORY
 ```
 
-The installer creates or refreshes only these AutoDev-owned target files:
+Then launch OpenCode from the target repository:
+
+```powershell
+cd C:\source\repos\TARGET_REPOSITORY
+opencode
+```
+
+The primary workflow is one command:
+
+```text
+/autodev-issue-to-pr 123
+```
+
+That command coordinates the normal AutoDev flow from GitHub issue number through a created PR ready for human review. AutoDev never merges the PR automatically.
+
+The command finishes with exactly one top-level state:
+
+```text
+PR_READY
+BLOCKED
+FAILED
+```
+
+`PR_READY` means the existing AutoDev commit/PR/required-CI boundary succeeded and the issue was marked ready for human review. `BLOCKED` means an expected workflow gate such as deterministic verification, semantic verification, or CI exhausted its allowed repair path or explicitly blocked progress. `FAILED` means setup, provider/subagent execution, or an underlying stage failed unexpectedly.
+
+On `BLOCKED` or `FAILED`, the coordinator reports the issue number, AutoDev branch, completed/failed stage, concise reason, artifact directory, whether the repository was modified, whether a commit or PR exists, the PR URL when available, and the recommended next action.
+
+## What the one-command coordinator does
+
+The installed command uses the primary `autodev-coordinator` agent. The coordinator does not implement or repair code itself. It owns only ordering and stage decisions:
+
+```text
+preflight
+  -> existing AutoDev Prepare
+  -> Task: isolated reader
+  -> Task: isolated synthesizer
+  -> Task: isolated planner
+  -> existing RenderImplementerPrompt
+  -> Task: isolated implementer
+  -> existing LocalCheck
+       -> repair: isolated fixer -> LocalCheck again
+  -> Task: isolated semantic verifier
+       -> repair: existing semantic repair artifact -> isolated fixer
+                  -> LocalCheck -> semantic verifier again
+       -> blocked: stop safely
+  -> existing PrAndCi
+       -> CI repair: existing ci-repair.md -> isolated fixer
+                     -> LocalCheck -> semantic verifier -> PrAndCi again
+  -> existing ReadyForReview
+  -> PR_READY
+```
+
+The coordinator never calls the existing full `Run` mode because that mode may invoke AutoDev-configured model providers itself. Model-heavy work stays in OpenCode's isolated role subagents.
+
+The coordinator uses the thin bridge stage API:
+
+```powershell
+pwsh -NoProfile -File .opencode\autodev.ps1 stage --name <stage>
+```
+
+The bridge returns compact JSON with outcomes such as `CONTINUE`, `REPAIR`, `BLOCKED`, `FAILED`, or `PR_READY`. It does not reproduce Git, GitHub, CI, repair, or semantic-verifier behavior. It invokes or reads the existing AutoDev boundaries and artifacts.
+
+Repair attempts respect the same environment settings used by the Windows workflow:
+
+```text
+MAX_REPAIR_ATTEMPTS
+MAX_SEMANTIC_REPAIR_ATTEMPTS
+```
+
+The normal defaults remain 3 deterministic/CI repairs and 1 semantic repair unless the operator configures them differently.
+
+## Isolation and durable artifacts
+
+Reader, synthesizer, planner, implementer, fixer, and verifier work runs in isolated OpenCode subagent contexts. Child role agents retain `task: deny`; only the primary coordinator can invoke the six allowlisted AutoDev roles.
+
+The coordinator does not carry role transcripts forward. State passes through the existing bounded artifacts, including:
+
+```text
+.codex-run/current/issue.md
+.codex-run/current/reader-brief.md
+.codex-run/current/synthesized-handoff.md
+.codex-run/current/plan.md
+.codex-run/current/implementer.md
+.codex-run/current/commit-message.txt
+.codex-run/current/local-repair.md
+.codex-run/current/verification-result.json
+.codex-run/current/verification/semantic-attempt-*.json
+.codex-run/current/verification/final-verdict.json
+.codex-run/current/verification-repair.md
+.codex-run/current/ci-repair.md
+.codex-run/current/state.json
+```
+
+Reader/synthesizer results remain bounded before they become downstream handoffs. Planner output continues through AutoDev's existing six-section parser. Semantic JSON continues through the existing #35 schema and now preserves successive `semantic-attempt-N.json` artifacts across a repair cycle.
+
+## Coordinator permissions
+
+The coordinator is installed as a primary agent with:
+
+```text
+edit: deny
+read: only the small current state/verifier-result artifacts
+bash: installed AutoDev bridge plus safe git status/diff only
+task: deny all, then allow only the six autodev-* role agents
+```
+
+It cannot directly edit source files. It cannot launch arbitrary subagents. It has no direct branch/commit/push/PR/issue mutation shell permissions and never performs a merge.
+
+Implementer/fixer permissions remain unchanged from the role frontend: they may edit target source files but deny VCS/PR/issue mutation. Reader/planner/verifier remain read-oriented and child roles cannot recursively invoke Task.
+
+## Installed target-repository files
+
+The idempotent installer creates or refreshes only AutoDev-owned files:
 
 ```text
 .opencode/
   autodev.json
   autodev.ps1
   commands/
+    autodev-issue-to-pr.md
     autodev-read.md
     autodev-plan.md
     autodev-implement.md
     autodev-fix.md
     autodev-verify.md
   agents/
+    autodev-coordinator.md
     autodev-reader.md
     autodev-synthesizer.md
     autodev-planner.md
@@ -42,123 +154,48 @@ To sync after updating AutoDev, rerun the same installer command.
 
 ## Prerequisites
 
-The target repository must already be usable by the existing AutoDev Windows workflow. In particular, the existing AutoDev PowerShell setup, `pwsh`, Python, GitHub CLI authentication, and the normal `codex-tools` prerequisites used by `Prepare` must be available.
+The target repository must already be usable by the existing AutoDev Windows workflow. The coordinator preflight checks that the target is a Git worktree, the configured AutoDev workflow exists, and `pwsh`, `gh`, and `git` are available before issue preparation mutates workflow state.
 
-The bridge deliberately delegates initial issue setup to AutoDev's existing `Prepare` stage rather than reimplementing issue selection, labels, state, or branch rules.
+The normal AutoDev GitHub authentication setup remains authoritative. The coordinator does not introduce another credential/provider abstraction.
 
-## Commands
+## Provider and model selection
 
-Launch OpenCode from the target repository and use:
+Checked-in OpenCode commands and agents do not declare a model. Provider/model selection stays in normal OpenCode user/project/session configuration.
 
-```text
-/autodev-read 49
-/autodev-plan 49
-/autodev-implement 49
-/autodev-fix 49
-/autodev-verify 49
-```
-
-All five commands use `subtask: true`, so each role runs in an isolated OpenCode context rather than accumulating reader/planner/implementer/fixer/verifier history in the primary conversation.
-
-The synthesizer is installed as `autodev-synthesizer` for later coordinator use but intentionally has no prominent slash command in this first implementation.
-
-This integration does not add `/autodev-issue-to-pr`, `/autodev-status`, or `/autodev-resume`. The existing AutoDev workflow and #37 manifest remain authoritative for orchestration and resume/status semantics.
-
-## What the bridge does
-
-Every public command follows the same thin pattern:
+Example mappings may be:
 
 ```text
-OpenCode command
-  -> .opencode/autodev.ps1
-  -> automation.opencode_adapter prepare
-  -> generated canonical AutoDev role prompt
-  -> isolated OpenCode role agent
-  -> normal .codex-run/current artifact / source edits
-  -> automation.opencode_adapter accept when validation is needed
+reader/synthesizer/planner/verifier -> Groq
+implementer/fixer                   -> OpenRouter free models
 ```
 
-The adapter itself never invokes a configured AutoDev model provider.
+or local Ollama models for any/all roles. These are examples only; AutoDev workflow code does not hardcode them.
 
-If the requested issue is not already the current AutoDev issue, `prepare` delegates to the existing Windows `Prepare` stage. Provider/model environment overrides are removed for that call so issue preparation does not accidentally start a second model invocation.
-
-The role prompt is then rendered from existing AutoDev code/templates and passed through the existing role-specific prompt-policy layer:
-
-- reader: existing area-reader discovery and reader prompt builder with a bounded repository bundle;
-- synthesizer: existing area-reader synthesis prompt builder;
-- planner: existing role-aware planner prompt builder;
-- implementer: `promptTemplates/implementer.md`;
-- fixer: the current `verification-repair.md`, `local-repair.md`, or `ci-repair.md` produced by AutoDev;
-- verifier: existing semantic-verifier evidence builder plus `promptTemplates/semantic-verifier.md`.
-
-No canonical Planner/Implementer/Fixer/Verifier prompt body is copied into `.opencode` files.
-
-## Durable artifacts
-
-Role handoffs use the existing current run directory rather than chat history:
-
-```text
-.codex-run/current/issue.md
-.codex-run/current/reader-brief.md
-.codex-run/current/synthesized-handoff.md
-.codex-run/current/plan.md
-.codex-run/current/implementer.md
-.codex-run/current/commit-message.txt
-.codex-run/current/verification-result.json
-.codex-run/current/verification/final-verdict.json
-```
-
-Reader/synthesizer results are limited to 30,000 characters before they can become a downstream handoff. The reader's deterministic repository bundle is separately capped before it is inserted into the generated reader prompt.
-
-Planner output is validated through AutoDev's existing six-section planner parser. Semantic verifier JSON is validated through AutoDev's existing semantic schema and persisted as the normal semantic-attempt artifact. A standalone `repair` verdict is not written as `final-verdict.json`; finalization remains owned by the normal #35 repair/reverification gate. Standalone terminal `pass` or `blocked` verdicts may be persisted as final verdicts.
-
-## Permissions
-
-The installed role agents do not declare a model.
-
-Provider and model selection therefore stays in the operator's normal OpenCode configuration or session selection. AutoDev does not hardcode Groq, OpenRouter, Ollama, or any specific free model into the integration.
-
-Role permissions are intentionally narrow:
-
-```text
-reader       read/search + reader artifact only; task denied
-synthesizer  bounded artifact read + synthesized handoff only; task denied
-planner      read/search + plan artifact only; task denied
-implementer  source edits; VCS/PR/issue mutation denied; task denied
-fixer        targeted source edits; VCS/PR/issue mutation denied; task denied
-verifier     read/search + verifier result; source edits denied; task denied
-```
-
-The role definitions preserve `.env` read protection. Implementer/fixer shell access remains ask-by-default, with explicit denials for branch/commit/push/PR/issue mutation and an explicit allow for the installed AutoDev bridge.
-
-## Provider examples
-
-OpenCode provider/model configuration is independent from AutoDev's provider-profile files. Select any OpenCode-supported provider/model normally, for example:
-
-```text
-reader/planner/verifier: Groq model selected in OpenCode
-implementer/fixer: OpenRouter free model selected in OpenCode
-```
-
-or:
-
-```text
-all roles: local Ollama-backed models selected in OpenCode
-```
-
-The checked-in `.opencode` agents deliberately omit `model:` so changing OpenCode provider/model configuration does not require regenerating AutoDev prompts or editing workflow logic.
-
-AutoDev's existing provider profiles remain available for the normal headless PowerShell/Python workflow and are not required for OpenCode role execution.
+The coordinator itself does not invoke AutoDev's provider layer for role work, so an OpenCode-local provider/model override does not require workflow-code changes and cannot be silently replaced by a different AutoDev role provider.
 
 ## Ponytail and Headroom
 
-AutoDev's #34 prompt-policy layer is already applied when the bridge renders each role prompt. Normal OpenCode role execution therefore does not require an external Ponytail plugin. If an OpenCode Ponytail plugin is installed, configure or disable it for the `autodev-*` agents so it does not inject a second, potentially contradictory policy on top of AutoDev's rendered role policy.
+AutoDev's #34 prompt-policy layer is applied when the bridge renders each role prompt. An external OpenCode Ponytail plugin is not required. If one is installed, configure or disable it for `autodev-*` agents so it does not inject a contradictory second policy.
 
-Role isolation also does not require Headroom. Do not wrap OpenCode in a second Headroom/compression path for these commands. AutoDev's provider-side Headroom support remains owned by the normal provider-backed workflow; this frontend does not duplicate that routing or compression logic.
+Role isolation and the one-command coordinator do not require Headroom. #36 remains the optional AutoDev provider-side Headroom implementation for provider-backed workflows; the OpenCode coordinator does not add another Headroom routing path.
+
+## Advanced/manual role controls
+
+The individual commands remain available for debugging or intentional intervention:
+
+```text
+/autodev-read 123
+/autodev-plan 123
+/autodev-implement 123
+/autodev-fix 123
+/autodev-verify 123
+```
+
+Those five commands continue to use `subtask: true`, so each role runs in an isolated OpenCode context. The synthesizer remains available as the `autodev-synthesizer` subagent.
 
 ## Existing workflows remain independent
 
-These entrypoints are unchanged and remain usable without OpenCode:
+OpenCode is still optional. These existing entrypoints remain independently usable and do not depend on the OpenCode adapter:
 
 ```text
 scripts/run-real-issue.ps1
@@ -167,4 +204,4 @@ automation.prompt_runner
 automation.run_real_issue
 ```
 
-OpenCode does not own branch creation, commits, pushes, pull requests, issue labels, CI loops, semantic repair semantics, or resumability. After an OpenCode role writes the expected durable artifact or source edits, continue with the existing AutoDev stage boundary appropriate for the run.
+The coordinator does not implement #37 resumability, #36 Headroom, or #38 evaluation. It also does not add an OpenCode-only Git/PR/CI engine: `Prepare`, `RenderImplementerPrompt`, `LocalCheck`, `PrAndCi`, `ReadyForReview`, and `Blocked` remain the authoritative Windows workflow boundaries.
