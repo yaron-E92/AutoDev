@@ -166,7 +166,8 @@ class OpenCodeIntegrationTests(unittest.TestCase):
 
             outputs = opencode_adapter.accept_role("planner", repo, plan_path)
 
-            self.assertEqual(outputs, [plan_path])
+            self.assertEqual(len(outputs), 1)
+            self.assertTrue(outputs[0].samefile(plan_path))
             self.assertTrue(plan_path.read_text(encoding="utf-8").startswith("1) Where to look"))
 
     def test_accept_verifier_reuses_semantic_schema_and_artifacts(self):
@@ -186,9 +187,10 @@ class OpenCodeIntegrationTests(unittest.TestCase):
             result_path.write_text(json.dumps(result), encoding="utf-8")
 
             outputs = opencode_adapter.accept_role("verifier", repo, result_path)
+            attempt_path = current / "verification" / "semantic-attempt-0.json"
 
             self.assertEqual(json.loads(result_path.read_text(encoding="utf-8"))["verdict"], "pass")
-            self.assertIn(current / "verification" / "semantic-attempt-0.json", outputs)
+            self.assertTrue(any(path.samefile(attempt_path) for path in outputs))
             self.assertTrue((current / "verification" / "final-verdict.json").is_file())
 
     def test_accept_verifier_repair_does_not_write_final_verdict(self):
@@ -213,9 +215,10 @@ class OpenCodeIntegrationTests(unittest.TestCase):
             result_path.write_text(json.dumps(result), encoding="utf-8")
 
             outputs = opencode_adapter.accept_role("verifier", repo, result_path)
+            attempt_path = verification / "semantic-attempt-0.json"
 
-            self.assertIn(verification / "semantic-attempt-0.json", outputs)
-            self.assertNotIn(final_path, outputs)
+            self.assertTrue(any(path.samefile(attempt_path) for path in outputs))
+            self.assertFalse(any(path.name == "final-verdict.json" for path in outputs))
             self.assertFalse(final_path.exists())
 
     def test_reader_handoff_rejects_unbounded_result(self):
