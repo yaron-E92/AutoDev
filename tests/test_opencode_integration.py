@@ -29,6 +29,7 @@ class OpenCodeIntegrationTests(unittest.TestCase):
             self.assertIn("subtask: true", text)
             self.assertIn(f"agent: {agent}", text)
             self.assertNotIn("model:", text)
+            self.assertNotIn("api_key", text.casefold())
             self.assertNotIn("You are the Planner for this repository", text)
             self.assertNotIn("BEGIN_UNIFIED_DIFF", text)
 
@@ -41,6 +42,7 @@ class OpenCodeIntegrationTests(unittest.TestCase):
             self.assertIn("mode: subagent", text)
             self.assertIn("task: deny", text)
             self.assertNotIn("model:", text)
+            self.assertNotIn("api_key", text.casefold())
 
         implementer = (OPEN_CODE_ROOT / "agents" / "autodev-implementer.md").read_text(encoding="utf-8")
         fixer = (OPEN_CODE_ROOT / "agents" / "autodev-fixer.md").read_text(encoding="utf-8")
@@ -49,10 +51,12 @@ class OpenCodeIntegrationTests(unittest.TestCase):
             self.assertIn('"git push*": deny', text)
             self.assertIn('"gh pr*": deny', text)
             self.assertIn('"gh issue edit*": deny', text)
+            self.assertIn('"*.env": deny', text)
 
         for name in ("autodev-reader.md", "autodev-planner.md", "autodev-verifier.md"):
             text = (OPEN_CODE_ROOT / "agents" / name).read_text(encoding="utf-8")
             self.assertIn('"*": deny', text)
+            self.assertIn('"*.env": deny', text)
 
     def test_install_is_idempotent_and_preserves_non_autodev_files(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -184,6 +188,33 @@ class OpenCodeIntegrationTests(unittest.TestCase):
             self.assertIn(current / "verification" / "semantic-attempt-0.json", outputs)
             self.assertTrue((current / "verification" / "final-verdict.json").is_file())
 
+    def test_accept_verifier_repair_does_not_write_final_verdict(self):
+        result = {
+            "verdict": "repair",
+            "requirements": [
+                {"criterion": "OpenCode role frontend exists", "status": "missing", "evidence": ["integration"]}
+            ],
+            "findings": [
+                {"severity": "blocking", "message": "Repair is required.", "path": "automation/opencode_adapter.py"}
+            ],
+            "repair_brief": "Fix the missing behavior.",
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            current = repo / ".codex-run" / "current"
+            verification = current / "verification"
+            verification.mkdir(parents=True)
+            final_path = verification / "final-verdict.json"
+            final_path.write_text('{"verdict":"pass"}\n', encoding="utf-8")
+            result_path = current / "verification-result.json"
+            result_path.write_text(json.dumps(result), encoding="utf-8")
+
+            outputs = opencode_adapter.accept_role("verifier", repo, result_path)
+
+            self.assertIn(verification / "semantic-attempt-0.json", outputs)
+            self.assertNotIn(final_path, outputs)
+            self.assertFalse(final_path.exists())
+
     def test_reader_handoff_rejects_unbounded_result(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
@@ -194,6 +225,17 @@ class OpenCodeIntegrationTests(unittest.TestCase):
 
             with self.assertRaises(opencode_adapter.OpenCodeAdapterError):
                 opencode_adapter.accept_role("reader", repo, result)
+
+    def test_existing_workflow_entrypoints_do_not_depend_on_opencode_adapter(self):
+        paths = (
+            REPO_ROOT / "scripts" / "run-real-issue.ps1",
+            REPO_ROOT / "windows" / "scripts" / "issue-to-pr-cycle.ps1",
+            REPO_ROOT / "automation" / "prompt_runner.py",
+            REPO_ROOT / "automation" / "run_real_issue.py",
+        )
+
+        for path in paths:
+            self.assertNotIn("opencode_adapter", path.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":
