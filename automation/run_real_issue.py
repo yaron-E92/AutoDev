@@ -44,6 +44,7 @@ _ACTIVE_ROLES: ContextVar[dict[str, ModelConfig | None] | None] = ContextVar("ac
 _ACTIVE_FACTORY: ContextVar[Callable[[ModelConfig], ModelProvider] | None] = ContextVar("active_factory", default=None)
 _ACTIVE_POLICIES: ContextVar[dict[str, str] | None] = ContextVar("active_policies", default=None)
 _ACTIVE_SEMANTIC: ContextVar[SemanticSettings | None] = ContextVar("active_semantic", default=None)
+_ACTIVE_DEBUG_ARTIFACTS: ContextVar[bool] = ContextVar("active_debug_artifacts", default=False)
 _CORE_WRITE_OPERATIONAL_OUTPUTS = _core.write_operational_outputs
 _CORE_CREATE_DRAFT_PR = _core.create_draft_pr
 
@@ -73,6 +74,7 @@ def run(argv=None, *, stdout=None, stderr=None, provider_factory=None):
     factory_token = _ACTIVE_FACTORY.set(actual_factory)
     policy_token = _ACTIVE_POLICIES.set(policies)
     semantic_token = _ACTIVE_SEMANTIC.set(semantic)
+    debug_token = _ACTIVE_DEBUG_ARTIFACTS.set(bool(args.debug_artifacts))
     originals = {
         "resolve_provider_configs": _core.resolve_provider_configs,
         "run_area_reader": _core.run_area_reader,
@@ -106,6 +108,7 @@ def run(argv=None, *, stdout=None, stderr=None, provider_factory=None):
         _ACTIVE_FACTORY.reset(factory_token)
         _ACTIVE_POLICIES.reset(policy_token)
         _ACTIVE_SEMANTIC.reset(semantic_token)
+        _ACTIVE_DEBUG_ARTIFACTS.reset(debug_token)
 
 
 def main(argv=None):
@@ -207,6 +210,15 @@ def write_operational_outputs(issue_text, area_out, out_dir, keep_debug):
     source = area_out / "model-invocations.json"
     if source.is_file():
         shutil.copyfile(source, out_dir / "model-invocations.json")
+        if keep_debug:
+            try:
+                records = json.loads(source.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                records = []
+            if isinstance(records, list):
+                for record in records:
+                    if isinstance(record, dict):
+                        write_compression_debug_artifact(out_dir, record)
     _CORE_WRITE_OPERATIONAL_OUTPUTS(issue_text, area_out, out_dir, keep_debug)
 
 
@@ -445,9 +457,27 @@ def call_coder(provider, config, prompt, out_dir, attempt, *, role="implementer"
         raise
     record.update(policy_metadata)
     append_invocation_metadata(metadata_path, record)
+    if _ACTIVE_DEBUG_ARTIFACTS.get():
+        write_compression_debug_artifact(out_dir, record)
     name = response_name or f"attempt-{attempt}.txt"
     write_text(out_dir / "model-responses" / name, response)  # noqa: F405
     return response
+
+
+def write_compression_debug_artifact(out_dir: Path, record: dict[str, object]) -> None:
+    compression = record.get("compression")
+    if not isinstance(compression, dict):
+        return
+    role = str(record.get("role", "unknown"))
+    attempt = record.get("attempt", 0)
+    payload = {
+        "role": role,
+        "attempt": attempt,
+        "transport": record.get("transport", record.get("provider", "")),
+        "model": record.get("model", ""),
+        **compression,
+    }
+    write_json(out_dir / "compression" / f"{role}-attempt-{attempt}.json", payload)  # noqa: F405
 
 
 def create_draft_pr(repo, github_repo, issue, issue_text, out_dir, reader_config, coder_config, stream):
