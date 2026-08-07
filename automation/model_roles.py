@@ -99,7 +99,8 @@ def resolve_role_configs(
             headroom_values = resolve_headroom_values(file_config, role)
         except HeadroomError as exc:
             raise ProviderError(str(exc), classification="invalid_config") from exc
-        if headroom_values:
+        provider_value = merged.get("transport", merged.get("provider", "command"))
+        if headroom_values and normalize_provider_name(str(provider_value)).startswith("openai-compatible-"):
             merged["headroom"] = headroom_values
 
         if profile_name and not merged.get("profile_name") and not merged.get("profile"):
