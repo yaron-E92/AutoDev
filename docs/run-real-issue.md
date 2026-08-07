@@ -548,7 +548,7 @@ Install the configured executable or correct the command template. Preflight che
 
 ## 11. Python patch-contract runner
 
-`automation.run_real_issue` remains available for users who specifically want the older Python-owned planning, implementation, verification, and PR flow:
+`automation.run_real_issue` owns the Python planning, implementation, deterministic verification, semantic verification, resumable checkpoint, and draft-PR flow:
 
 ```bash
 python3 -m automation.run_real_issue \
@@ -560,15 +560,158 @@ python3 -m automation.run_real_issue \
   --out /tmp/autodev-run
 ```
 
-For the normal trusted Windows or Linux issue-to-PR workflow, use `scripts/run-real-issue.ps1` or `scripts/run-real-issue.sh` as documented above.
+For the normal trusted Windows or Linux shell workflow, use `scripts/run-real-issue.ps1` or `scripts/run-real-issue.sh` as documented above. The resumable manifest described below belongs to the Python patch-contract runner.
+
+## 12. Resume an interrupted Python run
+
+Every Python patch-contract run writes a versioned manifest to:
+
+```text
+<out-directory>/run-manifest.json
+```
+
+The manifest records the target repository and issue, original base SHA, AutoDev branch, completed stages, artifact hashes, execution-affecting role/config fingerprints, safe provider metadata, provider attempts, usage/cost when reported, failure classification, semantic-verification state, Headroom compression metadata when available, and PR identity when one has been created.
+
+Secret values are not stored or hashed. API-key environment-variable names may be recorded; their resolved values are not.
+
+The checkpoint order is:
+
+```text
+issue-selected
+repository-read
+handoff-synthesized
+plan-created
+implementation-generated
+patch-applied
+deterministic-verified
+semantic-verified
+pr-created
+```
+
+`repair-generated` is recorded when a deterministic or semantic fixer produces an intermediate repair patch.
+
+### Inspect status without resuming
+
+```bash
+python3 -m automation.run_real_issue \
+  --resume /tmp/autodev-run \
+  --status
+```
+
+Status reports the completed stages, next stage, resolved role/provider/model metadata, recorded provider attempts/failures, requested role-invalidation preview, and artifact drift discovered from the manifest hashes.
+
+### Resume with the original configuration
+
+Restore any required credentials or local provider availability, return the target repository to the recorded AutoDev branch/worktree, then run:
+
+```bash
+python3 -m automation.run_real_issue \
+  --resume /tmp/autodev-run
+```
+
+The runner restores the repository, GitHub issue, mode, provider-profile path, fix-attempt limit, baseline-verification option, debug-artifact option, and managed-label behavior from the manifest. You do not need to repeat `--repo`, `--github-repo`, `--issue`, `--mode`, or `--out`.
+
+A provider/quota failure is resumable after the provider becomes available again. Completed reader/planner/implementation stages are not repeated merely because a later provider returned `429`, `402`, timeout, or another recorded provider failure.
+
+The next model-backed stage validates its resolved role configuration and required API-key environment variable before invoking the provider. Actual provider/model/fallback behavior remains the provider-neutral behavior documented earlier in this guide.
+
+### Resume after changing a future role/model
+
+You may edit or replace the provider profile for a role that has not yet contributed to a completed stage. For example, after planning but before implementation, changing only the implementer model does not require recomputing reader, synthesis, or planner work:
+
+```bash
+python3 -m automation.run_real_issue \
+  --resume /tmp/autodev-run \
+  --provider-config ~/autodev-new-implementer.json
+```
+
+If the changed role already produced completed work, AutoDev refuses to continue silently. Explicitly invalidate that role:
+
+```bash
+python3 -m automation.run_real_issue \
+  --resume /tmp/autodev-run \
+  --provider-config ~/autodev-new-planner.json \
+  --invalidate-role planner
+```
+
+Invalidation is deterministic:
+
+```text
+reader       -> repository-read and downstream
+synthesizer  -> handoff-synthesized and downstream
+planner      -> plan-created and downstream
+implementer  -> implementation-generated and downstream
+fixer        -> repair-generated and dependent verification
+verifier     -> semantic-verified and downstream PR state
+```
+
+Changing a planner therefore reuses completed reader and synthesis artifacts. Changing a synthesizer reuses completed reader artifacts. Changing an implementer after planning reuses the entire planning pipeline.
+
+`free_only`, explicit fallback models, request options, model IDs, transport, Headroom settings, output limits, command configuration, and prompt-policy metadata are part of the execution fingerprint. They cannot silently change completed work. Secret-value rotation in the same configured environment variable does not invalidate a stage.
+
+### Drift rules
+
+Resume fails closed when completed work can no longer be trusted. AutoDev checks:
+
+- the exact target repository path;
+- the recorded issue artifact rather than refetching changed issue text;
+- the recorded AutoDev branch;
+- that the original base SHA is still an ancestor of the current branch;
+- SHA-256 hashes for completed-stage artifacts, including the sanitized handoff and plan actually consumed downstream;
+- the tracked and untracked working-tree paths recorded when a patch was applied;
+- the current `git diff HEAD` hash;
+- the recorded branch-head SHA after PR creation.
+
+If a completed artifact, branch, or worktree changed externally, AutoDev refuses to resume instead of guessing which prior stage is still valid.
+
+Area-reader checkpoint files are retained beneath the run output so reader, synthesis, and planner model calls can be replayed independently. Resume may rebuild deterministic repository maps/prompts, but completed model calls are reused only when their recorded artifacts still hash exactly.
+
+### Patch and repair idempotency
+
+Generated and applied patches are separate checkpoints. Before applying a saved patch AutoDev checks whether the reverse patch already applies; if so, it treats the patch as already present instead of applying it twice.
+
+The manifest records the patch hash plus the resulting worktree hash and changed paths. A semantic repair invalidates the earlier deterministic-verification checkpoint before mutating the tree, so an interruption cannot accidentally reuse a pre-repair verification result.
+
+A crash after AutoDev commits but before it records the PR is recoverable only when the worktree is clean and the branch still contains the expected AutoDev issue commit. Arbitrary extra commits or worktree changes are not accepted as equivalent state.
+
+### Draft-PR idempotency
+
+Before creating a draft PR, AutoDev asks GitHub whether the recorded branch already has a PR. An existing PR is recorded and reused rather than creating another one.
+
+If AutoDev cannot determine whether a PR already exists, it fails closed rather than accepting duplicate-PR risk. Once `pr-created` is checkpointed, later resume requires the recorded branch-head SHA and a clean worktree.
+
+### Plan-only resume
+
+Interrupted `--mode plan-only` runs use the same manifest. Reader and synthesis checkpoints can be reused and a planner interruption resumes at `plan-created`. A completed plan-only manifest reports `Next stage: complete`; it is not silently converted into an implementation run.
+
+### Recovery examples
+
+Provider rate limit during implementation:
+
+```text
+1. python3 -m automation.run_real_issue --resume /tmp/autodev-run --status
+2. Restore provider quota / wait for the rate limit to clear.
+3. python3 -m automation.run_real_issue --resume /tmp/autodev-run
+```
+
+Planner model must change after planning:
+
+```text
+1. Edit or replace the provider profile.
+2. Preview with --resume /tmp/autodev-run --status --invalidate-role planner
+3. Resume with --resume /tmp/autodev-run --provider-config NEW.json --invalidate-role planner
+```
+
+Artifact drift:
+
+```text
+1. --status reports the changed artifact.
+2. Restore the recorded artifact/worktree, or explicitly restart/invalidate the producing stage.
+3. Resume only after the manifest and repository state validate again.
+```
+
+The manifest is state for one run directory. AutoDev does not add a database or global run registry.
 
 ## Scope boundaries
 
-This provider work does not implement:
-
-- semantic verification policy from issue #35;
-- Headroom compression from issue #36;
-- resumable run manifests from issue #37;
-- the evaluation harness from issue #38.
-
-Those features remain separate from provider selection and invocation.
+Provider-neutral role routing, semantic verification, optional Headroom compression, and resumable Python run manifests are implemented independently and compose through their existing metadata/artifact boundaries. The evaluation harness from issue #38 remains separate from the runtime workflow.
