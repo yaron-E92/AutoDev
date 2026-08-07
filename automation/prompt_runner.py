@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import shlex
@@ -31,6 +32,7 @@ from automation.model_roles import (
     resolve_role_configs,
 )
 from automation.prompt_policies import compose_prompt, resolve_prompt_policies, role_policy_metadata
+from automation.semantic_verifier import SemanticVerifierError, build_schema_repair_prompt, parse_semantic_output
 
 
 PATCH_START = "BEGIN_UNIFIED_DIFF"
@@ -272,6 +274,12 @@ def handle_verifier_output(output: str, output_file: Path) -> None:
     write_text(output_file, output)
 
 
+def handle_semantic_verifier_output(output: str, output_file: Path) -> dict[str, object]:
+    result = parse_semantic_output(output)
+    write_text(output_file, json.dumps(result, indent=2, sort_keys=True) + "\n")
+    return result
+
+
 def handle_patch_output(
     output: str,
     *,
@@ -359,10 +367,16 @@ def build_role_prompt(
     prompt: str,
     config: ModelConfig,
     commit_message_file: Path | None,
+    verifier_format: str = "legacy",
 ) -> str:
     direct_edit = config.provider == "command" and config.direct_edit and role in {"implementer", "fixer"}
     if role == "planner":
         contract = "Return only the complete six-section implementation plan as markdown. Do not edit files."
+    elif role == "verifier" and verifier_format == "semantic-json":
+        contract = (
+            "Return JSON only with verdict pass, repair, or blocked; requirements with criterion, status, and evidence; "
+            "findings with severity blocking or warning; and repair_brief. Do not use Markdown fences."
+        )
     elif role == "verifier":
         contract = "Return only the verification result. The first line must be exactly PASS or FAIL."
     elif direct_edit and role == "implementer":
@@ -392,15 +406,18 @@ def invoke_configured_role(
     role: str,
     prompt: str,
     commit_message_file: Path | None,
+    *,
+    attempt: int = 0,
+    verifier_format: str = "legacy",
 ) -> tuple[str, ModelConfig]:
     config, file_config = resolve_prompt_role_config(args, role)
     policies = resolve_prompt_policies(file_config)
-    effective_prompt = build_role_prompt(role, prompt, config, commit_message_file)
+    effective_prompt = build_role_prompt(role, prompt, config, commit_message_file, verifier_format)
     effective_prompt = compose_prompt(role, effective_prompt, policies[role])
     provider = create_provider(config)
     telemetry_path = Path(args.telemetry_file) if args.telemetry_file else None
     try:
-        output, record = invoke_model(provider, config, effective_prompt, role=role)
+        output, record = invoke_model(provider, config, effective_prompt, role=role, attempt=attempt)
     except ModelInvocationError as exc:
         exc.record.update(role_policy_metadata(role, policies))
         if telemetry_path is not None:
@@ -424,6 +441,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-file", default="")
     parser.add_argument("--commit-message-file", default="")
     parser.add_argument("--telemetry-file", default="")
+    parser.add_argument("--verifier-format", choices=("legacy", "semantic-json"), default="legacy")
+    parser.add_argument("--max-schema-retries", type=int, default=1)
     return parser
 
 
@@ -436,12 +455,38 @@ def run(argv: list[str] | None = None) -> int:
 
     try:
         prompt = read_text(prompt_file)
-        output, config = invoke_configured_role(args, role, prompt, commit_message_file)
+        output, config = invoke_configured_role(
+            args,
+            role,
+            prompt,
+            commit_message_file,
+            verifier_format=args.verifier_format,
+        )
         direct_edit = config.provider == "command" and config.direct_edit and role in {"implementer", "fixer"}
         if role == "planner":
             if output_file is None:
                 raise PromptRunnerError("planner role requires --output-file")
             handle_planner_output(output, output_file)
+        elif role == "verifier" and args.verifier_format == "semantic-json":
+            if output_file is None:
+                raise PromptRunnerError("semantic verifier role requires --output-file")
+            try:
+                handle_semantic_verifier_output(output, output_file)
+            except SemanticVerifierError as exc:
+                if args.max_schema_retries <= 0:
+                    raise
+                invalid_path = output_file.with_name(output_file.name + ".attempt-0.invalid.txt")
+                write_text(invalid_path, output)
+                retry_prompt = build_schema_repair_prompt(prompt, output, str(exc))
+                retry_output, _ = invoke_configured_role(
+                    args,
+                    role,
+                    retry_prompt,
+                    commit_message_file,
+                    attempt=1,
+                    verifier_format=args.verifier_format,
+                )
+                handle_semantic_verifier_output(retry_output, output_file)
         elif role == "verifier":
             if output_file is None:
                 raise PromptRunnerError("verifier role requires --output-file")

@@ -30,6 +30,8 @@ param(
     [string]$ProfilesPath = $(if ($env:PROFILES_PATH) { $env:PROFILES_PATH } else { "$env:USERPROFILE\codex-tools\codex-profiles.json" }),
     [string]$ProviderProfile = $env:PROVIDER_PROFILE,
     [string]$ProviderPreflightOut = $(if ($env:PROVIDER_PREFLIGHT_OUT) { $env:PROVIDER_PREFLIGHT_OUT } else { ".codex-run\provider-preflight.json" }),
+    [switch]$DisableSemanticVerification,
+    [int]$MaxSemanticRepairAttempts = $(if ($env:MAX_SEMANTIC_REPAIR_ATTEMPTS) { [int]$env:MAX_SEMANTIC_REPAIR_ATTEMPTS } else { 1 }),
 
     [string]$GitHubTokenSecretName = $env:GITHUB_TOKEN_SECRET_NAME,
     [string]$KeePassCliPath = $(if ($env:KEEPASS_CLI) { $env:KEEPASS_CLI } else { "keepassxc-cli" }),
@@ -56,6 +58,9 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+if ($MaxRepairAttempts -lt 0) { throw "-MaxRepairAttempts must be zero or greater." }
+if ($MaxSemanticRepairAttempts -lt 0) { throw "-MaxSemanticRepairAttempts must be zero or greater." }
+
 $scriptRoot = $PSScriptRoot
 $toolRoot = Split-Path -Parent (Split-Path -Parent $scriptRoot)
 $UsePromptRunnerModule = [string]::IsNullOrWhiteSpace($PromptRunner)
@@ -68,6 +73,7 @@ $PlannerProviderMode = -not [string]::IsNullOrWhiteSpace($ProviderProfile) -or
 $AgentProviderMode = -not [string]::IsNullOrWhiteSpace($ProviderProfile) -or
     -not [string]::IsNullOrWhiteSpace($AgentProvider) -or
     -not [string]::IsNullOrWhiteSpace($AgentModel)
+$script:SemanticVerificationEnabled = $false
 if ([string]::IsNullOrWhiteSpace($PlannerAgentCommand)) { $PlannerAgentCommand = $AgentCommand }
 
 function Set-OptionalWorkingDirectory {
@@ -100,7 +106,12 @@ function Invoke-PythonModule {
     )
     $oldPythonPath = $env:PYTHONPATH
     try {
-        $env:PYTHONPATH = if ([string]::IsNullOrWhiteSpace($oldPythonPath)) { $toolRoot } else { "$toolRoot$([IO.Path]::PathSeparator)$oldPythonPath" }
+        $env:PYTHONPATH = if ([string]::IsNullOrWhiteSpace($oldPythonPath)) {
+            $toolRoot
+        }
+        else {
+            "$toolRoot$([IO.Path]::PathSeparator)$oldPythonPath"
+        }
         $output = @(& $Python -m $Module @Arguments 2>&1)
         $code = $LASTEXITCODE
     }
@@ -108,6 +119,26 @@ function Invoke-PythonModule {
         $env:PYTHONPATH = $oldPythonPath
     }
     foreach ($line in $output) { Write-Host $line }
+    return $code
+}
+
+function Resolve-SemanticVerificationMode {
+    $script:SemanticVerificationEnabled = $false
+    if ($DisableSemanticVerification -or [string]::IsNullOrWhiteSpace($ProviderProfile)) {
+        return 0
+    }
+
+    $code = Invoke-PythonModule -Module "automation.semantic_verifier" -Arguments @(
+        "enabled",
+        "--provider-profile", $ProviderProfile
+    )
+    if ($code -eq 0) {
+        $script:SemanticVerificationEnabled = $true
+        return 0
+    }
+    if ($code -eq 1) {
+        return 0
+    }
     return $code
 }
 
@@ -142,26 +173,37 @@ function Invoke-ProviderPrompt {
         [Parameter(Mandatory = $true)][string]$Role,
         [Parameter(Mandatory = $true)][string]$Prompt,
         [string]$OutputFile = "",
-        [string]$CommitMessageFile = ""
+        [string]$CommitMessageFile = "",
+        [string]$VerifierFormat = ""
     )
     $promptFile = New-TemporaryFile
     try {
         Set-Content -LiteralPath $promptFile.FullName -Encoding UTF8 -Value $Prompt
         $args = @("--role", $Role, "--prompt-file", $promptFile.FullName, "--telemetry-file", $telemetryFile)
-        if (-not [string]::IsNullOrWhiteSpace($ProviderProfile)) { $args += @("--provider-profile", $ProviderProfile) }
+        if (-not [string]::IsNullOrWhiteSpace($ProviderProfile)) {
+            $args += @("--provider-profile", $ProviderProfile)
+        }
 
         $isPlanner = $Role -eq "planner"
         $legacyProvider = if ($isPlanner) { $PlannerProvider } else { $AgentProvider }
         $legacyModel = if ($isPlanner) { $PlannerModel } else { $AgentModel }
         $legacyCommand = if ($isPlanner) { $PlannerAgentCommand } else { $AgentCommand }
-        if (-not [string]::IsNullOrWhiteSpace($legacyModel) -and ([string]::IsNullOrWhiteSpace($legacyProvider) -or $legacyProvider -eq "ollama")) {
+        if (-not [string]::IsNullOrWhiteSpace($legacyModel) -and
+            ([string]::IsNullOrWhiteSpace($legacyProvider) -or $legacyProvider -eq "ollama")) {
             $legacyCommand = ""
         }
         if (-not [string]::IsNullOrWhiteSpace($legacyProvider)) { $args += @("--provider", $legacyProvider) }
         if (-not [string]::IsNullOrWhiteSpace($legacyModel)) { $args += @("--model", $legacyModel) }
-        if ([string]::IsNullOrWhiteSpace($ProviderProfile) -and -not [string]::IsNullOrWhiteSpace($legacyCommand)) { $args += @("--command", $legacyCommand) }
+        if ([string]::IsNullOrWhiteSpace($ProviderProfile) -and -not [string]::IsNullOrWhiteSpace($legacyCommand)) {
+            $args += @("--command", $legacyCommand)
+        }
         if (-not [string]::IsNullOrWhiteSpace($OutputFile)) { $args += @("--output-file", $OutputFile) }
-        if (-not [string]::IsNullOrWhiteSpace($CommitMessageFile)) { $args += @("--commit-message-file", $CommitMessageFile) }
+        if (-not [string]::IsNullOrWhiteSpace($CommitMessageFile)) {
+            $args += @("--commit-message-file", $CommitMessageFile)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($VerifierFormat)) {
+            $args += @("--verifier-format", $VerifierFormat)
+        }
 
         if ($UsePromptRunnerModule) {
             $code = Invoke-PythonModule -Module "automation.prompt_runner" -Arguments $args
@@ -179,7 +221,9 @@ function Invoke-ProviderPrompt {
 }
 
 function Invoke-ProviderPreflight {
-    if ([string]::IsNullOrWhiteSpace($ProviderProfile)) { throw "Preflight requires -ProviderProfile or PROVIDER_PROFILE." }
+    if ([string]::IsNullOrWhiteSpace($ProviderProfile)) {
+        throw "Preflight requires -ProviderProfile or PROVIDER_PROFILE."
+    }
     $code = Invoke-PythonModule -Module "automation.provider_preflight" -Arguments @(
         "--provider-profile", $ProviderProfile,
         "--out", $ProviderPreflightOut
@@ -208,7 +252,9 @@ function Invoke-Prepare {
     )
     if ($Issue -ne 0) { $args += @("-Issue", [string]$Issue) }
     if (-not [string]::IsNullOrWhiteSpace($Description)) { $args += @("-Description", $Description) }
-    if (-not [string]::IsNullOrWhiteSpace($DescriptionFile)) { $args += @("-DescriptionFile", $DescriptionFile) }
+    if (-not [string]::IsNullOrWhiteSpace($DescriptionFile)) {
+        $args += @("-DescriptionFile", $DescriptionFile)
+    }
     if (-not [string]::IsNullOrWhiteSpace($Profiles)) { $args += @("-Profiles", $Profiles) }
     if (-not [string]::IsNullOrWhiteSpace($LocalCheck)) { $args += @("-LocalCheck", $LocalCheck) }
     if (-not [string]::IsNullOrWhiteSpace($StackContext)) { $args += @("-StackContext", $StackContext) }
@@ -218,16 +264,28 @@ function Invoke-Prepare {
     elseif ($PlannerProviderMode -or $AgentProviderMode) {
         if (-not [string]::IsNullOrWhiteSpace($PlannerProvider)) { $args += @("-ReaderProvider", $PlannerProvider) }
         if (-not [string]::IsNullOrWhiteSpace($PlannerModel)) { $args += @("-ReaderModel", $PlannerModel) }
-        if ($PlannerProvider -eq "command" -and -not [string]::IsNullOrWhiteSpace($PlannerAgentCommand)) { $args += @("-ReaderCommand", $PlannerAgentCommand) }
+        if ($PlannerProvider -eq "command" -and -not [string]::IsNullOrWhiteSpace($PlannerAgentCommand)) {
+            $args += @("-ReaderCommand", $PlannerAgentCommand)
+        }
         if (-not [string]::IsNullOrWhiteSpace($AgentProvider)) { $args += @("-CoderProvider", $AgentProvider) }
         if (-not [string]::IsNullOrWhiteSpace($AgentModel)) { $args += @("-CoderModel", $AgentModel) }
-        if ($AgentProvider -eq "command" -and -not [string]::IsNullOrWhiteSpace($AgentCommand)) { $args += @("-CoderCommand", $AgentCommand) }
+        if ($AgentProvider -eq "command" -and -not [string]::IsNullOrWhiteSpace($AgentCommand)) {
+            $args += @("-CoderCommand", $AgentCommand)
+        }
     }
-    if (-not [string]::IsNullOrWhiteSpace($GitHubTokenSecretName)) { $args += @("-GitHubTokenSecretName", $GitHubTokenSecretName) }
+    if (-not [string]::IsNullOrWhiteSpace($GitHubTokenSecretName)) {
+        $args += @("-GitHubTokenSecretName", $GitHubTokenSecretName)
+    }
     if (-not [string]::IsNullOrWhiteSpace($KeePassCliPath)) { $args += @("-KeePassCliPath", $KeePassCliPath) }
-    if (-not [string]::IsNullOrWhiteSpace($KeePassDatabasePath)) { $args += @("-KeePassDatabasePath", $KeePassDatabasePath) }
-    if (-not [string]::IsNullOrWhiteSpace($KeePassEntryPath)) { $args += @("-KeePassEntryPath", $KeePassEntryPath) }
-    if (-not [string]::IsNullOrWhiteSpace($KeePassKeyFilePath)) { $args += @("-KeePassKeyFilePath", $KeePassKeyFilePath) }
+    if (-not [string]::IsNullOrWhiteSpace($KeePassDatabasePath)) {
+        $args += @("-KeePassDatabasePath", $KeePassDatabasePath)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($KeePassEntryPath)) {
+        $args += @("-KeePassEntryPath", $KeePassEntryPath)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($KeePassKeyFilePath)) {
+        $args += @("-KeePassKeyFilePath", $KeePassKeyFilePath)
+    }
     if ($KeePassNoPassword) { $args += "-KeePassNoPassword" }
     if (-not [string]::IsNullOrWhiteSpace($GhConfigDir)) { $args += @("-GhConfigDir", $GhConfigDir) }
     if ($ForceCurrent) { $args += "-ForceCurrent" }
@@ -260,7 +318,8 @@ function Invoke-PlanAgent {
         $prompt = "Use the issue-to-pr-automation skill.`n`nRun the planner prompt below. Write your complete planner output to:`n`n$planPath`n`nDo not edit any other files.`n`n--- PLANNER PROMPT ---`n$plannerPrompt"
         Invoke-AgentPrompt -Command $PlannerAgentCommand -Prompt $prompt -FailureMessage "Planner agent command failed."
     }
-    if (-not (Test-Path -LiteralPath $planPath) -or [string]::IsNullOrWhiteSpace((Get-Content -LiteralPath $planPath -Raw -Encoding UTF8))) {
+    if (-not (Test-Path -LiteralPath $planPath) -or
+        [string]::IsNullOrWhiteSpace((Get-Content -LiteralPath $planPath -Raw -Encoding UTF8))) {
         throw "Planner agent did not write $planPath."
     }
 }
@@ -276,7 +335,8 @@ function Invoke-ImplementAgent {
         $prompt = "Use the issue-to-pr-automation skill.`n`nRun the implementer prompt below. Edit the workspace directly.`n`nAlso write a concise commit message to:`n`n$commitMessagePath`n`n--- IMPLEMENTER PROMPT ---`n$implementerPrompt"
         Invoke-AgentPrompt -Command $AgentCommand -Prompt $prompt -FailureMessage "Implementer agent command failed."
     }
-    if (-not (Test-Path -LiteralPath $commitMessagePath) -or [string]::IsNullOrWhiteSpace((Get-Content -LiteralPath $commitMessagePath -Raw -Encoding UTF8))) {
+    if (-not (Test-Path -LiteralPath $commitMessagePath) -or
+        [string]::IsNullOrWhiteSpace((Get-Content -LiteralPath $commitMessagePath -Raw -Encoding UTF8))) {
         throw "Implementer agent did not write $commitMessagePath."
     }
 }
@@ -293,7 +353,7 @@ function Invoke-RepairAgent {
     }
 }
 
-function Invoke-VerifyAgent {
+function Invoke-LegacyVerifyAgent {
     $verifierPath = Join-Path $currentDir "verifier.md"
     $resultPath = Join-Path $currentDir "verification-result.md"
     $verifierPrompt = Get-FileText -Path $verifierPath
@@ -304,9 +364,56 @@ function Invoke-VerifyAgent {
         $prompt = "Use the issue-to-pr-automation skill.`n`nRun the verifier prompt below. Write only the verification result to:`n`n$resultPath`n`nThe file must start with exactly PASS or FAIL.`n`n--- VERIFIER PROMPT ---`n$verifierPrompt"
         Invoke-AgentPrompt -Command $AgentCommand -Prompt $prompt -FailureMessage "Verifier agent command failed."
     }
-    if (-not (Test-Path -LiteralPath $resultPath) -or [string]::IsNullOrWhiteSpace((Get-Content -LiteralPath $resultPath -Raw -Encoding UTF8))) {
+    if (-not (Test-Path -LiteralPath $resultPath) -or
+        [string]::IsNullOrWhiteSpace((Get-Content -LiteralPath $resultPath -Raw -Encoding UTF8))) {
         throw "Verifier agent did not write $resultPath."
     }
+}
+
+function Invoke-SemanticPromptPreparation {
+    $verificationDir = Join-Path $currentDir "verification"
+    New-Item -ItemType Directory -Force -Path $verificationDir | Out-Null
+    $code = Invoke-PythonModule -Module "automation.semantic_verifier" -Arguments @(
+        "prepare",
+        "--repo", [System.IO.Path]::GetFullPath("."),
+        "--current-dir", $currentDir,
+        "--template", (Join-Path $toolRoot "promptTemplates\semantic-verifier.md"),
+        "--out", (Join-Path $currentDir "verifier.md")
+    )
+    if ($code -ne 0) { throw "Semantic verifier evidence preparation failed. Exit code: $code." }
+}
+
+function Invoke-SemanticRepairPromptPreparation {
+    $code = Invoke-PythonModule -Module "automation.semantic_verifier" -Arguments @(
+        "repair-prompt",
+        "--repo", [System.IO.Path]::GetFullPath("."),
+        "--current-dir", $currentDir,
+        "--template", (Join-Path $toolRoot "promptTemplates\semantic-repair.md"),
+        "--out", (Join-Path $currentDir "verification-repair.md")
+    )
+    if ($code -ne 0) { throw "Semantic repair prompt preparation failed. Exit code: $code." }
+}
+
+function Invoke-SemanticVerifyAgent {
+    $verifierPath = Join-Path $currentDir "verifier.md"
+    $resultPath = Join-Path $currentDir "verification-result.json"
+    $verifierPrompt = Get-FileText -Path $verifierPath
+    Invoke-ProviderPrompt `
+        -Role "verifier" `
+        -Prompt $verifierPrompt `
+        -OutputFile $resultPath `
+        -VerifierFormat "semantic-json"
+    if (-not (Test-Path -LiteralPath $resultPath) -or
+        [string]::IsNullOrWhiteSpace((Get-Content -LiteralPath $resultPath -Raw -Encoding UTF8))) {
+        throw "Semantic verifier did not write $resultPath."
+    }
+}
+
+function Get-SemanticVerdictCode {
+    return Invoke-PythonModule -Module "automation.semantic_verifier" -Arguments @(
+        "verdict",
+        "--input", (Join-Path $currentDir "verification-result.json")
+    )
 }
 
 function Invoke-PrepareAndPlan {
@@ -328,6 +435,52 @@ function Invoke-LocalCheckWithRepairs {
     }
 }
 
+function Invoke-SemanticGate {
+    if (-not $script:SemanticVerificationEnabled) { return 0 }
+
+    Invoke-SemanticPromptPreparation
+    Invoke-SemanticVerifyAgent
+    $verificationDir = Join-Path $currentDir "verification"
+    $resultPath = Join-Path $currentDir "verification-result.json"
+    Copy-Item -LiteralPath $resultPath -Destination (Join-Path $verificationDir "semantic-attempt-0.json") -Force
+
+    $verdictCode = Get-SemanticVerdictCode
+    if ($verdictCode -eq 0) {
+        Copy-Item -LiteralPath $resultPath -Destination (Join-Path $verificationDir "final-verdict.json") -Force
+        return 0
+    }
+    if ($verdictCode -eq 20) {
+        Copy-Item -LiteralPath $resultPath -Destination (Join-Path $verificationDir "final-verdict.json") -Force
+        Write-Host "Semantic verifier blocked the run."
+        return 1
+    }
+    if ($verdictCode -ne 10) {
+        Write-Host "Semantic verifier failed or returned malformed output."
+        return 1
+    }
+    if ($MaxSemanticRepairAttempts -lt 1) {
+        Copy-Item -LiteralPath $resultPath -Destination (Join-Path $verificationDir "final-verdict.json") -Force
+        Write-Host "Semantic verifier requested repair but semantic repair is disabled."
+        return 1
+    }
+
+    Invoke-SemanticRepairPromptPreparation
+    Invoke-RepairAgent -PromptPath (Join-Path $currentDir "verification-repair.md")
+    $localCode = Invoke-LocalCheckWithRepairs
+    if ($localCode -ne 0) { return $localCode }
+
+    Invoke-SemanticPromptPreparation
+    Invoke-SemanticVerifyAgent
+    Copy-Item -LiteralPath $resultPath -Destination (Join-Path $verificationDir "semantic-attempt-1.json") -Force
+    $verdictCode = Get-SemanticVerdictCode
+    Copy-Item -LiteralPath $resultPath -Destination (Join-Path $verificationDir "final-verdict.json") -Force
+    if ($verdictCode -ne 0) {
+        Write-Host "Semantic verification did not pass after the targeted repair."
+        return 1
+    }
+    return 0
+}
+
 function Invoke-PrAndCiWithRepairs {
     $attempt = 0
     while ($true) {
@@ -338,35 +491,94 @@ function Invoke-PrAndCiWithRepairs {
         Invoke-RepairAgent -PromptPath (Join-Path $currentDir "ci-repair.md")
         $localCode = Invoke-LocalCheckWithRepairs
         if ($localCode -ne 0) { return $localCode }
+        $semanticCode = Invoke-SemanticGate
+        if ($semanticCode -ne 0) { return $semanticCode }
     }
 }
 
-function Invoke-RunCycle {
-    $planCode = Invoke-PrepareAndPlan
-    if ($planCode -eq 2) { return 0 }
-    if ($planCode -ne 0) { return $planCode }
-    $render = Invoke-Finalize -StepMode "RenderImplementerPrompt"
-    if ($render.Code -ne 0) { return $render.Code }
-    try { Invoke-ImplementAgent } catch { Invoke-Mark -Status "Blocked" -Reason "Implementer did not produce commit-message.txt."; throw }
-    $localCode = Invoke-LocalCheckWithRepairs
-    if ($localCode -ne 0) { Invoke-Mark -Status "Blocked" -Reason "Automation could not complete after local repair attempts."; return $localCode }
-
+function Invoke-LegacyVerificationLoop {
     $verificationAttempt = 0
     while ($true) {
-        $ciCode = Invoke-PrAndCiWithRepairs
-        if ($ciCode -ne 0) { Invoke-Mark -Status "Blocked" -Reason "Automation could not complete after CI repair attempts."; return $ciCode }
-        try { Invoke-VerifyAgent } catch { Invoke-Mark -Status "Blocked" -Reason "Verifier did not produce verification-result.md."; throw }
+        try {
+            Invoke-LegacyVerifyAgent
+        }
+        catch {
+            Invoke-Mark -Status "Blocked" -Reason "Verifier did not produce verification-result.md."
+            throw
+        }
         $firstLine = ((Get-Content -LiteralPath (Join-Path $currentDir "verification-result.md") -TotalCount 1) -replace "`r", "")
-        if ($firstLine -eq "PASS") { Invoke-Mark -Status "ReadyForReview"; return 0 }
-        if ($firstLine -ne "FAIL") { Invoke-Mark -Status "Blocked" -Reason "Verifier result must start with PASS or FAIL."; return 1 }
-        if ($verificationAttempt -ge $MaxRepairAttempts) { Invoke-Mark -Status "Blocked" -Reason "Automation could not complete after verification repair attempts."; return 1 }
+        if ($firstLine -eq "PASS") {
+            Invoke-Mark -Status "ReadyForReview"
+            return 0
+        }
+        if ($firstLine -ne "FAIL") {
+            Invoke-Mark -Status "Blocked" -Reason "Verifier result must start with PASS or FAIL."
+            return 1
+        }
+        if ($verificationAttempt -ge $MaxRepairAttempts) {
+            Invoke-Mark -Status "Blocked" -Reason "Automation could not complete after verification repair attempts."
+            return 1
+        }
+
         $verificationAttempt++
         $repairRender = Invoke-Finalize -StepMode "RenderVerificationRepair"
         if ($repairRender.Code -ne 0) { return $repairRender.Code }
         Invoke-RepairAgent -PromptPath (Join-Path $currentDir "verification-repair.md")
         $localCode = Invoke-LocalCheckWithRepairs
-        if ($localCode -ne 0) { Invoke-Mark -Status "Blocked" -Reason "Automation could not complete after verification local-check repairs."; return $localCode }
+        if ($localCode -ne 0) {
+            Invoke-Mark -Status "Blocked" -Reason "Automation could not complete after verification local-check repairs."
+            return $localCode
+        }
+        $ciCode = Invoke-PrAndCiWithRepairs
+        if ($ciCode -ne 0) {
+            Invoke-Mark -Status "Blocked" -Reason "Automation could not complete after CI repair attempts."
+            return $ciCode
+        }
     }
+}
+
+function Invoke-RunCycle {
+    $semanticModeCode = Resolve-SemanticVerificationMode
+    if ($semanticModeCode -ne 0) { return $semanticModeCode }
+
+    $planCode = Invoke-PrepareAndPlan
+    if ($planCode -eq 2) { return 0 }
+    if ($planCode -ne 0) { return $planCode }
+
+    $render = Invoke-Finalize -StepMode "RenderImplementerPrompt"
+    if ($render.Code -ne 0) { return $render.Code }
+    try {
+        Invoke-ImplementAgent
+    }
+    catch {
+        Invoke-Mark -Status "Blocked" -Reason "Implementer did not produce commit-message.txt."
+        throw
+    }
+
+    $localCode = Invoke-LocalCheckWithRepairs
+    if ($localCode -ne 0) {
+        Invoke-Mark -Status "Blocked" -Reason "Automation could not complete after local repair attempts."
+        return $localCode
+    }
+
+    $semanticCode = Invoke-SemanticGate
+    if ($semanticCode -ne 0) {
+        Invoke-Mark -Status "Blocked" -Reason "Independent semantic verification did not pass."
+        return $semanticCode
+    }
+
+    $ciCode = Invoke-PrAndCiWithRepairs
+    if ($ciCode -ne 0) {
+        Invoke-Mark -Status "Blocked" -Reason "Automation could not complete after CI repair attempts."
+        return $ciCode
+    }
+
+    if ($script:SemanticVerificationEnabled) {
+        Invoke-Mark -Status "ReadyForReview"
+        return 0
+    }
+
+    return Invoke-LegacyVerificationLoop
 }
 
 Set-OptionalWorkingDirectory -Path $WorkingDirectory
@@ -374,12 +586,35 @@ Set-OptionalWorkingDirectory -Path $WorkingDirectory
 switch ($Mode) {
     "Run" { exit (Invoke-RunCycle) }
     "Plan" { $code = Invoke-PrepareAndPlan; if ($code -eq 2) { exit 0 }; exit $code }
-    "Prepare" { $result = Invoke-Prepare; Write-Host "NEXT_ACTION: If PREPARED was printed, read $currentDir\planner.md and write $currentDir\plan.md."; exit $result.Code }
+    "Prepare" {
+        $result = Invoke-Prepare
+        Write-Host "NEXT_ACTION: If PREPARED was printed, read $currentDir\planner.md and write $currentDir\plan.md."
+        exit $result.Code
+    }
     "Preflight" { exit (Invoke-ProviderPreflight) }
-    "RenderImplementerPrompt" { $result = Invoke-Finalize -StepMode "RenderImplementerPrompt"; Write-Host "NEXT_ACTION: Read $currentDir\implementer.md, implement directly, and write $currentDir\commit-message.txt."; exit $result.Code }
-    "LocalCheck" { $result = Invoke-Finalize -StepMode "LocalCheck"; Write-Host "NEXT_ACTION: If LOCAL_CHECK_FAILED was printed, read $currentDir\local-repair.md and fix only that failure."; exit $result.Code }
-    "PrAndCi" { $result = Invoke-Finalize -StepMode "PrAndCi"; Write-Host "NEXT_ACTION: If CI_PASSED was printed, read $currentDir\verifier.md and write $currentDir\verification-result.md. If CI_FAILED was printed, read $currentDir\ci-repair.md."; exit $result.Code }
-    "RenderVerificationRepair" { $result = Invoke-Finalize -StepMode "RenderVerificationRepair"; Write-Host "NEXT_ACTION: Read $currentDir\verification-repair.md and fix only verifier gaps."; exit $result.Code }
+    "RenderImplementerPrompt" {
+        $result = Invoke-Finalize -StepMode "RenderImplementerPrompt"
+        Write-Host "NEXT_ACTION: Read $currentDir\implementer.md, implement directly, and write $currentDir\commit-message.txt."
+        exit $result.Code
+    }
+    "LocalCheck" {
+        $result = Invoke-Finalize -StepMode "LocalCheck"
+        Write-Host "NEXT_ACTION: If LOCAL_CHECK_FAILED was printed, read $currentDir\local-repair.md and fix only that failure."
+        exit $result.Code
+    }
+    "PrAndCi" {
+        $result = Invoke-Finalize -StepMode "PrAndCi"
+        Write-Host "NEXT_ACTION: If CI_PASSED was printed, verification may proceed. If CI_FAILED was printed, read $currentDir\ci-repair.md."
+        exit $result.Code
+    }
+    "RenderVerificationRepair" {
+        $result = Invoke-Finalize -StepMode "RenderVerificationRepair"
+        Write-Host "NEXT_ACTION: Read $currentDir\verification-repair.md and fix only verifier gaps."
+        exit $result.Code
+    }
     "ReadyForReview" { Invoke-Mark -Status "ReadyForReview" -Reason $Message; exit 0 }
-    "Blocked" { Invoke-Mark -Status "Blocked" -Reason $(if ($Message) { $Message } else { "Automation could not complete after repair attempts." }); exit 0 }
+    "Blocked" {
+        Invoke-Mark -Status "Blocked" -Reason $(if ($Message) { $Message } else { "Automation could not complete after repair attempts." })
+        exit 0
+    }
 }

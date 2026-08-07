@@ -54,5 +54,10 @@
       "api_key_env": "GROQ_API_KEY",
       "timeout_seconds": 1800
     }
+  },
+  "semantic_verification": {
+    "enabled": true,
+    "max_schema_retries": 1,
+    "max_repair_attempts": 1
   }
 }

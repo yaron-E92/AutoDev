@@ -10,7 +10,7 @@ Usage:
   issue-to-pr-cycle.sh --env ENV_FILE [--mode Run] [options]
 
 Modes:
-  Run                        Prepare, plan, implement, check, PR/CI, verify, mark ready.
+  Run                        Prepare, plan, implement, check, semantic verify, PR/CI, mark ready.
   Plan                       Prepare one issue and write plan.md with the planner agent.
   Prepare                    Select one ready issue and render planner.md.
   Preflight                  Validate the configured provider profile without repository mutation.
@@ -25,6 +25,10 @@ Options:
   --env FILE                  Project environment file. Required unless ENV_FILE is set.
   --provider-profile FILE     Version-2 role provider profile.
   --provider-preflight-out F  Preflight JSON path. Default: .codex-run/provider-preflight.json.
+  --disable-semantic-verification
+                              Preserve the legacy PASS/FAIL verifier workflow.
+  --max-semantic-repair-attempts N
+                              Targeted semantic repairs. Default: 1.
   --owner OWNER               GitHub owner. Defaults to GITHUB_OWNER.
   --repo REPO                 GitHub repo. Defaults to GITHUB_REPO.
   --base BRANCH               Base branch. Defaults to BASE_BRANCH or main.
@@ -33,7 +37,7 @@ Options:
   --description TEXT          Use literal issue text instead of a GitHub issue.
   --description-file FILE     Read literal issue text from a file.
   --message TEXT              Blocked status message.
-  --max-repair-attempts N     Repair attempts. Default: 3.
+  --max-repair-attempts N     Deterministic/CI repair attempts. Default: 3.
   --planner-provider NAME     Legacy planner transport override; Python validates it.
   --planner-model MODEL       Legacy planner model override.
   --agent-provider NAME       Legacy implementer/fixer/verifier transport override.
@@ -60,6 +64,8 @@ description_file="${ISSUE_DESCRIPTION_FILE:-}"
 message=""
 provider_profile="${PROVIDER_PROFILE:-}"
 provider_preflight_out="${PROVIDER_PREFLIGHT_OUT:-.codex-run/provider-preflight.json}"
+disable_semantic_verification="${DISABLE_SEMANTIC_VERIFICATION:-0}"
+max_semantic_repair_attempts="${MAX_SEMANTIC_REPAIR_ATTEMPTS:-1}"
 agent_command="${AGENT_COMMAND:-codex exec}"
 planner_agent_command="${PLANNER_AGENT_COMMAND:-}"
 planner_provider="${PLANNER_PROVIDER:-}"
@@ -69,6 +75,7 @@ agent_model="${AGENT_MODEL:-}"
 max_repair_attempts="${MAX_REPAIR_ATTEMPTS:-3}"
 current_dir=".codex-run/current"
 telemetry_file="$current_dir/model-invocations.json"
+semantic_enabled=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -84,6 +91,8 @@ while [[ $# -gt 0 ]]; do
     --message) message="$2"; shift 2 ;;
     --provider-profile) provider_profile="$2"; shift 2 ;;
     --provider-preflight-out) provider_preflight_out="$2"; shift 2 ;;
+    --disable-semantic-verification) disable_semantic_verification=1; shift ;;
+    --max-semantic-repair-attempts) max_semantic_repair_attempts="$2"; shift 2 ;;
     --max-repair-attempts) max_repair_attempts="$2"; shift 2 ;;
     --planner-provider) planner_provider="$2"; shift 2 ;;
     --planner-model) planner_model="$2"; shift 2 ;;
@@ -98,6 +107,10 @@ done
 
 [[ -n "$env_file" ]] || { echo "Missing --env or ENV_FILE" >&2; usage >&2; exit 2; }
 [[ "$max_repair_attempts" =~ ^[0-9]+$ ]] || { echo "--max-repair-attempts must be a non-negative integer" >&2; exit 2; }
+[[ "$max_semantic_repair_attempts" =~ ^[0-9]+$ ]] || {
+  echo "--max-semantic-repair-attempts must be a non-negative integer" >&2
+  exit 2
+}
 [[ -n "$planner_agent_command" ]] || planner_agent_command="$agent_command"
 planner_provider_mode=false
 agent_provider_mode=false
@@ -108,6 +121,24 @@ with_env=("$automation_root/scripts/with-env.sh" "$env_file")
 run_python_module() {
   local module="$1"; shift
   "${with_env[@]}" env PYTHONPATH="$tool_root${PYTHONPATH:+:$PYTHONPATH}" "$python_bin" -m "$module" "$@"
+}
+
+resolve_semantic_mode() {
+  semantic_enabled=false
+  [[ "$disable_semantic_verification" != 1 ]] || return 0
+  [[ -n "$provider_profile" ]] || return 0
+
+  local code
+  set +e
+  run_python_module automation.semantic_verifier enabled --provider-profile "$provider_profile"
+  code=$?
+  set -e
+  if [[ $code -eq 0 ]]; then
+    semantic_enabled=true
+    return 0
+  fi
+  [[ $code -eq 1 ]] && return 0
+  return "$code"
 }
 
 run_prepare() {
@@ -160,7 +191,7 @@ run_agent_prompt() {
 }
 
 run_provider_prompt() {
-  local role="$1" output_file="${2:-}" commit_file="${3:-}" prompt_file args=()
+  local role="$1" output_file="${2:-}" commit_file="${3:-}" verifier_format="${4:-}" prompt_file args=()
   prompt_file="$(mktemp)"
   cat > "$prompt_file"
   args=(--role "$role" --prompt-file "$prompt_file" --telemetry-file "$telemetry_file")
@@ -180,6 +211,7 @@ run_provider_prompt() {
   [[ -z "$provider_profile" && -n "$legacy_command" ]] && args+=(--command "$legacy_command")
   [[ -n "$output_file" ]] && args+=(--output-file "$output_file")
   [[ -n "$commit_file" ]] && args+=(--commit-message-file "$commit_file")
+  [[ -n "$verifier_format" ]] && args+=(--verifier-format "$verifier_format")
 
   if [[ -n "${PROMPT_RUNNER:-}" ]]; then
     "${with_env[@]}" "$python_bin" "$prompt_runner" "${args[@]}"
@@ -190,8 +222,13 @@ run_provider_prompt() {
 }
 
 run_provider_preflight() {
-  [[ -n "$provider_profile" ]] || { echo "Preflight requires --provider-profile or PROVIDER_PROFILE" >&2; return 2; }
-  run_python_module automation.provider_preflight --provider-profile "$provider_profile" --out "$provider_preflight_out"
+  [[ -n "$provider_profile" ]] || {
+    echo "Preflight requires --provider-profile or PROVIDER_PROFILE" >&2
+    return 2
+  }
+  run_python_module automation.provider_preflight \
+    --provider-profile "$provider_profile" \
+    --out "$provider_preflight_out"
 }
 
 agent_write_plan() {
@@ -211,7 +248,10 @@ Do not edit any other files.
 $(cat "$current_dir/planner.md")
 EOF
   fi
-  [[ -s "$current_dir/plan.md" ]] || { echo "Planner did not write $current_dir/plan.md" >&2; return 1; }
+  [[ -s "$current_dir/plan.md" ]] || {
+    echo "Planner did not write $current_dir/plan.md" >&2
+    return 1
+  }
 }
 
 agent_implement() {
@@ -228,7 +268,10 @@ Write a concise imperative commit message to $current_dir/commit-message.txt.
 $(cat "$current_dir/implementer.md")
 EOF
   fi
-  [[ -s "$current_dir/commit-message.txt" ]] || { echo "Implementer did not write $current_dir/commit-message.txt" >&2; return 1; }
+  [[ -s "$current_dir/commit-message.txt" ]] || {
+    echo "Implementer did not write $current_dir/commit-message.txt" >&2
+    return 1
+  }
 }
 
 agent_repair_file() {
@@ -247,7 +290,7 @@ EOF
   fi
 }
 
-agent_verify() {
+agent_verify_legacy() {
   if [[ "$agent_provider_mode" == true ]]; then
     run_provider_prompt verifier "$current_dir/verification-result.md" "" < "$current_dir/verifier.md"
   else
@@ -262,13 +305,104 @@ The file must start with exactly PASS or FAIL.
 $(cat "$current_dir/verifier.md")
 EOF
   fi
-  [[ -s "$current_dir/verification-result.md" ]] || { echo "Verifier did not write $current_dir/verification-result.md" >&2; return 1; }
+  [[ -s "$current_dir/verification-result.md" ]] || {
+    echo "Verifier did not write $current_dir/verification-result.md" >&2
+    return 1
+  }
+}
+
+prepare_semantic_prompt() {
+  mkdir -p "$current_dir/verification"
+  run_python_module automation.semantic_verifier prepare \
+    --repo . \
+    --current-dir "$current_dir" \
+    --template "$tool_root/promptTemplates/verifier.md" \
+    --out "$current_dir/verifier.md"
+}
+
+prepare_semantic_repair_prompt() {
+  run_python_module automation.semantic_verifier repair-prompt \
+    --repo . \
+    --current-dir "$current_dir" \
+    --template "$tool_root/promptTemplates/verification-repair.md" \
+    --out "$current_dir/verification-repair.md"
+}
+
+agent_verify_semantic() {
+  run_provider_prompt verifier "$current_dir/verification-result.json" "" semantic-json < "$current_dir/verifier.md"
+  [[ -s "$current_dir/verification-result.json" ]] || {
+    echo "Semantic verifier did not write $current_dir/verification-result.json" >&2
+    return 1
+  }
+}
+
+semantic_verdict() {
+  local code
+  set +e
+  run_python_module automation.semantic_verifier verdict --input "$current_dir/verification-result.json"
+  code=$?
+  set -e
+  return "$code"
+}
+
+semantic_gate() {
+  [[ "$semantic_enabled" == true ]] || return 0
+
+  local verdict_code
+  prepare_semantic_prompt
+  agent_verify_semantic
+  cp "$current_dir/verification-result.json" "$current_dir/verification/semantic-attempt-0.json"
+
+  set +e
+  semantic_verdict
+  verdict_code=$?
+  set -e
+
+  if [[ $verdict_code -eq 0 ]]; then
+    cp "$current_dir/verification-result.json" "$current_dir/verification/final-verdict.json"
+    return 0
+  fi
+  if [[ $verdict_code -eq 20 ]]; then
+    cp "$current_dir/verification-result.json" "$current_dir/verification/final-verdict.json"
+    echo "Semantic verifier blocked the run." >&2
+    return 1
+  fi
+  if [[ $verdict_code -ne 10 ]]; then
+    echo "Semantic verifier failed or returned malformed output." >&2
+    return 1
+  fi
+  if [[ $max_semantic_repair_attempts -lt 1 ]]; then
+    cp "$current_dir/verification-result.json" "$current_dir/verification/final-verdict.json"
+    echo "Semantic verifier requested repair but semantic repair is disabled." >&2
+    return 1
+  fi
+
+  prepare_semantic_repair_prompt
+  agent_repair_file "$current_dir/verification-repair.md"
+  local_check_with_repairs || return $?
+
+  prepare_semantic_prompt
+  agent_verify_semantic
+  cp "$current_dir/verification-result.json" "$current_dir/verification/semantic-attempt-1.json"
+
+  set +e
+  semantic_verdict
+  verdict_code=$?
+  set -e
+  cp "$current_dir/verification-result.json" "$current_dir/verification/final-verdict.json"
+  [[ $verdict_code -eq 0 ]] || {
+    echo "Semantic verification did not pass after the targeted repair." >&2
+    return 1
+  }
 }
 
 local_check_with_repairs() {
   local attempt=0 code
   while true; do
-    set +e; run_finalize LocalCheck; code=$?; set -e
+    set +e
+    run_finalize LocalCheck
+    code=$?
+    set -e
     [[ $code -eq 0 ]] && return 0
     [[ $code -eq 10 && $attempt -lt $max_repair_attempts ]] || return "$code"
     attempt=$((attempt + 1))
@@ -279,12 +413,16 @@ local_check_with_repairs() {
 pr_and_ci_with_repairs() {
   local attempt=0 code
   while true; do
-    set +e; run_finalize PrAndCi; code=$?; set -e
+    set +e
+    run_finalize PrAndCi
+    code=$?
+    set -e
     [[ $code -eq 0 ]] && return 0
     [[ $code -eq 20 && $attempt -lt $max_repair_attempts ]] || return "$code"
     attempt=$((attempt + 1))
     agent_repair_file "$current_dir/ci-repair.md"
-    local_check_with_repairs
+    local_check_with_repairs || return $?
+    semantic_gate || return $?
   done
 }
 
@@ -293,34 +431,86 @@ prepare_and_plan() {
   [[ -n "$repo" ]] || { echo "Missing --repo or GITHUB_REPO" >&2; return 2; }
   local prepare_log prepare_code
   prepare_log="$(mktemp)"
-  set +e; run_prepare | tee "$prepare_log"; prepare_code=${PIPESTATUS[0]}; set -e
+  set +e
+  run_prepare | tee "$prepare_log"
+  prepare_code=${PIPESTATUS[0]}
+  set -e
   if [[ $prepare_code -ne 0 ]]; then rm -f "$prepare_log"; return "$prepare_code"; fi
   if grep -q '^NO_READY_ISSUE$' "$prepare_log"; then rm -f "$prepare_log"; return 2; fi
   rm -f "$prepare_log"
   agent_write_plan
 }
 
-run_cycle() {
-  local code verification_attempt=0 first_line
-  set +e; prepare_and_plan; code=$?; set -e
-  [[ $code -eq 2 ]] && return 0
-  [[ $code -eq 0 ]] || return "$code"
-  run_finalize RenderImplementerPrompt
-  agent_implement || { mark_status Blocked "Implementer did not produce commit-message.txt."; return 1; }
-  local_check_with_repairs || { code=$?; mark_status Blocked "Automation could not complete after local repair attempts."; return "$code"; }
-
+legacy_verification_loop() {
+  local verification_attempt=0 first_line code
   while true; do
-    pr_and_ci_with_repairs || { code=$?; mark_status Blocked "Automation could not complete after CI repair attempts."; return "$code"; }
-    agent_verify || { mark_status Blocked "Verifier did not produce verification-result.md."; return 1; }
+    agent_verify_legacy || {
+      mark_status Blocked "Verifier did not produce verification-result.md."
+      return 1
+    }
     first_line="$(head -n 1 "$current_dir/verification-result.md" | tr -d '\r')"
     [[ "$first_line" == PASS ]] && { mark_status ReadyForReview; return 0; }
-    [[ "$first_line" == FAIL ]] || { mark_status Blocked "Verifier result must start with PASS or FAIL."; return 1; }
-    [[ $verification_attempt -lt $max_repair_attempts ]] || { mark_status Blocked "Automation could not complete after verification repair attempts."; return 1; }
+    [[ "$first_line" == FAIL ]] || {
+      mark_status Blocked "Verifier result must start with PASS or FAIL."
+      return 1
+    }
+    [[ $verification_attempt -lt $max_repair_attempts ]] || {
+      mark_status Blocked "Automation could not complete after verification repair attempts."
+      return 1
+    }
     verification_attempt=$((verification_attempt + 1))
     run_finalize RenderVerificationRepair
     agent_repair_file "$current_dir/verification-repair.md"
-    local_check_with_repairs || { code=$?; mark_status Blocked "Automation could not complete after verification local-check repairs."; return "$code"; }
+    local_check_with_repairs || {
+      code=$?
+      mark_status Blocked "Automation could not complete after verification local-check repairs."
+      return "$code"
+    }
+    pr_and_ci_with_repairs || {
+      code=$?
+      mark_status Blocked "Automation could not complete after CI repair attempts."
+      return "$code"
+    }
   done
+}
+
+run_cycle() {
+  local code
+  resolve_semantic_mode || return $?
+
+  set +e
+  prepare_and_plan
+  code=$?
+  set -e
+  [[ $code -eq 2 ]] && return 0
+  [[ $code -eq 0 ]] || return "$code"
+
+  run_finalize RenderImplementerPrompt
+  agent_implement || {
+    mark_status Blocked "Implementer did not produce commit-message.txt."
+    return 1
+  }
+  local_check_with_repairs || {
+    code=$?
+    mark_status Blocked "Automation could not complete after local repair attempts."
+    return "$code"
+  }
+  semantic_gate || {
+    code=$?
+    mark_status Blocked "Independent semantic verification did not pass."
+    return "$code"
+  }
+  pr_and_ci_with_repairs || {
+    code=$?
+    mark_status Blocked "Automation could not complete after CI repair attempts."
+    return "$code"
+  }
+
+  if [[ "$semantic_enabled" == true ]]; then
+    mark_status ReadyForReview
+    return 0
+  fi
+  legacy_verification_loop
 }
 
 case "$mode" in

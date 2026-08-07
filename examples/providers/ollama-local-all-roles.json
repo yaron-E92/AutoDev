@@ -32,5 +32,10 @@
       "model": "qwen35-9b-32k",
       "timeout_seconds": 1800
     }
+  },
+  "semantic_verification": {
+    "enabled": true,
+    "max_schema_retries": 1,
+    "max_repair_attempts": 1
   }
 }
