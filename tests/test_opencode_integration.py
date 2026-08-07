@@ -133,7 +133,7 @@ class OpenCodeIntegrationTests(unittest.TestCase):
 
         self.assertEqual(path.name, "planner.md")
         self.assertIn("Bounded handoff", prompt)
-        self.assertIn("AutoDev implementation policy", prompt)
+        self.assertIn("Role-specific prompt policy (lite; autodev-ponytail-v1)", prompt)
         self.assertIn("# GitHub Issue #49", prompt)
 
     def test_accept_planner_reuses_existing_six_section_parser(self):
