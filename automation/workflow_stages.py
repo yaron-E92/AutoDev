@@ -109,6 +109,19 @@ def execute_stage(
         )
 
     current = repo / CURRENT_DIR
+    if name == "failed":
+        state_value = read_json(current / "state.json")
+        state = state_value if isinstance(state_value, dict) else {}
+        if state:
+            mark_blocked(current, state, reason or "OpenCode coordinator failed.", runner=runner)
+        return 0, stage_payload(
+            repo,
+            "FAILED",
+            name,
+            reason=reason or "OpenCode coordinator failed",
+            next_action="inspect the failure artifacts, correct the setup/provider/subagent failure, then restart intentionally",
+        )
+
     state = read_state(current)
 
     if name == "render-implementer":
@@ -267,17 +280,6 @@ def execute_stage(
             next_action="inspect the current AutoDev artifacts and intervene manually",
         )
 
-    if name == "failed":
-        if current.is_dir() and read_json(current / "state.json"):
-            mark_blocked(current, state, reason or "OpenCode coordinator failed.", runner=runner)
-        return 0, stage_payload(
-            repo,
-            "FAILED",
-            name,
-            reason=reason or "OpenCode coordinator failed",
-            next_action="inspect the failure artifacts, correct the setup/provider/subagent failure, then restart intentionally",
-        )
-
     status = str(state.get("Status", ""))
     outcome = "PR_READY" if status == "ReadyForReview" else "BLOCKED" if status == "Blocked" else "CONTINUE"
     return 0, stage_payload(
@@ -415,6 +417,10 @@ def resolve_profiles(
     config = read_json(profiles_path)
     if not isinstance(config, dict):
         config = {}
+    if not config and not explicit_local_check.strip():
+        raise WorkflowStageError(
+            f"verification profile configuration is missing or invalid: {profiles_path}; set LOCAL_CHECK explicitly"
+        )
     definitions = config.get("profiles", {})
     definitions = definitions if isinstance(definitions, dict) else {}
     selected = [value for value in re.split(r"[,;\s]+", explicit_profiles.casefold()) if value]
@@ -433,10 +439,10 @@ def resolve_profiles(
 
     verify_profiles: list[str] = []
     contexts: list[str] = []
-    for name in selected:
-        value = definitions.get(name, {}) if name != "auto" else {}
+    for profile_name in selected:
+        value = definitions.get(profile_name, {}) if profile_name != "auto" else {}
         value = value if isinstance(value, dict) else {}
-        verify_profiles.append(str(value.get("verifyProfile", name)))
+        verify_profiles.append(str(value.get("verifyProfile", profile_name)))
         context = str(value.get("stackContext", "")).strip()
         if context:
             contexts.append(context)
@@ -446,14 +452,15 @@ def resolve_profiles(
     else:
         template = str(config.get("verifyCommandTemplate", "")).strip()
         if not template:
-            local_check = "python -m unittest discover -s tests"
-        else:
-            codex_tools = os.environ.get("CODEX_TOOLS_DIR", str(Path.home() / "codex-tools"))
-            local_check = (
-                template.replace("{{ProfilesCsv}}", profiles_csv)
-                .replace("{{AutomationRoot}}", str(autodev_root))
-                .replace("{{CodexToolsDir}}", codex_tools)
+            raise WorkflowStageError(
+                f"verification profile {profiles_path} has no verifyCommandTemplate; set LOCAL_CHECK explicitly"
             )
+        codex_tools = os.environ.get("CODEX_TOOLS_DIR", str(Path.home() / "codex-tools"))
+        local_check = (
+            template.replace("{{ProfilesCsv}}", profiles_csv)
+            .replace("{{AutomationRoot}}", str(autodev_root))
+            .replace("{{CodexToolsDir}}", codex_tools)
+        )
     stack_context = explicit_stack_context.strip() or "\n".join(contexts)
     if not stack_context:
         stack_context = (
@@ -625,7 +632,10 @@ def create_api_commit(
             ),
             runner=runner,
         )
-        tree_items.append({"path": relative, "mode": "100644", "type": "blob", "sha": str(blob.get("sha", ""))})
+        blob_sha = str(blob.get("sha", ""))
+        if not blob_sha:
+            raise WorkflowStageError(f"GitHub API did not return a blob SHA for {relative}")
+        tree_items.append({"path": relative, "mode": "100644", "type": "blob", "sha": blob_sha})
 
     tree = gh_json(
         repo,
@@ -633,11 +643,14 @@ def create_api_commit(
         input_text=json.dumps({"base_tree": base_tree, "tree": tree_items}),
         runner=runner,
     )
+    tree_sha = str(tree.get("sha", ""))
+    if not tree_sha:
+        raise WorkflowStageError("GitHub API did not return a tree SHA")
     message = commit_message(current, state)
     commit = gh_json(
         repo,
         ["api", f"repos/{repo_full}/git/commits", "--method", "POST", "--input", "-"],
-        input_text=json.dumps({"message": message, "tree": str(tree.get("sha", "")), "parents": [parent]}),
+        input_text=json.dumps({"message": message, "tree": tree_sha, "parents": [parent]}),
         runner=runner,
     )
     sha = str(commit.get("sha", ""))
@@ -702,7 +715,8 @@ def ensure_pr(
         ],
         runner=runner,
     )
-    url = (getattr(completed, "stdout", "") or "").strip().splitlines()[-1].strip()
+    lines = [line.strip() for line in (getattr(completed, "stdout", "") or "").splitlines() if line.strip()]
+    url = lines[-1] if lines else ""
     if not url:
         raise WorkflowStageError("gh pr create did not return a PR URL")
     details = gh_json(repo, ["pr", "view", url, "--repo", repo_full, "--json", "number"], runner=runner)
@@ -735,6 +749,9 @@ def wait_for_required_checks(
     )
     text = (getattr(completed, "stdout", "") or "").strip()
     if int(getattr(completed, "returncode", 1)) != 0 and not text:
+        stderr = (getattr(completed, "stderr", "") or "").casefold()
+        if "no checks" in stderr or "no required" in stderr:
+            return []
         raise WorkflowStageError(_command_reason(completed))
     if not text:
         return []
@@ -792,9 +809,10 @@ def mark_ready(
 ) -> None:
     issue_number = int(state.get("IssueNumber", 0) or 0)
     repo_full = str(state.get("RepoFullName", ""))
+    repo = current.parents[1]
     if issue_number:
         gh(
-            current.parents[1],
+            repo,
             [
                 "issue",
                 "edit",
@@ -811,7 +829,7 @@ def mark_ready(
             runner=runner,
         )
         gh(
-            current.parents[1],
+            repo,
             [
                 "issue",
                 "comment",
@@ -836,9 +854,10 @@ def mark_blocked(
 ) -> None:
     issue_number = int(state.get("IssueNumber", 0) or 0)
     repo_full = str(state.get("RepoFullName", ""))
+    repo = current.parents[1]
     if issue_number:
         gh(
-            current.parents[1],
+            repo,
             [
                 "issue",
                 "edit",
@@ -853,7 +872,7 @@ def mark_blocked(
             runner=runner,
         )
         gh(
-            current.parents[1],
+            repo,
             [
                 "issue",
                 "comment",
