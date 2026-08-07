@@ -4,6 +4,9 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
+
+from automation import workflow_verify_current
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -59,6 +62,46 @@ class OpenCodeBridgeTests(unittest.TestCase):
                 os.chdir(old_cwd)
 
             self.assertEqual(actual, original)
+
+    def test_linux_bridge_defaults_to_current_profile_verifier_without_pwsh(self):
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(BRIDGE.os, "name", "posix"),
+        ):
+            env = BRIDGE._bridge_environment("python3", REPO_ROOT)
+
+        self.assertIn("automation.workflow_verify_current", env["LOCAL_CHECK"])
+        self.assertNotIn("pwsh", env["LOCAL_CHECK"])
+        self.assertIn(str(REPO_ROOT), env["PYTHONPATH"])
+
+    def test_explicit_linux_local_check_is_preserved(self):
+        with (
+            patch.dict(os.environ, {"LOCAL_CHECK": "custom-check"}, clear=True),
+            patch.object(BRIDGE.os, "name", "posix"),
+        ):
+            env = BRIDGE._bridge_environment("python3", REPO_ROOT)
+
+        self.assertEqual(env["LOCAL_CHECK"], "custom-check")
+
+    def test_linux_current_profile_verifier_uses_resolved_profiles(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            current = repo / ".codex-run" / "current"
+            current.mkdir(parents=True)
+            (current / "state.json").write_text(
+                json.dumps({"ProfilesCsv": "backend,maui"}),
+                encoding="utf-8",
+            )
+
+            with patch("automation.workflow_verify_current.subprocess.run") as runner:
+                runner.return_value.returncode = 0
+                code = workflow_verify_current.run(repo, REPO_ROOT)
+
+            self.assertEqual(code, 0)
+            command = runner.call_args.args[0]
+            self.assertEqual(command[0], "bash")
+            self.assertTrue(command[1].endswith("linux/scripts/codex-verify.sh"))
+            self.assertEqual(command[-2:], ["--profiles", "backend,maui"])
 
     def _write_state(self, repo: Path, issue_number: int) -> None:
         current = repo / ".codex-run" / "current"
