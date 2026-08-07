@@ -74,6 +74,7 @@ class RunManifestTests(unittest.TestCase):
             (root / "repo").mkdir()
             manifest_path = self._create(root)
             issue = self._artifact(root, "issue.md", "Issue #37")
+            expected_hash = hash_file(issue)
 
             complete_stage(
                 manifest_path,
@@ -90,7 +91,7 @@ class RunManifestTests(unittest.TestCase):
         self.assertIn("planner", manifest["roles"])
         self.assertEqual(
             manifest["stages"]["issue-selected"]["artifacts"]["issue.md"],
-            hash_file(issue),
+            expected_hash,
         )
         self.assertTrue(manifest["stages"]["issue-selected"]["input_hash"])
         self.assertTrue(manifest["stages"]["issue-selected"]["output_hash"])
