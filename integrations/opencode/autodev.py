@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -38,6 +39,26 @@ def _arguments_with_current_issue(arguments: list[str]) -> list[str]:
     return updated
 
 
+def _bridge_environment(python: str, autodev_root: Path) -> dict[str, str]:
+    env = dict(os.environ)
+    old_python_path = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = (
+        str(autodev_root)
+        if not old_python_path
+        else str(autodev_root) + os.pathsep + old_python_path
+    )
+    if (
+        os.name != "nt"
+        and not env.get("LOCAL_CHECK", "").strip()
+        and not env.get("PROFILES_PATH", "").strip()
+    ):
+        env["LOCAL_CHECK"] = (
+            f"{shlex.quote(python)} -m automation.workflow_verify_current "
+            f"--autodev-root {shlex.quote(str(autodev_root))}"
+        )
+    return env
+
+
 def main() -> int:
     root = Path(__file__).resolve().parent
     config_path = root / "autodev.json"
@@ -53,13 +74,6 @@ def main() -> int:
         return 1
 
     python = str(config.get("python", "")).strip() or sys.executable
-    env = dict(os.environ)
-    old_python_path = env.get("PYTHONPATH", "")
-    env["PYTHONPATH"] = (
-        str(autodev_root)
-        if not old_python_path
-        else str(autodev_root) + os.pathsep + old_python_path
-    )
     completed = subprocess.run(
         [
             python,
@@ -68,7 +82,7 @@ def main() -> int:
             *_arguments_with_current_issue(sys.argv[1:]),
         ],
         cwd=Path.cwd(),
-        env=env,
+        env=_bridge_environment(python, autodev_root),
         check=False,
     )
     return completed.returncode
