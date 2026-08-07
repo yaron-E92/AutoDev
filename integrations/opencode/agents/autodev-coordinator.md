@@ -33,7 +33,7 @@ For every bridge stage, run the installed portable bridge with the available Pyt
 
 `python .opencode/autodev.py stage --name <stage> ...`
 
-Use `python3` instead of `python` on systems where that is the available Python command. Do not route normal OpenCode execution through the Windows PowerShell workflow.
+Use `python3` instead of `python` on systems where that is the available Python command. Do not route normal OpenCode execution through Windows-specific stage wrappers.
 
 Treat the returned JSON `state` as authoritative:
 
