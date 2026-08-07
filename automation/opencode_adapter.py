@@ -12,7 +12,7 @@ from pathlib import Path
 from area_reader_v2 import runner_core as area_reader_core
 from automation import run_real_issue_core as run_core
 from automation.model_output_sanitizer import sanitize_model_output
-from automation.model_providers import load_provider_config
+from automation.model_providers import ProviderError, load_provider_config
 from automation.prompt_policies import compose_prompt, resolve_prompt_policies
 from automation.prompt_runner import PromptRunnerError, handle_planner_output
 from automation.semantic_verifier import (
@@ -273,8 +273,13 @@ def accept_role(role: str, repo: Path, input_path: Path | None = None) -> list[P
         result_path = current / "verification-result.json"
         _write_text(result_path, json.dumps(result, indent=2, sort_keys=True) + "\n")
         attempt_path = write_semantic_result(current, 0, result)
-        final_path = write_final_verdict(current, result)
-        return [result_path, attempt_path, final_path]
+        outputs = [result_path, attempt_path]
+        final_path = current / "verification" / "final-verdict.json"
+        if result["verdict"] in {"pass", "blocked"}:
+            outputs.append(write_final_verdict(current, result))
+        else:
+            final_path.unlink(missing_ok=True)
+        return outputs
     raise OpenCodeAdapterError(f"unsupported OpenCode role: {role}")
 
 
@@ -508,7 +513,7 @@ def run(argv: list[str] | None = None) -> int:
             for path in paths:
                 print(path)
             return 0
-    except (OpenCodeAdapterError, PromptRunnerError, SemanticVerifierError, OSError, ValueError) as exc:
+    except (OpenCodeAdapterError, PromptRunnerError, SemanticVerifierError, ProviderError, OSError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
     return 1
