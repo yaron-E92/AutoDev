@@ -52,7 +52,7 @@ Use `version: 2` and a `roles` object to configure roles independently:
 }
 ```
 
-An explicitly configured role wins over legacy CLI fallback values. The verifier configuration is resolved and reported but is not invoked until semantic verification is implemented.
+An explicitly configured role wins over legacy CLI fallback values. The verifier role is used by semantic verification when that gate is enabled.
 
 ## Routing
 
@@ -62,7 +62,7 @@ cross-area synthesis   -> synthesizer
 implementation plan    -> planner
 initial patch           -> implementer
 deterministic repair   -> fixer
-semantic review        -> verifier (reserved)
+semantic review        -> verifier
 ```
 
 Use the configuration with the operational runner:
@@ -81,7 +81,7 @@ The shared area runner also accepts `--provider-config`. Its legacy `--synthesiz
 
 ## Metadata
 
-`provider-metadata.json` records the safe static configuration for every role. `model-invocations.json` records each call's role, provider, model, timeout, attempt, start/end timestamps, elapsed time, and success or failure. Secret values and full environment variables are not written.
+`provider-metadata.json` records the safe static configuration for every role. `model-invocations.json` records each call's role, provider, model, timeout, attempt, start/end timestamps, elapsed time, success or failure, and optional Headroom compression metadata. Secret values, header values, and full environment variables are not written.
 
 ## Opt-in Ollama Cloud profile
 
@@ -222,7 +222,7 @@ Omitted role entries keep the stable defaults. Disable all policy injection with
 }
 ```
 
-Supported modes are `off`, `lite`, `full`, and `review`. AutoDev inserts the policy before issue and repository evidence. Exact output contracts remain last, including `BEGIN_UNIFIED_DIFF`, `END_UNIFIED_DIFF`, `NO_CHANGES_REQUIRED`, and future verifier JSON schemas.
+Supported modes are `off`, `lite`, `full`, and `review`. AutoDev inserts the policy before issue and repository evidence. Exact output contracts remain last, including `BEGIN_UNIFIED_DIFF`, `END_UNIFIED_DIFF`, `NO_CHANGES_REQUIRED`, and the semantic verifier JSON schema.
 
 Static metadata records the resolved mapping and source version beneath `prompt_policy` in `provider-metadata.json` and area-reader summaries. Every model-call record includes `prompt_policy_mode`, `prompt_policy_version`, source version, and source commit.
 
@@ -278,12 +278,37 @@ A role may configure:
 
 API-key values are read only from the named environment variable. Safe metadata records the environment-variable name and header names, never resolved secrets or header values. `Authorization`, `X-Api-Key`, cookies, and other sensitive headers cannot be placed in committed profile headers.
 
-Chat Completions omits `max_tokens` by default. Responses omits `max_output_tokens` by default. Either field is added only when `output_limit` is explicitly configured. Provider response text is passed alone to the planner, unified-diff, and verifier parsers; usage, reported cost, model, timing, retries, and sanitized failure classification are written separately to `model-invocations.json`.
+Chat Completions omits `max_tokens` by default. Responses omits `max_output_tokens` by default. Either field is added only when `output_limit` is explicitly configured. Provider response text is passed alone to the planner, unified-diff, and verifier parsers; usage, reported cost, model, timing, retries, sanitized failure classification, and compression telemetry are written separately to `model-invocations.json`.
+
+### Optional Headroom compression
+
+Version-2 profiles may add a top-level `headroom` object. Headroom applies only to OpenAI-compatible HTTP transports; command providers remain unchanged.
+
+```json
+{
+  "headroom": {
+    "enabled": true,
+    "proxy_url": "http://127.0.0.1:8787/v1",
+    "mode": "lossless",
+    "output_shaping": false,
+    "fail_open": true,
+    "roles": {
+      "verifier": { "enabled": false }
+    }
+  }
+}
+```
+
+Global settings are inherited by each role and role entries override them. Verifier compression defaults to disabled unless explicitly enabled. AutoDev compresses only known evidence sections through Headroom's compression-only endpoint, then proxy-routes the completed request with automatic recompression bypassed so issue requirements, Ponytail policy, branch/file constraints, patch markers, `NO_CHANGES_REQUIRED`, and verifier JSON contracts remain untouched.
+
+See `docs/headroom.md` for installation, Windows/Linux startup, routing/fail-open behavior, telemetry, dashboard checks, Ollama HTTP usage, and compressed-versus-uncompressed comparison.
 
 ### Checked-in profiles
 
 - `examples/providers/groq-openrouter-free.json`: Groq for reader, synthesizer, planner, and verifier; configurable OpenRouter `:free` model for implementer and fixer.
+- `examples/providers/groq-openrouter-free-headroom.json`: the same mixed mapping with optional Headroom compression for eligible HTTP-role evidence and verifier compression disabled.
 - `examples/providers/ollama-local-all-roles.json`: local Ollama commands for all six roles.
+- `examples/providers/ollama-openai-compatible-headroom.json`: local Ollama through its OpenAI-compatible HTTP API with Headroom enabled.
 - `examples/providers/codex-command-profile.json`: Codex CLI profiles through the generic command transport. `direct_edit: true` is used only for implementer and fixer.
 - `examples/providers/ollama-cloud-nemotron-minimax.json`: the existing opt-in Ollama Cloud mapping.
 
@@ -303,7 +328,7 @@ When `free_only` is true, every configured model and fallback must end in `:free
 
 ### Provider-neutral preflight
 
-The preflight validates profile structure, required environment variables, command executables, endpoint reachability, and model visibility when `/models` is available. It does not select an issue, change labels, create branches, or contact GitHub.
+The preflight validates profile structure, required environment variables, command executables, endpoint reachability, and model visibility when `/models` is available. It does not select an issue, change labels, create branches, or contact GitHub. Headroom itself is fail-open by default and is checked independently with its `/health` endpoint.
 
 ```powershell
 python -m automation.provider_preflight `
@@ -349,6 +374,6 @@ linux/scripts/issue-to-pr-cycle.sh \
   --provider-profile examples/providers/groq-openrouter-free.json
 ```
 
-Both wrappers pass role and profile references to `automation.prompt_runner`; provider validation, request construction, model invocation, failure classification, telemetry, and response parsing live in Python. Legacy planner/agent provider, model, and command flags remain accepted and are resolved by Python. Codex Desktop is optional and is not needed for a headless run.
+Both wrappers pass role and profile references to `automation.prompt_runner`; provider validation, request construction, model invocation, failure classification, compression telemetry, and response parsing live in Python. Legacy planner/agent provider, model, and command flags remain accepted and are resolved by Python. Codex Desktop is optional and is not needed for a headless run.
 
-This provider work does not add semantic verification policy, Headroom compression, resumable manifests, or the evaluation harness; those remain separate issues.
+Semantic verification and Headroom compression are now independent optional layers above the shared role/provider transport. Resumable manifests and the evaluation harness remain separate issues.
