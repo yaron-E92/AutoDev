@@ -928,7 +928,7 @@ def write_workspace_snapshot(repo: Path, path: Path) -> None:
 
 
 def ignored_workspace_path(relative: str) -> bool:
-    normalized = relative.replace("\\", "/").lstrip("./")
+    normalized = relative.replace("\\", "/").removeprefix("./")
     return normalized == "memory.md" or normalized.endswith("/memory.md") or any(
         normalized.startswith(prefix) or f"/{prefix}" in f"/{normalized}"
         for prefix in IGNORED_PREFIXES
