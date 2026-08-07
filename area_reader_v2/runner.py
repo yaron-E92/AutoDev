@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 from area_reader_v2 import runner_core as _core
@@ -56,13 +57,14 @@ def resolve_area_role_configs(args) -> dict[str, ModelConfig | None]:
     if args.synthesizer and configs["synthesizer"] == configs["reader"]:
         reader = configs["reader"]
         assert reader is not None
-        configs["synthesizer"] = ModelConfig(
-            reader.provider,
-            args.synthesizer,
-            ollama_command_for_model(args.synthesizer) if reader.provider == "command" else reader.command,
-            reader.base_url,
-            reader.api_key_env,
-            reader.timeout_seconds,
+        configs["synthesizer"] = replace(
+            reader,
+            model=args.synthesizer,
+            command=(
+                ollama_command_for_model(args.synthesizer)
+                if reader.provider == "command"
+                else reader.command
+            ),
         )
     return configs
 
