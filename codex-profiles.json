@@ -1,6 +1,6 @@
 {
   "defaultProfile": "auto",
-  "verifyCommandTemplate": "pwsh -File \"{{CodexToolsDir}}\\codex-verify.ps1\" -Profiles \"{{ProfilesCsv}}\"",
+  "verifyCommandTemplate": "python -m automation.workflow_verify --profiles \"{{ProfilesCsv}}\" --autodev-root \"{{AutomationRoot}}\"",
   "profiles": {
     "backend": {
       "labels": ["area:backend"],
