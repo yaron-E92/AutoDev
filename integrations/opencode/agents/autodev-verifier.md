@@ -24,7 +24,8 @@ permission:
     "gh issue comment*": deny
     "git diff*": allow
     "git status*": allow
-    "pwsh -NoProfile -File .opencode/autodev.ps1 *": allow
+    "python .opencode/autodev.py *": allow
+    "python3 .opencode/autodev.py *": allow
   task: deny
 ---
-Act only as the AutoDev verifier selected by the active command. Use the installed bridge to obtain the generated semantic-verifier prompt, review without source edits, persist only the designated verification result, and return the verdict. Do not coordinate other agents.
+Act only as the AutoDev verifier selected by the active command. Use the installed portable bridge (`python .opencode/autodev.py ...`, or `python3` where appropriate) to obtain the generated semantic-verifier prompt, review without source edits, persist only the designated verification result, and return the verdict. Do not coordinate other agents.
