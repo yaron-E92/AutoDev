@@ -5,6 +5,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+from automation.headroom import HeadroomError, resolve_headroom_values
 from automation.model_providers import (
     ModelConfig,
     ModelProvider,
@@ -13,6 +14,7 @@ from automation.model_providers import (
     model_config_from_values,
     normalize_provider_name,
     ollama_command_for_model,
+    with_headroom_role,
 )
 
 MODEL_ROLES = ("reader", "synthesizer", "planner", "implementer", "fixer", "verifier")
@@ -94,6 +96,13 @@ def resolve_role_configs(
                     merged[key] = value
                     overrides[key] = value
 
+        try:
+            headroom_values = resolve_headroom_values(file_config, role)
+        except HeadroomError as exc:
+            raise ProviderError(str(exc), classification="invalid_config") from exc
+        if headroom_values:
+            merged["headroom"] = headroom_values
+
         if profile_name and not merged.get("profile_name") and not merged.get("profile"):
             merged["profile_name"] = profile_name
         resolved[role] = _model_config(role, merged, overrides)
@@ -148,6 +157,7 @@ def model_config_to_dict(config: ModelConfig) -> dict[str, object]:
         "free_only": config.free_only,
         "fallback_models": list(config.fallback_models),
         "direct_edit": config.direct_edit,
+        "headroom": config.headroom.safe_metadata(),
     }
 
 
@@ -177,14 +187,15 @@ def invoke_model(
         **config.safe_metadata(),
         "started_at": started_at.isoformat(),
     }
+    provider_prompt = with_headroom_role(prompt, role) if config.headroom.enabled else prompt
     try:
         if "generate" in type(provider).__dict__ and "invoke" not in type(provider).__dict__:
             response = ProviderResponse(
-                provider.generate(prompt, model=config.model, timeout_seconds=config.timeout_seconds),
+                provider.generate(provider_prompt, model=config.model, timeout_seconds=config.timeout_seconds),
                 {},
             )
         else:
-            response = provider.invoke(prompt, model=config.model, timeout_seconds=config.timeout_seconds)
+            response = provider.invoke(provider_prompt, model=config.model, timeout_seconds=config.timeout_seconds)
     except Exception as exc:
         classification = exc.classification if isinstance(exc, ProviderError) else type(exc).__name__
         record.update(
