@@ -80,7 +80,6 @@ _CORE_FETCH_ISSUE_TEXT = _core.fetch_issue_text
 _CORE_ENSURE_CLEAN_WORKTREE = _core.ensure_clean_worktree
 _CORE_ENSURE_ISSUE_BRANCH = _core.ensure_issue_branch
 _CORE_CREATE_DRAFT_PR = _core.create_draft_pr
-_CORE_RUN_IMPLEMENTATION_LOOP = _core.run_implementation_loop
 
 
 class _DeferredProvider(ModelProvider):
@@ -269,7 +268,13 @@ def _inject_resume_arguments(values: list[str], resume_dir: Path, manifest: dict
     }
     for flag, expected in required.items():
         supplied = _argument_value(result, flag)
-        if supplied is not None and str(Path(supplied).expanduser().resolve() if flag in {"--repo", "--out"} else supplied) != str(Path(expected).expanduser().resolve() if flag in {"--repo", "--out"} else expected):
+        supplied_value = (
+            str(Path(supplied).expanduser().resolve())
+            if supplied is not None and flag in {"--repo", "--out"}
+            else supplied
+        )
+        expected_value = str(Path(expected).expanduser().resolve()) if flag in {"--repo", "--out"} else expected
+        if supplied is not None and supplied_value != expected_value:
             raise ManifestError(f"resume {flag} does not match the manifest")
         if supplied is None:
             result.extend([flag, expected])
@@ -617,8 +622,6 @@ def write_operational_outputs(issue_text, area_out, out_dir, keep_debug):
         problems = validate_artifacts(load_manifest(_active_manifest_path()), out_dir)
         if problems:
             raise RunnerError("resume artifact validation failed after area-reader replay: " + "; ".join(problems), 2)  # noqa: F405
-    # Area-reader checkpoint files are retained even without --debug-artifacts so reader/synthesis
-    # model calls can be replayed safely during resume.
     _CORE_WRITE_OPERATIONAL_OUTPUTS(issue_text, area_out, out_dir, True)
     _refresh_operational_checkpoints(area_out, out_dir)
     _sync_manifest_invocations(out_dir)
@@ -680,17 +683,17 @@ def run_implementation_loop(
     max_fix_attempts, dry_run, stream,
 ):
     if _ACTIVE_MANIFEST.get() is None:
-        legacy_provider = coder_provider or implementer_provider
-        legacy_config = coder_config or implementer_config
-        if legacy_provider is None or legacy_config is None:
-            raise RunnerError("coder provider and configuration are required")  # noqa: F405
-        return _CORE_RUN_IMPLEMENTATION_LOOP(
+        return _run_uncheckpointed_implementation_loop(
             repo=repo,
             out_dir=out_dir,
             issue_text=issue_text,
             branch_name=branch_name,
-            coder_provider=legacy_provider,
-            coder_config=legacy_config,
+            coder_provider=coder_provider,
+            coder_config=coder_config,
+            implementer_provider=implementer_provider,
+            implementer_config=implementer_config,
+            fixer_provider=fixer_provider,
+            fixer_config=fixer_config,
             max_fix_attempts=max_fix_attempts,
             dry_run=dry_run,
             stream=stream,
@@ -857,6 +860,70 @@ def run_implementation_loop(
         factory=factory,
         stream=stream,
     )
+
+
+def _run_uncheckpointed_implementation_loop(
+    *, repo, out_dir, issue_text, branch_name,
+    coder_provider=None, coder_config=None,
+    implementer_provider=None, implementer_config=None,
+    fixer_provider=None, fixer_config=None,
+    max_fix_attempts, dry_run, stream,
+):
+    roles = _roles_or_legacy(None, coder_config)
+    policies = _policies_or_default()
+    implementer_config = implementer_config or roles["implementer"] or coder_config
+    fixer_config = fixer_config or roles["fixer"] or implementer_config
+    if implementer_config is None:
+        raise RunnerError("implementer configuration is required")  # noqa: F405
+    factory = _ACTIVE_FACTORY.get() or create_provider
+    implementer_provider = implementer_provider or coder_provider or factory(implementer_config)
+
+    prompt = build_implementation_prompt(  # noqa: F405
+        issue_text=issue_text,
+        synthesized_handoff=read_optional_text(out_dir / "synthesized-handoff.md"),  # noqa: F405
+        coder_plan=read_optional_text(out_dir / "coder-plan.md"),  # noqa: F405
+        recommended_command_groups=read_optional_text(out_dir / "recommended-command-groups.json"),  # noqa: F405
+        constraints=read_optional_text(PROMPT_TEMPLATE_DIR / "implementer.md"),  # noqa: F405
+        branch_name=branch_name,
+    )
+    prompt = compose_prompt("implementer", prompt, policies["implementer"])
+    write_text(out_dir / "implementation-prompt.md", prompt)  # noqa: F405
+    response = call_coder(implementer_provider, implementer_config, prompt, out_dir, 0, role="implementer")
+    patch = process_model_response(response, out_dir, 0)  # noqa: F405
+    if patch is None:
+        verification = VerificationResult(0, 0, "no-change", "NO_CHANGES_REQUIRED", "", out_dir / "verification" / "attempt-0.md")  # noqa: F405
+        write_verification_result(out_dir, verification)  # noqa: F405
+    elif dry_run:
+        return VerificationResult(0, 0, "dry-run", "Dry-run implementation did not apply patch.", "", out_dir / "verification" / "attempt-0.md")  # noqa: F405
+    else:
+        apply_patch_file(repo, patch, stream)
+        verification = run_recommended_verification(out_dir, repo, 0, stream)  # noqa: F405
+        write_verification_result(out_dir, verification)  # noqa: F405
+        attempt = 1
+        while not verification.passed and attempt <= max_fix_attempts:
+            if fixer_provider is None:
+                if fixer_config is None:
+                    fixer_config = implementer_config
+                fixer_provider = factory(fixer_config)
+            fix_prompt = build_fix_prompt(  # noqa: F405
+                issue_text=issue_text,
+                synthesized_handoff=read_optional_text(out_dir / "synthesized-handoff.md"),  # noqa: F405
+                coder_plan=read_optional_text(out_dir / "coder-plan.md"),  # noqa: F405
+                previous_response=read_optional_text(out_dir / "model-responses" / f"attempt-{attempt - 1}.txt"),  # noqa: F405
+                current_diff=current_diff(repo, stream),  # noqa: F405
+                verification=verification,
+            )
+            fix_prompt = compose_prompt("fixer", fix_prompt, policies["fixer"])
+            write_text(out_dir / "fix-prompt.md", fix_prompt)  # noqa: F405
+            response = call_coder(fixer_provider, fixer_config, fix_prompt, out_dir, attempt, role="fixer")
+            patch = process_model_response(response, out_dir, attempt)  # noqa: F405
+            if patch is None:
+                break
+            apply_patch_file(repo, patch, stream)
+            verification = run_recommended_verification(out_dir, repo, attempt, stream)  # noqa: F405
+            write_verification_result(out_dir, verification)  # noqa: F405
+            attempt += 1
+    return verification
 
 
 def apply_patch_file(repo: Path, patch_path: Path, stream: TextIO) -> bool:
