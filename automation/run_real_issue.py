@@ -123,6 +123,8 @@ def run(argv=None, *, stdout=None, stderr=None, provider_factory=None):
             manifest = load_manifest(resume_manifest)
             values = _inject_resume_arguments(values, resume_dir, manifest)
         args = _core.parse_args(values)
+        if resume_manifest is not None and args.allow_dirty:
+            raise ManifestError("--allow-dirty is not supported while resuming; restore the recorded worktree instead")
     except (ManifestError, RunnerError, SystemExit) as exc:
         message = str(exc)
         if message:
@@ -140,6 +142,7 @@ def run(argv=None, *, stdout=None, stderr=None, provider_factory=None):
                 role_snapshots,
                 explicit_invalidations=invalidated_roles,
             )
+            _reconcile_semantic_settings(resume_manifest, semantic, invalidated_roles)
             _update_resume_target_options(resume_manifest, args)
             _validate_next_stage_provider(load_manifest(resume_manifest), roles)
     except (ManifestError, ProviderError, RunnerError, OSError, json.JSONDecodeError) as exc:
@@ -259,6 +262,8 @@ def _inject_resume_arguments(values: list[str], resume_dir: Path, manifest: dict
     if not isinstance(target, dict):
         raise ManifestError("run manifest target is invalid")
     result = list(values)
+    if "--next" in result:
+        raise ManifestError("--next is not supported with --resume; the manifest already identifies the issue")
     required = {
         "--repo": str(target["repo_path"]),
         "--github-repo": str(target["github_repo"]),
@@ -278,23 +283,38 @@ def _inject_resume_arguments(values: list[str], resume_dir: Path, manifest: dict
             raise ManifestError(f"resume {flag} does not match the manifest")
         if supplied is None:
             result.extend([flag, expected])
+
     provider_config = target.get("provider_config_path")
     if provider_config and _argument_value(result, "--provider-config") is None:
         result.extend(["--provider-config", str(provider_config)])
+
     options = target.get("options", {})
     if isinstance(options, dict):
-        if _argument_value(result, "--max-fix-attempts") is None and options.get("max_fix_attempts") is not None:
-            result.extend(["--max-fix-attempts", str(options["max_fix_attempts"])])
-        flag_options = {
-            "debug_artifacts": "--debug-artifacts",
+        saved_fix_attempts = options.get("max_fix_attempts")
+        supplied_fix_attempts = _argument_value(result, "--max-fix-attempts")
+        if supplied_fix_attempts is not None and saved_fix_attempts is not None:
+            if int(supplied_fix_attempts) != int(saved_fix_attempts):
+                raise ManifestError(
+                    "resume --max-fix-attempts differs from the recorded run; restart the run instead of changing repair policy"
+                )
+        elif supplied_fix_attempts is None and saved_fix_attempts is not None:
+            result.extend(["--max-fix-attempts", str(saved_fix_attempts)])
+
+        execution_flags = {
             "skip_implementation": "--skip-implementation",
             "dry_run_implementation": "--dry-run-implementation",
             "baseline_verify": "--baseline-verify",
             "managed_labels": "--manage-labels",
         }
-        for key, flag in flag_options.items():
-            if options.get(key) and flag not in result:
+        for key, flag in execution_flags.items():
+            recorded = bool(options.get(key))
+            supplied = flag in result
+            if supplied and not recorded:
+                raise ManifestError(f"resume {flag} differs from the recorded run configuration")
+            if recorded and not supplied:
                 result.append(flag)
+        if options.get("debug_artifacts") and "--debug-artifacts" not in result:
+            result.append("--debug-artifacts")
     return result
 
 
@@ -328,15 +348,45 @@ def _build_role_snapshots(
     return snapshots
 
 
+def _reconcile_semantic_settings(
+    path: Path,
+    settings: SemanticSettings,
+    invalidated_roles: set[str],
+) -> None:
+    manifest = load_manifest(path)
+    current = safe_semantic_metadata(settings)
+    previous = manifest.get("semantic_verification", {})
+    if not isinstance(previous, dict):
+        previous = {}
+    if previous and previous != current:
+        affected = [
+            stage
+            for stage in ("semantic-verified", "pr-created")
+            if stage_completed(manifest, stage)
+        ]
+        if affected and "verifier" not in invalidated_roles:
+            raise ManifestError(
+                "semantic-verification configuration changed for completed work; "
+                "resume requires --invalidate-role verifier"
+            )
+    manifest = load_manifest(path)
+    manifest["semantic_verification"] = current
+    save_manifest(path, manifest)
+
+
 def _update_resume_target_options(path: Path, args) -> None:
     manifest = load_manifest(path)
     target = manifest.get("target", {})
     if not isinstance(target, dict):
         raise ManifestError("run manifest target is invalid")
     target["provider_config_path"] = _provider_config_path(args.provider_config)
+    previous_options = target.get("options", {})
+    debug_artifacts = bool(args.debug_artifacts)
+    if isinstance(previous_options, dict):
+        debug_artifacts = debug_artifacts or bool(previous_options.get("debug_artifacts"))
     target["options"] = {
         "max_fix_attempts": args.max_fix_attempts,
-        "debug_artifacts": bool(args.debug_artifacts),
+        "debug_artifacts": debug_artifacts,
         "skip_implementation": bool(args.skip_implementation),
         "dry_run_implementation": bool(args.dry_run_implementation),
         "baseline_verify": bool(args.baseline_verify),
@@ -352,6 +402,11 @@ def _provider_config_path(value: str | None) -> str:
 
 
 def _validate_next_stage_provider(manifest: dict[str, object], roles: dict[str, ModelConfig | None]) -> None:
+    stage = next_stage(manifest)
+    if stage == "semantic-verified":
+        semantic = manifest.get("semantic_verification", {})
+        if isinstance(semantic, dict) and semantic.get("enabled") is False:
+            return
     role_for_stage = {
         "repository-read": "reader",
         "handoff-synthesized": "synthesizer",
@@ -359,7 +414,7 @@ def _validate_next_stage_provider(manifest: dict[str, object], roles: dict[str, 
         "implementation-generated": "implementer",
         "semantic-verified": "verifier",
     }
-    role = role_for_stage.get(next_stage(manifest))
+    role = role_for_stage.get(stage)
     if role is None:
         return
     config = roles.get(role)
@@ -478,6 +533,7 @@ def _validate_resume_repository(repo: Path, stream: TextIO) -> None:
     problems = validate_artifacts(manifest, Path(_active_args().out))
     if problems:
         raise RunnerError("resume artifact validation failed: " + "; ".join(problems), 2)  # noqa: F405
+
     current_branch = run_command(["git", "branch", "--show-current"], cwd=repo, stream=stream).stdout.strip()  # noqa: F405
     if current_branch != target["branch"]:
         raise RunnerError(
@@ -493,6 +549,7 @@ def _validate_resume_repository(repo: Path, stream: TextIO) -> None:
     )  # noqa: F405
     if ancestry.returncode != 0:
         raise RunnerError("resume refused because the branch no longer descends from the original base SHA", 2)  # noqa: F405
+
     current_head = run_command(["git", "rev-parse", "HEAD"], cwd=repo, stream=stream).stdout.strip()  # noqa: F405
     status_paths = sorted(changed_worktree_paths(repo, stream))  # noqa: F405
     if stage_completed(manifest, "pr-created"):
@@ -504,17 +561,102 @@ def _validate_resume_repository(repo: Path, stream: TextIO) -> None:
         return
 
     diff_text = run_command(["git", "diff", "--binary", "HEAD"], cwd=repo, stream=stream, check=False).stdout  # noqa: F405
+    actual_hash = hash_text(diff_text)
     if stage_completed(manifest, "patch-applied"):
         patch_details = _stage_details(manifest, "patch-applied")
         expected_hash = str(patch_details.get("worktree_hash", ""))
         expected_paths = sorted(str(path) for path in patch_details.get("changed_paths", []) if str(path))
-        actual_hash = hash_text(diff_text)
-        if expected_hash != actual_hash or expected_paths != status_paths:
-            if not diff_text and not status_paths and current_head != base_sha and _is_expected_autodev_commit(repo, stream, int(target["issue_number"])):
+        if expected_hash == actual_hash and expected_paths == status_paths:
+            return
+        pending_patch = _pending_uncheckpointed_patch(manifest, Path(_active_args().out))
+        if pending_patch is not None and _patch_matches_resume_worktree(
+            repo,
+            pending_patch,
+            status_paths,
+            expected_paths,
+            stream,
+        ):
+            return
+        if not diff_text and not status_paths and current_head != base_sha:
+            committed_diff = run_command(
+                ["git", "diff", "--binary", base_sha, "HEAD"],
+                cwd=repo,
+                stream=stream,
+                check=False,
+            ).stdout  # noqa: F405
+            if (
+                hash_text(committed_diff) == expected_hash
+                and _is_expected_autodev_commit(repo, stream, int(target["issue_number"]))
+            ):
                 return
-            raise RunnerError("resume refused because the working tree changed after the recorded patch", 2)  # noqa: F405
-    elif status_paths:
+        raise RunnerError("resume refused because the working tree changed after the recorded patch", 2)  # noqa: F405
+
+    pending_patch = _pending_uncheckpointed_patch(manifest, Path(_active_args().out))
+    if pending_patch is not None and _patch_matches_resume_worktree(
+        repo,
+        pending_patch,
+        status_paths,
+        [],
+        stream,
+    ):
+        return
+    if status_paths:
         raise RunnerError("resume refused because the working tree changed before patch application", 2)  # noqa: F405
+
+
+def _pending_uncheckpointed_patch(manifest: dict[str, object], out_dir: Path) -> Path | None:
+    applied_hash = str(_stage_details(manifest, "patch-applied").get("last_patch_hash", "")) if stage_completed(manifest, "patch-applied") else ""
+    for stage in ("repair-generated", "implementation-generated"):
+        if not stage_completed(manifest, stage):
+            continue
+        details = _stage_details(manifest, stage)
+        relative = str(details.get("patch_path", ""))
+        expected_hash = str(details.get("patch_hash", ""))
+        if not relative or not expected_hash or expected_hash == applied_hash:
+            continue
+        path = out_dir / relative
+        if path.is_file() and hash_file(path) == expected_hash:
+            return path
+    return None
+
+
+def _patch_matches_resume_worktree(
+    repo: Path,
+    patch: Path,
+    status_paths: list[str],
+    prior_paths: list[str],
+    stream: TextIO,
+) -> bool:
+    reverse = run_command(
+        ["git", "apply", "--check", "--reverse", str(patch)],
+        cwd=repo,
+        stream=stream,
+        check=False,
+    )  # noqa: F405
+    if reverse.returncode != 0:
+        return False
+    patch_paths = _patch_paths(repo, patch, stream)
+    if not patch_paths:
+        return False
+    expected_paths = sorted(set(prior_paths) | set(patch_paths))
+    return expected_paths == sorted(status_paths)
+
+
+def _patch_paths(repo: Path, patch: Path, stream: TextIO) -> list[str]:
+    result = run_command(
+        ["git", "apply", "--numstat", str(patch)],
+        cwd=repo,
+        stream=stream,
+        check=False,
+    )  # noqa: F405
+    if result.returncode != 0:
+        return []
+    paths: list[str] = []
+    for line in result.stdout.splitlines():
+        parts = line.split("\t", 2)
+        if len(parts) == 3 and parts[2].strip():
+            paths.append(parts[2].strip())
+    return sorted(set(paths))
 
 
 def _is_expected_autodev_commit(repo: Path, stream: TextIO, issue: int) -> bool:
