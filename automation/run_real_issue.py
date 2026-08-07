@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import shlex
 import shutil
 import sys
 from contextvars import ContextVar
@@ -142,7 +141,7 @@ def run(argv=None, *, stdout=None, stderr=None, provider_factory=None):
             )
             _update_resume_target_options(resume_manifest, args)
             _validate_next_stage_provider(load_manifest(resume_manifest), roles)
-    except (ManifestError, ProviderError, RunnerError) as exc:
+    except (ManifestError, ProviderError, RunnerError, OSError, json.JSONDecodeError) as exc:
         print(str(exc), file=err_stream)
         return exc.exit_code if isinstance(exc, RunnerError) else 2
 
@@ -279,8 +278,16 @@ def _inject_resume_arguments(values: list[str], resume_dir: Path, manifest: dict
     if isinstance(options, dict):
         if _argument_value(result, "--max-fix-attempts") is None and options.get("max_fix_attempts") is not None:
             result.extend(["--max-fix-attempts", str(options["max_fix_attempts"])])
-        if options.get("debug_artifacts") and "--debug-artifacts" not in result:
-            result.append("--debug-artifacts")
+        flag_options = {
+            "debug_artifacts": "--debug-artifacts",
+            "skip_implementation": "--skip-implementation",
+            "dry_run_implementation": "--dry-run-implementation",
+            "baseline_verify": "--baseline-verify",
+            "managed_labels": "--manage-labels",
+        }
+        for key, flag in flag_options.items():
+            if options.get(key) and flag not in result:
+                result.append(flag)
     return result
 
 
@@ -323,6 +330,10 @@ def _update_resume_target_options(path: Path, args) -> None:
     target["options"] = {
         "max_fix_attempts": args.max_fix_attempts,
         "debug_artifacts": bool(args.debug_artifacts),
+        "skip_implementation": bool(args.skip_implementation),
+        "dry_run_implementation": bool(args.dry_run_implementation),
+        "baseline_verify": bool(args.baseline_verify),
+        "managed_labels": bool(args.manage_labels or args.next),
     }
     save_manifest(path, manifest)
 
@@ -476,21 +487,26 @@ def _validate_resume_repository(repo: Path, stream: TextIO) -> None:
     if ancestry.returncode != 0:
         raise RunnerError("resume refused because the branch no longer descends from the original base SHA", 2)  # noqa: F405
     current_head = run_command(["git", "rev-parse", "HEAD"], cwd=repo, stream=stream).stdout.strip()  # noqa: F405
+    status_paths = sorted(changed_worktree_paths(repo, stream))  # noqa: F405
     if stage_completed(manifest, "pr-created"):
         expected_head = str(_stage_details(manifest, "pr-created").get("head_sha", ""))
         if expected_head and current_head != expected_head:
             raise RunnerError("resume refused because the PR branch head changed after PR creation", 2)  # noqa: F405
+        if status_paths:
+            raise RunnerError("resume refused because the working tree changed after PR creation", 2)  # noqa: F405
         return
 
     diff_text = run_command(["git", "diff", "--binary", "HEAD"], cwd=repo, stream=stream, check=False).stdout  # noqa: F405
     if stage_completed(manifest, "patch-applied"):
-        expected_hash = str(_stage_details(manifest, "patch-applied").get("worktree_hash", ""))
+        patch_details = _stage_details(manifest, "patch-applied")
+        expected_hash = str(patch_details.get("worktree_hash", ""))
+        expected_paths = sorted(str(path) for path in patch_details.get("changed_paths", []) if str(path))
         actual_hash = hash_text(diff_text)
-        if expected_hash and actual_hash != expected_hash:
-            if not diff_text and current_head != base_sha and _is_expected_autodev_commit(repo, stream, int(target["issue_number"])):
+        if expected_hash != actual_hash or expected_paths != status_paths:
+            if not diff_text and not status_paths and current_head != base_sha and _is_expected_autodev_commit(repo, stream, int(target["issue_number"])):
                 return
             raise RunnerError("resume refused because the working tree changed after the recorded patch", 2)  # noqa: F405
-    elif diff_text.strip():
+    elif status_paths:
         raise RunnerError("resume refused because the working tree changed before patch application", 2)  # noqa: F405
 
 
@@ -592,10 +608,63 @@ def write_operational_outputs(issue_text, area_out, out_dir, keep_debug):
                 for record in records:
                     if isinstance(record, dict):
                         write_compression_debug_artifact(out_dir, record)
+    if _ACTIVE_RESUMING.get():
+        problems = validate_artifacts(load_manifest(_active_manifest_path()), out_dir)
+        if problems:
+            raise RunnerError("resume artifact validation failed after area-reader replay: " + "; ".join(problems), 2)  # noqa: F405
     # Area-reader checkpoint files are retained even without --debug-artifacts so reader/synthesis
     # model calls can be replayed safely during resume.
     _CORE_WRITE_OPERATIONAL_OUTPUTS(issue_text, area_out, out_dir, True)
+    _refresh_operational_checkpoints(area_out, out_dir)
     _sync_manifest_invocations(out_dir)
+
+
+def _refresh_operational_checkpoints(area_out: Path, out_dir: Path) -> None:
+    manifest_file = _active_manifest_path()
+    manifest = load_manifest(manifest_file)
+    if stage_completed(manifest, "repository-read"):
+        reader_artifacts = [
+            out_dir / "routed-areas.json",
+            out_dir / "detected-facts.json",
+            out_dir / "recommended-command-groups.json",
+            out_dir / "verification-command-groups.json",
+            *sorted(area_out.glob("area-*/reader-brief.md")),
+        ]
+        complete_stage(
+            manifest_file,
+            "repository-read",
+            run_root=out_dir,
+            artifacts=reader_artifacts,
+            inputs={
+                "issue_sha256": _file_hash_or_empty(out_dir / "issue.md"),
+                "reader_fingerprint": stage_role_fingerprint(manifest, "reader"),
+            },
+            details={"area_count": len(list(area_out.glob("area-*/reader-brief.md")))},
+        )
+        manifest = load_manifest(manifest_file)
+    if stage_completed(manifest, "handoff-synthesized"):
+        complete_stage(
+            manifest_file,
+            "handoff-synthesized",
+            run_root=out_dir,
+            artifacts=[out_dir / "synthesized-handoff.md", area_out / "synthesis-prompt.txt", area_out / "synthesis-brief.md"],
+            inputs={
+                "repository_read_output": _stage_output_hash(manifest, "repository-read"),
+                "synthesizer_fingerprint": stage_role_fingerprint(manifest, "synthesizer"),
+            },
+        )
+        manifest = load_manifest(manifest_file)
+    if stage_completed(manifest, "plan-created"):
+        complete_stage(
+            manifest_file,
+            "plan-created",
+            run_root=out_dir,
+            artifacts=[out_dir / "coder-plan.md", area_out / "coder-prompt.txt", area_out / "coder-plan.md"],
+            inputs={
+                "handoff_output": _stage_output_hash(manifest, "handoff-synthesized"),
+                "planner_fingerprint": stage_role_fingerprint(manifest, "planner"),
+            },
+        )
 
 
 def run_implementation_loop(
@@ -906,10 +975,15 @@ def run_semantic_verification_gate(
     if resumed_repair is not None:
         repair_patch, repair_attempt = resumed_repair
         if not _patch_is_recorded_as_applied(manifest, repair_patch):
+            _clear_completed_stages(manifest_file, ["deterministic-verified", "semantic-verified", "pr-created"], "semantic repair patch")
             apply_patch_file(repo, repair_patch, stream)
             _checkpoint_patch_applied(out_dir, repo, repair_patch, stream, attempt=repair_attempt)
+            manifest = load_manifest(manifest_file)
+        elif not _deterministic_matches_current_patch(manifest):
+            _clear_completed_stages(manifest_file, ["deterministic-verified", "semantic-verified", "pr-created"], "semantic repair requires re-verification")
+            manifest = load_manifest(manifest_file)
         deterministic_attempt = int(getattr(verification, "attempt", 0)) + 1
-        if not stage_completed(load_manifest(manifest_file), "deterministic-verified"):
+        if not stage_completed(manifest, "deterministic-verified"):
             verification = run_recommended_verification(out_dir, repo, deterministic_attempt, stream)  # noqa: F405
             write_verification_result(out_dir, verification)  # noqa: F405
             if not verification.passed:
@@ -1011,6 +1085,7 @@ def run_semantic_verification_gate(
             "patch_hash": hash_file(patch_path),
         },
     )
+    _clear_completed_stages(manifest_file, ["deterministic-verified", "semantic-verified", "pr-created"], "semantic repair patch")
     apply_patch_file(repo, patch_path, stream)  # noqa: F405
     _checkpoint_patch_applied(out_dir, repo, patch_path, stream)
 
@@ -1031,6 +1106,40 @@ def run_semantic_verification_gate(
         return verification
     _checkpoint_deterministic(out_dir, repo, verification, stream)
     return _run_final_semantic_attempt(repo, out_dir, issue_text, verification, roles, settings, factory)
+
+
+def _deterministic_matches_current_patch(manifest: dict[str, object]) -> bool:
+    if not stage_completed(manifest, "deterministic-verified") or not stage_completed(manifest, "patch-applied"):
+        return False
+    deterministic_hash = str(_stage_details(manifest, "deterministic-verified").get("worktree_hash", ""))
+    patch_hash = str(_stage_details(manifest, "patch-applied").get("worktree_hash", ""))
+    return bool(deterministic_hash and deterministic_hash == patch_hash)
+
+
+def _clear_completed_stages(path: Path, stages_to_clear: list[str], reason: str) -> None:
+    manifest = load_manifest(path)
+    stages = manifest.get("stages", {})
+    completed = manifest.get("completed_stages", [])
+    invalidations = manifest.setdefault("invalidations", [])
+    if not isinstance(stages, dict) or not isinstance(completed, list) or not isinstance(invalidations, list):
+        raise ManifestError("run manifest stage state is invalid")
+    for stage in stages_to_clear:
+        record = stages.pop(stage, None)
+        if stage in completed:
+            completed.remove(stage)
+        if record is not None:
+            invalidations.append(
+                {
+                    "stage": stage,
+                    "role": "workflow",
+                    "reason": reason,
+                    "invalidated_at": datetime.now(timezone.utc).isoformat(),
+                    "previous_output_hash": record.get("output_hash", "") if isinstance(record, dict) else "",
+                }
+            )
+    manifest["current_stage"] = completed[-1] if completed else ""
+    manifest["failure"] = {}
+    save_manifest(path, manifest)
 
 
 def _run_final_semantic_attempt(repo, out_dir, issue_text, verification, roles, settings, factory):
@@ -1258,15 +1367,19 @@ def _find_existing_pr(repo: Path, github_repo: str, branch: str, stream: TextIO)
         check=False,
     )  # noqa: F405
     if result.returncode != 0:
-        return None
+        raise RunnerError("Unable to determine whether a PR already exists; refusing duplicate-PR risk.", 2)  # noqa: F405
     try:
         values = json.loads(result.stdout)
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(values, list) or not values:
+    except json.JSONDecodeError as exc:
+        raise RunnerError("gh pr list returned invalid JSON; refusing duplicate-PR risk.", 2) from exc  # noqa: F405
+    if not isinstance(values, list):
+        raise RunnerError("gh pr list returned an unexpected response; refusing duplicate-PR risk.", 2)  # noqa: F405
+    if not values:
         return None
     first = values[0]
-    return first if isinstance(first, dict) else None
+    if not isinstance(first, dict):
+        raise RunnerError("gh pr list returned an invalid PR record; refusing duplicate-PR risk.", 2)  # noqa: F405
+    return first
 
 
 def _record_pr_checkpoint(out_dir: Path, repo: Path, pr: dict[str, object], stream: TextIO) -> None:
