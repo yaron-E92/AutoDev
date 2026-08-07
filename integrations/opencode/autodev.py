@@ -2,23 +2,40 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
 
 
-def _arguments_with_current_issue(arguments: list[str]) -> list[str]:
-    if not arguments or arguments[0] != "prepare" or "--arguments" in arguments:
-        return arguments
+def _current_issue_number() -> int:
     state_path = Path.cwd() / ".codex-run" / "current" / "state.json"
     try:
         state = json.loads(state_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
+        return 0
+    return int(state.get("IssueNumber", 0) or 0) if isinstance(state, dict) else 0
+
+
+def _arguments_with_current_issue(arguments: list[str]) -> list[str]:
+    if not arguments or arguments[0] != "prepare":
         return arguments
-    issue_number = int(state.get("IssueNumber", 0) or 0) if isinstance(state, dict) else 0
+    issue_number = _current_issue_number()
     if issue_number <= 0:
         return arguments
-    return [*arguments, "--arguments", str(issue_number)]
+
+    if "--arguments" not in arguments:
+        return [*arguments, "--arguments", str(issue_number)]
+
+    index = arguments.index("--arguments")
+    if index + 1 >= len(arguments):
+        return arguments
+    value = arguments[index + 1]
+    if re.search(r"(?<!\d)#?\d+(?!\d)", value):
+        return arguments
+    updated = list(arguments)
+    updated[index + 1] = f"{issue_number} {value}".strip()
+    return updated
 
 
 def main() -> int:
