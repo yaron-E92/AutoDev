@@ -323,6 +323,15 @@ def workflow_stage(
         missing = [tool for tool in ("pwsh", "gh", "git") if which(tool) is None]
         if missing:
             raise OpenCodeAdapterError("required command is unavailable: " + ", ".join(missing))
+        missing_config = [
+            name
+            for name in ("GITHUB_OWNER", "GITHUB_REPO")
+            if not os.environ.get(name, "").strip()
+        ]
+        if missing_config:
+            raise OpenCodeAdapterError(
+                "required AutoDev setting is unavailable: " + ", ".join(missing_config)
+            )
         _configured_attempt_limit("MAX_REPAIR_ATTEMPTS", DEFAULT_MAX_REPAIR_ATTEMPTS)
         _configured_attempt_limit(
             "MAX_SEMANTIC_REPAIR_ATTEMPTS",
@@ -621,7 +630,7 @@ def _stage_payload(
         "state": outcome,
         "issue_number": issue_number,
         "branch": str(state.get("BranchName", "")),
-        "completed_stage": str(state.get("Status", "")) if outcome not in {"FAILED", "BLOCKED"} else "",
+        "completed_stage": str(state.get("Status", "")),
         "failed_stage": stage if outcome in {"FAILED", "BLOCKED", "REPAIR"} else "",
         "stage": stage,
         "reason": _concise(reason),
