@@ -162,8 +162,12 @@ def proxy_headers(upstream_base_url: str) -> dict[str, str]:
 
 def compressible_ranges(prompt: str, role: str) -> list[tuple[int, int]]:
     role = role or infer_role(prompt)
-    pairs: list[tuple[str, str]] = []
-    if role == "implementer":
+    pairs: list[tuple[str, str | None]] = []
+    if role == "reader":
+        pairs = [("Area bundle metadata:\n", None)]
+    elif role == "synthesizer":
+        pairs = [("Routed areas:\n", None)]
+    elif role == "implementer":
         pairs = [
             ("Synthesized handoff:\n", "\n\nCoder plan:"),
             ("Coder plan:\n", "\n\nRecommended command groups JSON:"),
@@ -179,7 +183,10 @@ def compressible_ranges(prompt: str, role: str) -> list[tuple[int, int]]:
         else:
             pairs = [("Synthesized handoff:\n", "\n\nOutput only:")]
     elif role == "planner":
-        pairs = [("Area-reader routed areas:\n", "\n\nAutomation context:")]
+        if "Area-reader routed areas:" in prompt:
+            pairs = [("Area-reader routed areas:\n", "\n\nAutomation context:")]
+        elif "You are the coder model in an area-based local LLM benchmark." in prompt:
+            pairs = [("Synthesized handoff:\n", None)]
     elif role == "verifier" and "Semantic JSON contract:" in prompt:
         pairs = [
             ("Implementation plan:\n", "\n\nCurrent implementation diff or summary:"),
@@ -193,11 +200,15 @@ def compressible_ranges(prompt: str, role: str) -> list[tuple[int, int]]:
 
 
 def infer_role(prompt: str) -> str:
+    if "You are the area reader model for area:" in prompt:
+        return "reader"
+    if "You are the synthesis reader model in an area-based local LLM benchmark." in prompt:
+        return "synthesizer"
     if "You are the coder model for AutoDev." in prompt:
         return "implementer"
     if "You are the fixer model for AutoDev." in prompt or "You are the Fixer correcting verifier gaps." in prompt:
         return "fixer"
-    if "You are the Planner for this repository." in prompt:
+    if "You are the Planner for this repository." in prompt or "You are the coder model in an area-based local LLM benchmark." in prompt:
         return "planner"
     if "You are the independent Verifier for this repository." in prompt:
         return "verifier"
@@ -267,14 +278,14 @@ def _compress_messages(
     return compressed, metrics
 
 
-def _find_ranges(prompt: str, pairs: list[tuple[str, str]]) -> list[tuple[int, int]]:
+def _find_ranges(prompt: str, pairs: list[tuple[str, str | None]]) -> list[tuple[int, int]]:
     ranges: list[tuple[int, int]] = []
     for start_marker, end_marker in pairs:
         marker_index = prompt.find(start_marker)
         if marker_index < 0:
             continue
         start = marker_index + len(start_marker)
-        end = prompt.find(end_marker, start)
+        end = len(prompt) if end_marker is None else prompt.find(end_marker, start)
         if end < 0 or end <= start:
             continue
         ranges.append((start, end))
