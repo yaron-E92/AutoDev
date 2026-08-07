@@ -161,6 +161,7 @@ def proxy_headers(upstream_base_url: str) -> dict[str, str]:
 
 
 def compressible_ranges(prompt: str, role: str) -> list[tuple[int, int]]:
+    role = role or infer_role(prompt)
     pairs: list[tuple[str, str]] = []
     if role == "implementer":
         pairs = [
@@ -189,6 +190,18 @@ def compressible_ranges(prompt: str, role: str) -> list[tuple[int, int]]:
             ("Relevant uncertainty or skipped-check notes:\n", "\n\nSemantic JSON contract:"),
         ]
     return _find_ranges(prompt, pairs)
+
+
+def infer_role(prompt: str) -> str:
+    if "You are the coder model for AutoDev." in prompt:
+        return "implementer"
+    if "You are the fixer model for AutoDev." in prompt or "You are the Fixer correcting verifier gaps." in prompt:
+        return "fixer"
+    if "You are the Planner for this repository." in prompt:
+        return "planner"
+    if "You are the independent Verifier for this repository." in prompt:
+        return "verifier"
+    return ""
 
 
 def sanitize_url(value: str) -> str:
