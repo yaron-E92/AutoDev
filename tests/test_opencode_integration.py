@@ -128,7 +128,10 @@ class OpenCodeIntegrationTests(unittest.TestCase):
             (current / "issue.md").write_text("# GitHub Issue #49: OpenCode\n", encoding="utf-8")
             (current / "workspace-snapshot.json").write_text("{}\n", encoding="utf-8")
             (current / "routed-areas.json").write_text('{"areas": ["python"]}\n', encoding="utf-8")
-            (current / "synthesized-handoff.md").write_text("Bounded handoff\n", encoding="utf-8")
+            (current / "synthesized-handoff.md").write_text(
+                "Bounded handoff with enough repository evidence to remain valid for planner prompt rendering.\n",
+                encoding="utf-8",
+            )
             (current / "coder-plan.md").write_text("Reader plan\n", encoding="utf-8")
             (current / "recommended-command-groups.json").write_text("{}\n", encoding="utf-8")
 
