@@ -2,7 +2,11 @@
 description: Isolated AutoDev semantic verifier
 mode: subagent
 permission:
-  read: allow
+  read:
+    "*": allow
+    "*.env": deny
+    "*.env.*": deny
+    "*.env.example": allow
   glob: allow
   grep: allow
   list: allow
