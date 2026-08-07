@@ -168,17 +168,39 @@ def compressible_ranges(prompt: str, role: str) -> list[tuple[int, int]]:
     elif role == "synthesizer":
         pairs = [("Routed areas:\n", None)]
     elif role == "implementer":
-        pairs = [
-            ("Synthesized handoff:\n", "\n\nCoder plan:"),
-            ("Coder plan:\n", "\n\nRecommended command groups JSON:"),
-            ("Recommended command groups JSON:\n", "\n\nRepository constraints:"),
-        ]
+        if "You are the Implementer editing this repository." in prompt:
+            pairs = [("Planner output:\n", "\n\nIssue:\n")]
+        else:
+            pairs = [
+                ("Synthesized handoff:\n", "\n\nCoder plan:"),
+                ("Coder plan:\n", "\n\nRecommended command groups JSON:"),
+                ("Recommended command groups JSON:\n", "\n\nRepository constraints:"),
+            ]
     elif role == "fixer":
-        if "Semantic-only repair evidence:" in prompt:
+        if (
+            "Semantic-only repair evidence:" in prompt
+            and "{{RepairBrief}}" not in prompt
+            and "{{ChangedFiles}}" not in prompt
+            and "{{Diff}}" not in prompt
+        ):
             pairs = [
                 ("Implementation plan:\n", "\n\nVerifier result:"),
                 ("Changed files:\n", "\n\nCurrent diff:"),
                 ("Current diff:\n", "\n\nSemantic repair output contract:"),
+            ]
+        elif "You are the Debugger for this repository." in prompt:
+            pairs = [
+                ("Error / bug / failed behavior:\n", "\n\nRelevant issue:\n"),
+            ]
+        elif "You are the CI Debugger for this repository." in prompt:
+            pairs = [
+                ("CI summary / failure information:\n", "\n\nRelevant issue:\n"),
+                ("Planner output:\n", "\n\nOutput contract:\n"),
+            ]
+        elif "You are the Fixer correcting verifier gaps." in prompt:
+            pairs = [
+                ("Implementation plan:\n", "\n\nVerifier result:"),
+                ("Verifier result:\n", "\n\nSemantic-only repair evidence:"),
             ]
         else:
             pairs = [("Synthesized handoff:\n", "\n\nOutput only:")]
@@ -204,9 +226,14 @@ def infer_role(prompt: str) -> str:
         return "reader"
     if "You are the synthesis reader model in an area-based local LLM benchmark." in prompt:
         return "synthesizer"
-    if "You are the coder model for AutoDev." in prompt:
+    if "You are the coder model for AutoDev." in prompt or "You are the Implementer editing this repository." in prompt:
         return "implementer"
-    if "You are the fixer model for AutoDev." in prompt or "You are the Fixer correcting verifier gaps." in prompt:
+    if (
+        "You are the fixer model for AutoDev." in prompt
+        or "You are the Fixer correcting verifier gaps." in prompt
+        or "You are the Debugger for this repository." in prompt
+        or "You are the CI Debugger for this repository." in prompt
+    ):
         return "fixer"
     if "You are the Planner for this repository." in prompt or "You are the coder model in an area-based local LLM benchmark." in prompt:
         return "planner"
