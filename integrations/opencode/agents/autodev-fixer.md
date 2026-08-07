@@ -2,12 +2,19 @@
 description: Isolated AutoDev targeted repair agent
 mode: subagent
 permission:
-  read: allow
+  read:
+    "*": allow
+    "*.env": deny
+    "*.env.*": deny
+    "*.env.example": allow
   glob: allow
   grep: allow
   list: allow
   edit:
     "*": allow
+    "*.env": deny
+    "*.env.*": deny
+    "*.env.example": allow
     ".git/**": deny
     ".opencode/**": deny
     ".codex-run/**": deny
