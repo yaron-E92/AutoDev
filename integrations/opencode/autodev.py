@@ -7,6 +7,20 @@ import sys
 from pathlib import Path
 
 
+def _arguments_with_current_issue(arguments: list[str]) -> list[str]:
+    if not arguments or arguments[0] != "prepare" or "--arguments" in arguments:
+        return arguments
+    state_path = Path.cwd() / ".codex-run" / "current" / "state.json"
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return arguments
+    issue_number = int(state.get("IssueNumber", 0) or 0) if isinstance(state, dict) else 0
+    if issue_number <= 0:
+        return arguments
+    return [*arguments, "--arguments", str(issue_number)]
+
+
 def main() -> int:
     root = Path(__file__).resolve().parent
     config_path = root / "autodev.json"
@@ -30,7 +44,12 @@ def main() -> int:
         else str(autodev_root) + os.pathsep + old_python_path
     )
     completed = subprocess.run(
-        [python, "-m", "automation.opencode_adapter", *sys.argv[1:]],
+        [
+            python,
+            "-m",
+            "automation.opencode_adapter",
+            *_arguments_with_current_issue(sys.argv[1:]),
+        ],
         cwd=Path.cwd(),
         env=env,
         check=False,
