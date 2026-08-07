@@ -7,6 +7,7 @@ from pathlib import Path
 from automation import run_real_issue
 from automation.model_providers import ModelConfig, MockProvider
 from automation.prompt_policies import resolve_prompt_policies
+from automation.run_manifest import create_manifest
 from automation.semantic_verifier import SemanticSettings
 
 
@@ -44,6 +45,26 @@ class SemanticVerifierFailureTests(unittest.TestCase):
             "fixer": ModelConfig(provider="mock", model="fixer"),
             "verifier": ModelConfig(provider="mock", model="verifier"),
         }
+        self._manifest_temp = tempfile.TemporaryDirectory()
+        root = Path(self._manifest_temp.name)
+        repo = root / "repo"
+        repo.mkdir()
+        manifest_path = root / "run-manifest.json"
+        create_manifest(
+            manifest_path,
+            repo_path=repo,
+            github_repo="owner/repo",
+            issue_number=35,
+            mode="implement",
+            base_sha="base-sha",
+            branch="autodev/issue-35-semantic-verifier",
+            role_snapshots={},
+        )
+        self._manifest_token = run_real_issue._ACTIVE_MANIFEST.set(manifest_path)
+
+    def tearDown(self):
+        run_real_issue._ACTIVE_MANIFEST.reset(self._manifest_token)
+        self._manifest_temp.cleanup()
 
     def _prepare_out_dir(self, root):
         for name, value in (
@@ -153,6 +174,8 @@ class SemanticVerifierFailureTests(unittest.TestCase):
                 run_real_issue.apply_patch_file,
                 run_real_issue.run_recommended_verification,
                 run_real_issue.write_verification_result,
+                run_real_issue._checkpoint_patch_applied,
+                run_real_issue._checkpoint_deterministic,
             )
             try:
                 run_real_issue.apply_patch_file = lambda repo, patch, stream: None
@@ -167,6 +190,8 @@ class SemanticVerifierFailureTests(unittest.TestCase):
                     )
                 )
                 run_real_issue.write_verification_result = lambda out, result: None
+                run_real_issue._checkpoint_patch_applied = lambda *args, **kwargs: None
+                run_real_issue._checkpoint_deterministic = lambda *args, **kwargs: None
                 with self.assertRaises(run_real_issue.RunnerError):
                     run_real_issue.run_semantic_verification_gate(
                         repo=out_dir,
@@ -188,6 +213,8 @@ class SemanticVerifierFailureTests(unittest.TestCase):
                     run_real_issue.apply_patch_file,
                     run_real_issue.run_recommended_verification,
                     run_real_issue.write_verification_result,
+                    run_real_issue._checkpoint_patch_applied,
+                    run_real_issue._checkpoint_deterministic,
                 ) = originals
                 run_real_issue._ACTIVE_SEMANTIC.reset(semantic_token)
                 run_real_issue._ACTIVE_POLICIES.reset(policy_token)
