@@ -10,6 +10,14 @@ from pathlib import Path
 from typing import Any
 from urllib import error, request
 
+from automation.headroom import (
+    HeadroomConfig,
+    HeadroomError,
+    headroom_config_from_values,
+    prepare_prompt,
+    proxy_headers,
+)
+
 
 PROVIDER_ALIASES = {
     "openai-compatible": "openai-compatible-chat-completions",
@@ -28,6 +36,8 @@ SAFE_HEADER_NAMES = {
     "groq-beta",
     "http-referer",
     "user-agent",
+    "x-headroom-base-url",
+    "x-headroom-bypass",
     "x-openrouter-metadata",
     "x-title",
 }
@@ -76,6 +86,7 @@ class ModelConfig:
     free_only: bool = False
     fallback_models: tuple[str, ...] = ()
     direct_edit: bool = False
+    headroom: HeadroomConfig = field(default_factory=HeadroomConfig)
 
     @property
     def transport(self) -> str:
@@ -89,6 +100,7 @@ class ModelConfig:
             "timeout_seconds": self.timeout_seconds,
             "free_only": self.free_only,
             "direct_edit": self.direct_edit,
+            "headroom": self.headroom.safe_metadata(),
         }
         if self.profile_name:
             metadata["profile_name"] = self.profile_name
@@ -323,6 +335,68 @@ class ResponsesProvider(_OpenAICompatibleProvider):
         )
 
 
+class HeadroomProvider(ModelProvider):
+    def __init__(
+        self,
+        direct_provider: _OpenAICompatibleProvider,
+        proxy_provider: _OpenAICompatibleProvider,
+        headroom: HeadroomConfig,
+        upstream_base_url: str,
+    ):
+        self.direct_provider = direct_provider
+        self.proxy_provider = proxy_provider
+        self.headroom = headroom
+        self.upstream_base_url = upstream_base_url
+
+    def invoke(self, prompt: str, *, model: str, timeout_seconds: int) -> ProviderResponse:
+        role = headroom_role_from_prompt(prompt)
+        try:
+            prepared = prepare_prompt(
+                prompt,
+                role=role,
+                model=model,
+                config=self.headroom,
+                upstream_base_url=self.upstream_base_url,
+                timeout_seconds=timeout_seconds,
+            )
+        except HeadroomError as exc:
+            raise ProviderError(str(exc), classification="compression_failed") from exc
+
+        if prepared.telemetry.get("status") == "compression_failed":
+            direct = self.direct_provider.invoke(prompt, model=model, timeout_seconds=timeout_seconds)
+            return ProviderResponse(
+                direct.text,
+                {**direct.telemetry, "compression": prepared.telemetry},
+            )
+
+        try:
+            proxied = self.proxy_provider.invoke(
+                prepared.prompt,
+                model=model,
+                timeout_seconds=timeout_seconds,
+            )
+        except ProviderError as exc:
+            if self.headroom.fail_open and exc.classification == "transport_error":
+                direct = self.direct_provider.invoke(prompt, model=model, timeout_seconds=timeout_seconds)
+                compression = dict(prepared.telemetry)
+                compression.update(
+                    {
+                        "status": "proxy_unavailable",
+                        "warning": "Headroom proxy is unreachable; used direct upstream",
+                        "fail_open_used": True,
+                    }
+                )
+                return ProviderResponse(
+                    direct.text,
+                    {**direct.telemetry, "compression": compression},
+                )
+            raise
+        return ProviderResponse(
+            proxied.text,
+            {**proxied.telemetry, "compression": prepared.telemetry},
+        )
+
+
 class MockProvider(ModelProvider):
     def __init__(self, responses: list[str] | None = None):
         self.responses = list(responses or ["NO_CHANGES_REQUIRED\nmock response"])
@@ -339,6 +413,21 @@ def quote_shell_argument(value: str) -> str:
     if os.name == "nt":
         return subprocess.list2cmdline([value])
     return shlex.quote(value)
+
+
+def headroom_role_from_prompt(prompt: str) -> str:
+    marker = "AUTODEV_HEADROOM_ROLE:"
+    first = prompt.find(marker)
+    if first < 0:
+        return ""
+    value = prompt[first + len(marker):].splitlines()[0].strip().casefold()
+    return value
+
+
+def with_headroom_role(prompt: str, role: str) -> str:
+    if not role or "AUTODEV_HEADROOM_ROLE:" in prompt:
+        return prompt
+    return f"AUTODEV_HEADROOM_ROLE:{role}\n{prompt}"
 
 
 def build_chat_completions_body(
@@ -495,6 +584,9 @@ def create_provider(config: ModelConfig, mock_responses: list[str] | None = None
     provider = normalize_provider_name(config.provider)
     if provider == "command":
         return CommandProvider(config.command)
+    if provider == "mock":
+        return MockProvider(mock_responses)
+
     common = {
         "headers": config.headers,
         "request_options": config.request_options,
@@ -502,13 +594,22 @@ def create_provider(config: ModelConfig, mock_responses: list[str] | None = None
         "free_only": config.free_only,
         "fallback_models": config.fallback_models,
     }
+    provider_type: type[_OpenAICompatibleProvider]
     if provider == "openai-compatible-chat-completions":
-        return ChatCompletionsProvider(config.base_url, config.api_key_env, **common)
-    if provider == "openai-compatible-responses":
-        return ResponsesProvider(config.base_url, config.api_key_env, **common)
-    if provider == "mock":
-        return MockProvider(mock_responses)
-    raise ProviderError(f"unsupported provider transport: {config.provider}", classification="invalid_config")
+        provider_type = ChatCompletionsProvider
+    elif provider == "openai-compatible-responses":
+        provider_type = ResponsesProvider
+    else:
+        raise ProviderError(f"unsupported provider transport: {config.provider}", classification="invalid_config")
+
+    direct = provider_type(config.base_url, config.api_key_env, **common)
+    if not config.headroom.enabled:
+        return direct
+
+    proxy_common = dict(common)
+    proxy_common["headers"] = {**config.headers, **proxy_headers(config.base_url)}
+    proxied = provider_type(config.headroom.proxy_url, config.api_key_env, **proxy_common)
+    return HeadroomProvider(direct, proxied, config.headroom, config.base_url)
 
 
 def load_provider_config(path: str | None) -> dict[str, object]:
@@ -545,6 +646,10 @@ def model_config_from_values(
         raise ProviderError(f"{role} fallback_models must be an array", classification="invalid_config")
     fallback_models = tuple(str(item).strip() for item in fallback_value if str(item).strip())
     direct_edit = bool(values.get("direct_edit", False))
+    try:
+        headroom = headroom_config_from_values(values.get("headroom", {}))
+    except HeadroomError as exc:
+        raise ProviderError(str(exc), classification="invalid_config") from exc
 
     if timeout_seconds <= 0:
         raise ProviderError(f"{role} timeout must be greater than zero", classification="invalid_config")
@@ -556,6 +661,11 @@ def model_config_from_values(
         raise ProviderError(f"{role} command provider requires a command", classification="invalid_config")
     if provider.startswith("openai-compatible-") and not base_url:
         raise ProviderError(f"{role} HTTP provider requires a base URL", classification="invalid_config")
+    if headroom.enabled and not provider.startswith("openai-compatible-"):
+        raise ProviderError(
+            f"{role} Headroom compression requires an OpenAI-compatible HTTP transport",
+            classification="invalid_config",
+        )
     validate_safe_headers(headers)
     if free_only:
         apply_model_selection({}, model, fallback_models, True)
@@ -574,6 +684,7 @@ def model_config_from_values(
         free_only=free_only,
         fallback_models=fallback_models,
         direct_edit=direct_edit,
+        headroom=headroom,
     )
 
 

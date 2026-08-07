@@ -1,0 +1,59 @@
+{
+  "version": 2,
+  "name": "ollama-openai-compatible-headroom",
+  "headroom": {
+    "enabled": true,
+    "proxy_url": "http://127.0.0.1:8787/v1",
+    "mode": "lossless",
+    "output_shaping": false,
+    "fail_open": true,
+    "roles": {
+      "verifier": {
+        "enabled": false
+      }
+    }
+  },
+  "roles": {
+    "reader": {
+      "transport": "openai-compatible-chat-completions",
+      "model": "qwen35-9b-32k",
+      "base_url": "http://127.0.0.1:11434/v1",
+      "timeout_seconds": 1800
+    },
+    "synthesizer": {
+      "transport": "openai-compatible-chat-completions",
+      "model": "qwen35-9b-32k",
+      "base_url": "http://127.0.0.1:11434/v1",
+      "timeout_seconds": 1800
+    },
+    "planner": {
+      "transport": "openai-compatible-chat-completions",
+      "model": "qwen35-9b-32k",
+      "base_url": "http://127.0.0.1:11434/v1",
+      "timeout_seconds": 1800
+    },
+    "implementer": {
+      "transport": "openai-compatible-chat-completions",
+      "model": "devstral-small2-12k",
+      "base_url": "http://127.0.0.1:11434/v1",
+      "timeout_seconds": 2400
+    },
+    "fixer": {
+      "transport": "openai-compatible-chat-completions",
+      "model": "devstral-small2-12k",
+      "base_url": "http://127.0.0.1:11434/v1",
+      "timeout_seconds": 2400
+    },
+    "verifier": {
+      "transport": "openai-compatible-chat-completions",
+      "model": "qwen35-9b-32k",
+      "base_url": "http://127.0.0.1:11434/v1",
+      "timeout_seconds": 1800
+    }
+  },
+  "semantic_verification": {
+    "enabled": true,
+    "max_schema_retries": 1,
+    "max_repair_attempts": 1
+  }
+}

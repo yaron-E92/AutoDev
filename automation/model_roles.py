@@ -5,6 +5,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+from automation.headroom import HeadroomError, resolve_headroom_values
 from automation.model_providers import (
     ModelConfig,
     ModelProvider,
@@ -94,6 +95,14 @@ def resolve_role_configs(
                     merged[key] = value
                     overrides[key] = value
 
+        try:
+            headroom_values = resolve_headroom_values(file_config, role)
+        except HeadroomError as exc:
+            raise ProviderError(str(exc), classification="invalid_config") from exc
+        provider_value = merged.get("transport", merged.get("provider", "command"))
+        if headroom_values and normalize_provider_name(str(provider_value)).startswith("openai-compatible-"):
+            merged["headroom"] = headroom_values
+
         if profile_name and not merged.get("profile_name") and not merged.get("profile"):
             merged["profile_name"] = profile_name
         resolved[role] = _model_config(role, merged, overrides)
@@ -148,6 +157,7 @@ def model_config_to_dict(config: ModelConfig) -> dict[str, object]:
         "free_only": config.free_only,
         "fallback_models": list(config.fallback_models),
         "direct_edit": config.direct_edit,
+        "headroom": config.headroom.safe_metadata(),
     }
 
 
