@@ -110,7 +110,7 @@ Role handoffs use the existing current run directory rather than chat history:
 
 Reader/synthesizer results are limited to 30,000 characters before they can become a downstream handoff. The reader's deterministic repository bundle is separately capped before it is inserted into the generated reader prompt.
 
-Planner output is validated through AutoDev's existing six-section planner parser. Semantic verifier JSON is validated through AutoDev's existing semantic schema and persisted using the existing semantic-attempt/final-verdict artifact writers.
+Planner output is validated through AutoDev's existing six-section planner parser. Semantic verifier JSON is validated through AutoDev's existing semantic schema and persisted as the normal semantic-attempt artifact. A standalone `repair` verdict is not written as `final-verdict.json`; finalization remains owned by the normal #35 repair/reverification gate. Standalone terminal `pass` or `blocked` verdicts may be persisted as final verdicts.
 
 ## Permissions
 
@@ -129,7 +129,7 @@ fixer        targeted source edits; VCS/PR/issue mutation denied; task denied
 verifier     read/search + verifier result; source edits denied; task denied
 ```
 
-Implementer/fixer shell access remains ask-by-default, with explicit denials for branch/commit/push/PR/issue mutation and an explicit allow for the installed AutoDev bridge.
+The role definitions preserve `.env` read protection. Implementer/fixer shell access remains ask-by-default, with explicit denials for branch/commit/push/PR/issue mutation and an explicit allow for the installed AutoDev bridge.
 
 ## Provider examples
 
@@ -149,6 +149,12 @@ all roles: local Ollama-backed models selected in OpenCode
 The checked-in `.opencode` agents deliberately omit `model:` so changing OpenCode provider/model configuration does not require regenerating AutoDev prompts or editing workflow logic.
 
 AutoDev's existing provider profiles remain available for the normal headless PowerShell/Python workflow and are not required for OpenCode role execution.
+
+## Ponytail and Headroom
+
+AutoDev's #34 prompt-policy layer is already applied when the bridge renders each role prompt. Normal OpenCode role execution therefore does not require an external Ponytail plugin. If an OpenCode Ponytail plugin is installed, configure or disable it for the `autodev-*` agents so it does not inject a second, potentially contradictory policy on top of AutoDev's rendered role policy.
+
+Role isolation also does not require Headroom. Do not wrap OpenCode in a second Headroom/compression path for these commands. AutoDev's provider-side Headroom support remains owned by the normal provider-backed workflow; this frontend does not duplicate that routing or compression logic.
 
 ## Existing workflows remain independent
 
