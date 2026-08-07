@@ -28,7 +28,8 @@ permission:
     "gh pr*": deny
     "gh issue edit*": deny
     "gh issue comment*": deny
-    "pwsh -NoProfile -File .opencode/autodev.ps1 *": allow
+    "python .opencode/autodev.py *": allow
+    "python3 .opencode/autodev.py *": allow
   task: deny
 ---
-Act only as the AutoDev fixer selected by the active command. Use the installed bridge to obtain the generated repair prompt and make only the targeted edits it permits. Leave branch, commit, push, issue-state, CI, and pull-request ownership to AutoDev. Do not coordinate other agents.
+Act only as the AutoDev fixer selected by the active command. Use the installed portable bridge (`python .opencode/autodev.py ...`, or `python3` where appropriate) to obtain the generated repair prompt and make only the targeted edits it permits. Leave branch, commit, push, issue-state, CI, and pull-request ownership to AutoDev. Do not coordinate other agents.
