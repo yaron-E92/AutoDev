@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -15,7 +16,11 @@ from automation import workflow_stages
 from automation.model_output_sanitizer import sanitize_model_output
 from automation.model_providers import ProviderError, load_provider_config
 from automation.prompt_policies import compose_prompt, resolve_prompt_policies
-from automation.prompt_runner import PromptRunnerError, handle_planner_output
+from automation.prompt_runner import (
+    REQUIRED_PLAN_HEADINGS,
+    PromptRunnerError,
+    handle_planner_output,
+)
 from automation.semantic_verifier import (
     SemanticVerifierError,
     build_semantic_prompt,
@@ -25,6 +30,7 @@ from automation.semantic_verifier import (
     extract_acceptance_criteria,
     parse_semantic_output,
     render_template,
+    semantic_result_template,
     write_final_verdict,
     write_semantic_result,
 )
@@ -49,15 +55,79 @@ AGENT_FILES = (
     "autodev-fixer.md",
     "autodev-verifier.md",
 )
+ROLE_NAMES = ("reader", "synthesizer", "planner", "implementer", "fixer", "verifier")
 COORDINATOR_STAGES = workflow_stages.STAGES
 MAX_HANDOFF_CHARS = 30_000
 MAX_READER_BUNDLE_CHARS = 24_000
+OPENCODE_PROTOCOL_VERSION = 1
 DEFAULT_MAX_REPAIR_ATTEMPTS = workflow_stages.DEFAULT_MAX_REPAIR_ATTEMPTS
 DEFAULT_MAX_SEMANTIC_REPAIR_ATTEMPTS = workflow_stages.DEFAULT_MAX_SEMANTIC_REPAIR_ATTEMPTS
 
 
 class OpenCodeAdapterError(RuntimeError):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        classification: str = workflow_stages.FAILURE_DETERMINISTIC,
+    ) -> None:
+        super().__init__(message)
+        self.classification = classification
+
+
+def role_contracts() -> dict[str, dict[str, object]]:
+    return {
+        "reader": {
+            "input_artifact": ".codex-run/current/reader.md",
+            "output_artifact": ".codex-run/current/reader-brief.md",
+            "format": "bounded text/Markdown handoff",
+            "max_chars": MAX_HANDOFF_CHARS,
+            "prepare": "python .opencode/autodev.py prepare --role reader",
+            "accept": "python .opencode/autodev.py accept --role reader --input .codex-run/current/reader-brief.md",
+        },
+        "synthesizer": {
+            "input_artifact": ".codex-run/current/synthesizer.md",
+            "output_artifact": ".codex-run/current/synthesized-handoff.md",
+            "format": "bounded text/Markdown cross-area handoff",
+            "max_chars": MAX_HANDOFF_CHARS,
+            "prepare": "python .opencode/autodev.py prepare --role synthesizer",
+            "accept": "python .opencode/autodev.py accept --role synthesizer --input .codex-run/current/synthesized-handoff.md",
+        },
+        "planner": {
+            "input_artifact": ".codex-run/current/planner.md",
+            "template_artifact": ".codex-run/current/plan.template.md",
+            "output_artifact": ".codex-run/current/plan.md",
+            "format": "exact six-section AutoDev plan",
+            "required_sections": list(REQUIRED_PLAN_HEADINGS),
+            "max_chars": MAX_HANDOFF_CHARS,
+            "prepare": "python .opencode/autodev.py prepare --role planner",
+            "accept": "python .opencode/autodev.py accept --role planner --input .codex-run/current/plan.md",
+        },
+        "implementer": {
+            "input_artifact": ".codex-run/current/implementer.md",
+            "output_artifact": ".codex-run/current/commit-message.txt",
+            "format": "one non-empty commit-message line, maximum 200 characters",
+            "max_chars": 200,
+            "prepare": "standalone only: python .opencode/autodev.py prepare --role implementer",
+            "coordinator_prepare": "none; stage --name render-implementer already rendered implementer.md",
+            "accept": "python .opencode/autodev.py accept --role implementer",
+        },
+        "fixer": {
+            "input_artifact": "one of local-repair.md, verification-repair.md, ci-repair.md selected by prepare --role fixer --arguments local|semantic|ci",
+            "output_artifact": "target repository edits only",
+            "format": "targeted source repair; no new AutoDev protocol artifact",
+            "prepare": "python .opencode/autodev.py prepare --role fixer --arguments local|semantic|ci",
+            "accept": "python .opencode/autodev.py accept --role fixer",
+        },
+        "verifier": {
+            "input_artifact": ".codex-run/current/verifier.md",
+            "template_artifact": ".codex-run/current/verification-result.template.json",
+            "output_artifact": ".codex-run/current/verification-result.json",
+            "format": "strict semantic JSON using only parser-supported fields/enums and exact pre-populated acceptance criteria",
+            "prepare": "python .opencode/autodev.py prepare --role verifier",
+            "accept": "python .opencode/autodev.py accept --role verifier --input .codex-run/current/verification-result.json",
+        },
+    }
 
 
 def install_assets(
@@ -131,7 +201,10 @@ def ensure_current_issue(
             runner=runner,
         )
     except workflow_stages.WorkflowStageError as exc:
-        raise OpenCodeAdapterError(str(exc)) from exc
+        raise OpenCodeAdapterError(
+            str(exc),
+            classification=exc.classification,
+        ) from exc
 
 
 def prepare_role(
@@ -144,6 +217,8 @@ def prepare_role(
     repo = repo.expanduser().resolve()
     autodev_root = autodev_root.expanduser().resolve()
     current = ensure_current_issue(repo, autodev_root, arguments)
+    _ensure_opencode_protocol(current)
+    _begin_role_invocation(current, role)
     state = _read_state(current)
     issue_text = _read_text(current / "issue.md") or str(state.get("IssueText", ""))
     policies = _resolved_policies(repo, state)
@@ -155,6 +230,7 @@ def prepare_role(
         prompt = _prepare_synthesizer(current, issue_text)
         path = current / "synthesizer.md"
     elif role == "planner":
+        _write_plan_template(current)
         prompt = run_core.build_planner_prompt_from_area_reader(
             current,
             issue_text,
@@ -163,6 +239,11 @@ def prepare_role(
             if isinstance(state.get("Labels"), list)
             else [],
             str(state.get("StackContext", "")),
+        )
+        prompt += (
+            "\n\nAutoDev deterministic output contract:\n"
+            "Use `.codex-run/current/plan.template.md` as the exact six-section structure. "
+            "Do not add preamble, scratchpad, or extra top-level sections.\n"
         )
         path = current / "planner.md"
     elif role == "implementer":
@@ -175,14 +256,30 @@ def prepare_role(
                 "IssueText": issue_text,
             },
         )
+        prompt += (
+            "\n\nAutoDev deterministic output contract:\n"
+            "Write one concise commit-message line to `.codex-run/current/commit-message.txt` "
+            "and run the exact accept command from `.codex-run/current/role-contracts.json`.\n"
+        )
         path = current / "implementer.md"
     elif role == "fixer":
         source = _fixer_source(current, arguments)
         prompt = _read_text(source)
         if not prompt.strip():
             raise OpenCodeAdapterError(f"fixer source artifact is empty: {source}")
+        prompt += (
+            "\n\nAutoDev deterministic output contract:\n"
+            "Apply only this repair. Do not create workflow state, commits, branches, PRs, or issue mutations. "
+            "Run exactly `python .opencode/autodev.py accept --role fixer` when the targeted edit is complete.\n"
+        )
         path = current / "fixer.md"
     elif role == "verifier":
+        criteria = extract_acceptance_criteria(issue_text)
+        _write_json(
+            current / "verification-result.template.json",
+            semantic_result_template(criteria),
+            ensure_ascii=False,
+        )
         changed_files = collect_changed_files(repo)
         prompt = build_semantic_prompt(
             issue_text=issue_text,
@@ -193,6 +290,13 @@ def prepare_role(
             deterministic_evidence=collect_deterministic_evidence(current),
             uncertainty_notes=_read_text(current / "verification-notes.md"),
             template=_read_text(autodev_root / "promptTemplates" / "semantic-verifier.md"),
+        )
+        prompt += (
+            "\n\nAutoDev deterministic JSON contract:\n"
+            "Start from `.codex-run/current/verification-result.template.json`. Preserve every pre-populated "
+            "criterion verbatim. Use only verdict pass|repair|blocked, requirement status "
+            "met|missing|uncertain, and finding severity blocking|warning. Evidence must be string arrays; "
+            "findings may be [] for a clean pass. Return/write JSON only.\n"
         )
         path = current / "verifier.md"
     else:
@@ -208,7 +312,17 @@ def accept_role(role: str, repo: Path, input_path: Path | None = None) -> list[P
     current = repo / CURRENT_DIR
     if not current.is_dir():
         raise OpenCodeAdapterError(".codex-run/current is missing; prepare the role first")
+    _write_role_contracts(current)
+    try:
+        outputs = _accept_role_once(role, current, input_path)
+    except (OpenCodeAdapterError, PromptRunnerError, SemanticVerifierError) as exc:
+        _raise_contract_rejection(current, role, input_path, exc)
+    _mark_role_accepted(current, role, outputs)
+    _reset_current_correction(current, role)
+    return outputs
 
+
+def _accept_role_once(role: str, current: Path, input_path: Path | None) -> list[Path]:
     if role == "reader":
         source = input_path or current / "reader-brief.md"
         text = _bounded_result(source)
@@ -269,8 +383,9 @@ def workflow_stage(
     runner=subprocess.run,
     which=shutil.which,
 ) -> tuple[int, dict[str, object]]:
+    repo = repo.expanduser().resolve()
     try:
-        return workflow_stages.execute_stage(
+        code, payload = workflow_stages.execute_stage(
             name,
             repo,
             arguments=arguments,
@@ -281,7 +396,18 @@ def workflow_stage(
             which=which,
         )
     except workflow_stages.WorkflowStageError as exc:
-        raise OpenCodeAdapterError(str(exc)) from exc
+        raise OpenCodeAdapterError(
+            str(exc),
+            classification=exc.classification,
+        ) from exc
+
+    current = repo / CURRENT_DIR
+    if name == "prepare" and payload.get("state") == "CONTINUE" and current.is_dir():
+        _ensure_opencode_protocol(current)
+    elif name == "render-implementer" and payload.get("state") == "CONTINUE" and current.is_dir():
+        _ensure_opencode_protocol(current)
+        _begin_role_invocation(current, "implementer")
+    return code, payload
 
 
 def _next_semantic_attempt(current: Path) -> int:
@@ -420,6 +546,162 @@ def _fixer_source(current: Path, arguments: str) -> Path:
     return existing[0]
 
 
+def _ensure_opencode_protocol(current: Path) -> None:
+    state = _read_state(current)
+    state["OpenCodeProtocolVersion"] = OPENCODE_PROTOCOL_VERSION
+    if not isinstance(state.get("AcceptedRoleArtifacts"), dict):
+        state["AcceptedRoleArtifacts"] = {}
+    _write_json(current / "state.json", state)
+    _write_role_contracts(current)
+    diagnostics = _read_diagnostics(current)
+    diagnostics.setdefault("role_invocations", {})
+    diagnostics.setdefault("protocol_correction_attempts", {})
+    diagnostics.setdefault("protocol_correction_used", {})
+    diagnostics.setdefault("stage_invocations", {})
+    diagnostics.setdefault("stage_wall_time_ms", {})
+    diagnostics.setdefault("repeated_identical_failures", 0)
+    _write_diagnostics(current, diagnostics)
+
+
+def _write_role_contracts(current: Path) -> None:
+    _write_json(
+        current / "role-contracts.json",
+        {
+            "version": OPENCODE_PROTOCOL_VERSION,
+            "roles": role_contracts(),
+            "protocol_correction_limit": 1,
+        },
+    )
+
+
+def _write_plan_template(current: Path) -> None:
+    _write_text(
+        current / "plan.template.md",
+        "\n\n".join(REQUIRED_PLAN_HEADINGS) + "\n",
+    )
+
+
+def _begin_role_invocation(current: Path, role: str) -> None:
+    if role not in ROLE_NAMES:
+        raise OpenCodeAdapterError(f"unsupported OpenCode role: {role}")
+    state = _read_state(current)
+    accepted = state.get("AcceptedRoleArtifacts", {})
+    if isinstance(accepted, dict):
+        accepted.pop(role, None)
+        state["AcceptedRoleArtifacts"] = accepted
+        _write_json(current / "state.json", state)
+    diagnostics = _read_diagnostics(current)
+    invocations = diagnostics.setdefault("role_invocations", {})
+    if isinstance(invocations, dict):
+        invocations[role] = int(invocations.get(role, 0) or 0) + 1
+    used = diagnostics.setdefault("protocol_correction_used", {})
+    if isinstance(used, dict):
+        used[role] = False
+    _write_diagnostics(current, diagnostics)
+    (current / f"contract-correction-{role}.md").unlink(missing_ok=True)
+
+
+def _mark_role_accepted(current: Path, role: str, outputs: list[Path]) -> None:
+    state_value = _read_json(current / "state.json")
+    if not isinstance(state_value, dict) or not state_value:
+        return
+    state = state_value
+    contract = role_contracts().get(role, {})
+    relative = str(contract.get("output_artifact", ""))
+    path = current / Path(relative).name if relative.startswith(".codex-run/current/") else None
+    digest = _file_sha256(path) if path is not None else ""
+    accepted = state.setdefault("AcceptedRoleArtifacts", {})
+    if isinstance(accepted, dict):
+        accepted[role] = {
+            "artifact": relative,
+            "sha256": digest,
+        }
+    state["OpenCodeProtocolVersion"] = OPENCODE_PROTOCOL_VERSION
+    _write_json(current / "state.json", state)
+
+
+def _raise_contract_rejection(
+    current: Path,
+    role: str,
+    input_path: Path | None,
+    error: BaseException,
+) -> None:
+    diagnostics = _read_diagnostics(current)
+    used = diagnostics.setdefault("protocol_correction_used", {})
+    already_used = bool(used.get(role, False)) if isinstance(used, dict) else False
+    if already_used:
+        raise OpenCodeAdapterError(
+            f"{role} protocol correction limit exhausted after one retry: {error}"
+        ) from error
+
+    if isinstance(used, dict):
+        used[role] = True
+    attempts = diagnostics.setdefault("protocol_correction_attempts", {})
+    if isinstance(attempts, dict):
+        attempts[role] = int(attempts.get(role, 0) or 0) + 1
+    _write_diagnostics(current, diagnostics)
+
+    contract = role_contracts().get(role, {})
+    source = input_path or _contract_output_path(current, role)
+    previous = _bounded_text(_read_text(source), 8_000) if source is not None else ""
+    template = ""
+    if role == "planner":
+        template = _read_text(current / "plan.template.md")
+    elif role == "verifier":
+        template = _read_text(current / "verification-result.template.json")
+    correction = current / f"contract-correction-{role}.md"
+    _write_text(
+        correction,
+        "# AutoDev protocol correction\n\n"
+        "This is the only protocol-format correction attempt allowed for the current role invocation.\n\n"
+        f"Role: `{role}`\n\n"
+        f"Validation errors:\n\n```text\n{error}\n```\n\n"
+        "Exact role contract:\n\n```json\n"
+        + json.dumps(contract, indent=2, sort_keys=True)
+        + "\n```\n\n"
+        + ("Exact generated template:\n\n```text\n" + template + "\n```\n\n" if template else "")
+        + ("Bounded previous output:\n\n```text\n" + previous + "\n```\n\n" if previous else "")
+        + f"Correct the designated output artifact once, then rerun exactly:\n\n`{contract.get('accept', '')}`\n",
+    )
+    raise OpenCodeAdapterError(
+        f"{role} protocol artifact rejected; one correction is allowed using {correction}; "
+        f"then rerun exactly: {contract.get('accept', '')}"
+    ) from error
+
+
+def _reset_current_correction(current: Path, role: str) -> None:
+    diagnostics = _read_diagnostics(current)
+    used = diagnostics.setdefault("protocol_correction_used", {})
+    if isinstance(used, dict):
+        used[role] = False
+    _write_diagnostics(current, diagnostics)
+
+
+def _contract_output_path(current: Path, role: str) -> Path | None:
+    relative = str(role_contracts().get(role, {}).get("output_artifact", ""))
+    if relative.startswith(".codex-run/current/"):
+        return current / Path(relative).name
+    return None
+
+
+def _read_diagnostics(current: Path) -> dict[str, object]:
+    value = _read_json(current / workflow_stages.DIAGNOSTICS_FILE)
+    return value if isinstance(value, dict) else {}
+
+
+def _write_diagnostics(current: Path, value: dict[str, object]) -> None:
+    _write_json(current / workflow_stages.DIAGNOSTICS_FILE, value)
+
+
+def _file_sha256(path: Path | None) -> str:
+    if path is None:
+        return ""
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return ""
+
+
 def _resolved_policies(repo: Path, state: dict[str, object]) -> dict[str, str]:
     profile_value = str(state.get("ProviderProfile", "")).strip()
     if not profile_value:
@@ -449,6 +731,13 @@ def _bounded_result(path: Path) -> str:
     return value
 
 
+def _bounded_text(value: str, limit: int) -> str:
+    if len(value) <= limit:
+        return value
+    digest = hashlib.sha256(value.encode("utf-8", errors="replace")).hexdigest()
+    return value[:limit] + f"\n[truncated; sha256={digest}]\n"
+
+
 def _read_state(current: Path) -> dict[str, object]:
     state = _read_json(current / "state.json")
     if not isinstance(state, dict) or not state:
@@ -475,8 +764,11 @@ def _write_text(path: Path, value: str) -> None:
     path.write_text(value, encoding="utf-8")
 
 
-def _write_json(path: Path, value: object) -> None:
-    _write_text(path, json.dumps(value, indent=2, sort_keys=True) + "\n")
+def _write_json(path: Path, value: object, *, ensure_ascii: bool = True) -> None:
+    _write_text(
+        path,
+        json.dumps(value, indent=2, sort_keys=True, ensure_ascii=ensure_ascii) + "\n",
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -491,7 +783,7 @@ def build_parser() -> argparse.ArgumentParser:
     prepare = subparsers.add_parser("prepare")
     prepare.add_argument(
         "--role",
-        choices=("reader", "synthesizer", "planner", "implementer", "fixer", "verifier"),
+        choices=ROLE_NAMES,
         required=True,
     )
     prepare.add_argument("--repo", default=".")
@@ -501,7 +793,7 @@ def build_parser() -> argparse.ArgumentParser:
     accept = subparsers.add_parser("accept")
     accept.add_argument(
         "--role",
-        choices=("reader", "synthesizer", "planner", "implementer", "fixer", "verifier"),
+        choices=ROLE_NAMES,
         required=True,
     )
     accept.add_argument("--repo", default=".")
@@ -550,10 +842,11 @@ def run(argv: list[str] | None = None) -> int:
                 print(path)
             return 0
         if args.command == "stage":
+            repo = Path(args.repo).expanduser().resolve()
             try:
                 code, payload = workflow_stage(
                     args.name,
-                    Path(args.repo),
+                    repo,
                     arguments=args.arguments,
                     autodev_root=Path(args.autodev_root),
                     attempt=args.attempt,
@@ -568,13 +861,11 @@ def run(argv: list[str] | None = None) -> int:
                 OSError,
                 ValueError,
             ) as exc:
-                payload = workflow_stages.stage_payload(
-                    Path(args.repo).expanduser().resolve(),
-                    "FAILED",
+                payload = workflow_stages.record_stage_failure(
+                    repo,
                     args.name,
-                    reason=str(exc),
+                    exc,
                     requested_issue=issue_number_from_arguments(args.arguments),
-                    next_action="correct the reported setup or stage failure before retrying",
                 )
                 print(json.dumps(payload, sort_keys=True))
                 return 1
