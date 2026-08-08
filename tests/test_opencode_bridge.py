@@ -100,7 +100,7 @@ class OpenCodeBridgeTests(unittest.TestCase):
             self.assertEqual(code, 0)
             command = runner.call_args.args[0]
             self.assertEqual(command[0], "bash")
-            self.assertTrue(command[1].endswith("linux/scripts/codex-verify.sh"))
+            self.assertEqual(Path(command[1]).parts[-3:], ("linux", "scripts", "codex-verify.sh"))
             self.assertEqual(command[-2:], ["--profiles", "backend,maui"])
 
     def _write_state(self, repo: Path, issue_number: int) -> None:
