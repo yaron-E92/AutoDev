@@ -4,7 +4,11 @@ import argparse
 from pathlib import Path
 
 from automation import workflow_stages
-from automation.semantic_verifier import render_template
+from automation.semantic_verifier import (
+    extract_acceptance_criteria,
+    parse_semantic_output,
+    render_template,
+)
 
 
 MODES = (
@@ -78,6 +82,35 @@ def initialize_shipment_proof(
     return state
 
 
+def sync_semantic_proof(
+    current: Path,
+    state: dict[str, object],
+) -> dict[str, object]:
+    verdict_path = current / "verification" / "final-verdict.json"
+    if not verdict_path.is_file():
+        return state
+    issue_text = workflow_stages.read_text(current / "issue.md") or str(
+        state.get("IssueText", "")
+    )
+    result = parse_semantic_output(
+        workflow_stages.read_text(verdict_path),
+        expected_criteria=extract_acceptance_criteria(issue_text) or None,
+    )
+    verdict = str(result["verdict"])
+    state["LastSemanticVerdict"] = verdict
+    if verdict == "pass":
+        identity = str(state.get("VerifiedSourceIdentity", "")).strip()
+        if state.get("VerificationProofVersion") and not identity:
+            raise workflow_stages.WorkflowStageError(
+                "semantic pass cannot be bound because the current local verification identity is missing"
+            )
+        state["SemanticSourceIdentity"] = identity
+    else:
+        state.pop("SemanticSourceIdentity", None)
+    workflow_stages.write_state(current, state)
+    return state
+
+
 def run_mode(mode: str, repo: Path, autodev_root: Path) -> int:
     repo = repo.expanduser().resolve()
     autodev_root = autodev_root.expanduser().resolve()
@@ -94,6 +127,7 @@ def run_mode(mode: str, repo: Path, autodev_root: Path) -> int:
         print("LOCAL_CHECK_PASSED" if passed else "LOCAL_CHECK_FAILED")
         return 0 if passed else 10
     if mode == "PrAndCi":
+        state = sync_semantic_proof(current, state)
         passed = workflow_stages.pr_and_ci(repo, current, state, autodev_root)
         print("CI_PASSED" if passed else "CI_FAILED")
         return 0 if passed else 20
