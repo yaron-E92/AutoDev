@@ -72,6 +72,7 @@ SEMANTIC_IGNORED_PARTS = {
     "__pycache__",
 }
 _UNRESOLVED_PLACEHOLDER = re.compile(r"\{\{[A-Za-z][A-Za-z0-9_]*\}\}")
+_LEGACY_ONLY_PLACEHOLDERS = {"{{LocalCheck}}", "{{StackContext}}"}
 _DECLARATION_PATTERNS = (
     re.compile(r"\b(?:class|interface|record|struct|enum|def|function|func)\s+([A-Za-z_][A-Za-z0-9_]*)"),
     re.compile(
@@ -86,6 +87,12 @@ _DECLARATION_PATTERNS = (
 
 class SemanticVerifierError(ProviderError):
     pass
+
+
+class ChangedFileList(list[str]):
+    def __init__(self, values: list[str], repo: Path) -> None:
+        super().__init__(values)
+        self.repo = repo
 
 
 @dataclass(frozen=True)
@@ -265,6 +272,14 @@ def build_semantic_prompt(
     template: str = "",
 ) -> str:
     criteria = extract_acceptance_criteria(issue_text)
+    if not cross_file_regression_evidence:
+        source_repo = getattr(changed_files, "repo", None)
+        if isinstance(source_repo, Path):
+            cross_file_regression_evidence = collect_cross_file_regression_evidence(
+                source_repo,
+                list(changed_files),
+                diff,
+            )
     values = {
         "IssueText": _bounded(issue_text, MAX_EVIDENCE_CHARS),
         "AcceptanceCriteria": (
@@ -292,7 +307,11 @@ def build_semantic_prompt(
         ),
     }
     rendered = render_template(template, values) if template else default_semantic_template(values)
-    unresolved = sorted(set(_UNRESOLVED_PLACEHOLDER.findall(rendered)))
+    unresolved = sorted(
+        placeholder
+        for placeholder in set(_UNRESOLVED_PLACEHOLDER.findall(rendered))
+        if placeholder not in _LEGACY_ONLY_PLACEHOLDERS
+    )
     if unresolved:
         raise SemanticVerifierError(
             "semantic verifier prompt contains unresolved placeholders: " + ", ".join(unresolved),
@@ -332,7 +351,7 @@ def render_template(template: str, values: dict[str, str]) -> str:
 
 
 def collect_changed_files(repo: Path) -> list[str]:
-    return sorted(
+    values = sorted(
         set(
             _git_lines(repo, ["git", "diff", "--name-only", "--relative", "--", "."])
             + _git_lines(
@@ -342,6 +361,7 @@ def collect_changed_files(repo: Path) -> list[str]:
             + _git_lines(repo, ["git", "ls-files", "--others", "--exclude-standard"])
         )
     )
+    return ChangedFileList(values, repo.expanduser().resolve())
 
 
 def collect_current_diff(
