@@ -5,6 +5,7 @@ import shlex
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from automation import opencode_adapter
@@ -142,12 +143,16 @@ class OpenCodeIntegrationTests(unittest.TestCase):
                 parser.parse_args(normalized)
         self.assertGreater(seen, 10)
 
-    def test_install_is_idempotent_and_includes_portable_bridge(self):
+    def test_install_is_idempotent_and_preserves_user_opencode_config(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             target = Path(temp_dir)
             custom = target / ".opencode" / "commands" / "custom.md"
             custom.parent.mkdir(parents=True)
             custom.write_text("user-owned\n", encoding="utf-8")
+            project_json = target / "opencode.json"
+            project_jsonc = target / "opencode.jsonc"
+            project_json.write_text('{"agent":{"autodev-reader":{"model":"provider/reader"}}}\n', encoding="utf-8")
+            project_jsonc.write_text('// user-owned\n{"model":"provider/default"}\n', encoding="utf-8")
 
             first = opencode_adapter.install_assets(target, REPO_ROOT, python_command="python-custom")
             second = opencode_adapter.install_assets(target, REPO_ROOT, python_command="python-custom")
@@ -155,6 +160,14 @@ class OpenCodeIntegrationTests(unittest.TestCase):
 
             self.assertEqual(len(first), len(second))
             self.assertEqual(custom.read_text(encoding="utf-8"), "user-owned\n")
+            self.assertEqual(
+                project_json.read_text(encoding="utf-8"),
+                '{"agent":{"autodev-reader":{"model":"provider/reader"}}}\n',
+            )
+            self.assertEqual(
+                project_jsonc.read_text(encoding="utf-8"),
+                '// user-owned\n{"model":"provider/default"}\n',
+            )
             self.assertEqual(config["autodev_root"], str(REPO_ROOT.resolve()))
             self.assertEqual(config["python"], "python-custom")
             self.assertTrue((target / ".opencode" / "autodev.py").is_file())
@@ -162,6 +175,144 @@ class OpenCodeIntegrationTests(unittest.TestCase):
             self.assertTrue((target / ".opencode" / "commands" / "autodev-issue-to-pr.md").is_file())
             self.assertTrue((target / ".opencode" / "agents" / "autodev-coordinator.md").is_file())
             self.assertNotIn("api_key", json.dumps(config).casefold())
+
+    def test_all_seven_opencode_roles_can_be_mapped_independently(self):
+        agents = {
+            f"autodev-{role}": {"model": f"provider/{role}"}
+            for role in opencode_adapter.OPENCODE_ROLE_NAMES
+        }
+
+        mappings = opencode_adapter.model_mappings_from_config({"agent": agents})
+
+        self.assertEqual(set(mappings), set(opencode_adapter.OPENCODE_ROLE_NAMES))
+        for role in opencode_adapter.OPENCODE_ROLE_NAMES:
+            self.assertEqual(mappings[role]["source"], "explicit")
+            self.assertEqual(mappings[role]["model"], f"provider/{role}")
+
+    def test_unmapped_roles_preserve_opencode_inheritance(self):
+        mappings = opencode_adapter.model_mappings_from_config(
+            {
+                "model": "provider/default",
+                "agent": {
+                    "autodev-coordinator": {"model": "provider/coordinator"},
+                    "autodev-implementer": {"model": "provider/strong"},
+                },
+            }
+        )
+
+        self.assertEqual(mappings["coordinator"]["source"], "explicit")
+        self.assertEqual(mappings["coordinator"]["model"], "provider/coordinator")
+        self.assertEqual(mappings["reader"]["source"], "inherited")
+        self.assertEqual(mappings["reader"]["model"], "provider/coordinator")
+        self.assertIn("autodev-coordinator", mappings["reader"]["inherits_from"])
+        self.assertEqual(mappings["implementer"]["model"], "provider/strong")
+
+        global_only = opencode_adapter.model_mappings_from_config({"model": "provider/default"})
+        self.assertEqual(global_only["coordinator"]["model"], "provider/default")
+        self.assertEqual(global_only["reader"]["model"], "provider/default")
+
+        runtime_only = opencode_adapter.model_mappings_from_config({})
+        self.assertEqual(runtime_only["coordinator"]["model"], "")
+        self.assertIn("current/default", runtime_only["coordinator"]["inherits_from"])
+
+    def test_model_mapping_rejects_malformed_and_unknown_autodev_roles(self):
+        with self.assertRaises(opencode_adapter.OpenCodeAdapterError) as malformed:
+            opencode_adapter.model_mappings_from_config(
+                {"agent": {"autodev-reader": {"model": "missing-provider-separator"}}}
+            )
+        self.assertIn("provider/model", str(malformed.exception))
+
+        with self.assertRaises(opencode_adapter.OpenCodeAdapterError) as unknown:
+            opencode_adapter.model_mappings_from_config(
+                {"agent": {"autodev-reviewer": {"model": "provider/model"}}}
+            )
+        self.assertIn("unknown AutoDev OpenCode role mapping", str(unknown.exception))
+
+    def test_models_introspection_uses_resolved_config_without_exposing_secrets(self):
+        calls = []
+        config = {
+            "model": "provider/default",
+            "agent": {"autodev-implementer": {"model": "provider/strong"}},
+            "provider": {"provider": {"options": {"apiKey": "TOP-SECRET"}}},
+        }
+
+        def runner(command, **kwargs):
+            calls.append((command, kwargs))
+            return SimpleNamespace(returncode=0, stdout=json.dumps(config), stderr="")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            mappings = opencode_adapter.resolve_opencode_model_mappings(
+                Path(temp_dir),
+                runner=runner,
+            )
+
+        rendered = opencode_adapter.render_model_mappings(mappings)
+        self.assertEqual(calls[0][0], ["opencode", "debug", "config"])
+        self.assertEqual(mappings["implementer"]["model"], "provider/strong")
+        self.assertIn("provider/strong", rendered)
+        self.assertNotIn("TOP-SECRET", rendered)
+        self.assertNotIn("apiKey", rendered)
+
+    def test_models_subcommand_is_read_only_and_prints_mapping(self):
+        parser = opencode_adapter.build_parser()
+        parsed = parser.parse_args(["models", "--repo", "."])
+        self.assertEqual(parsed.command, "models")
+
+        mappings = opencode_adapter.model_mappings_from_config({"model": "provider/default"})
+        with patch(
+            "automation.opencode_adapter.resolve_opencode_model_mappings",
+            return_value=mappings,
+        ) as resolve, patch("builtins.print") as output:
+            code = opencode_adapter.run(["models", "--repo", "."])
+
+        self.assertEqual(code, 0)
+        resolve.assert_called_once()
+        self.assertIn("coordinator", output.call_args.args[0])
+        self.assertIn("provider/default", output.call_args.args[0])
+
+    def test_preflight_validates_resolved_opencode_models_before_work(self):
+        config = {
+            "agent": {"autodev-reader": {"model": "provider/reader"}},
+        }
+        calls = []
+
+        def runner(command, **kwargs):
+            calls.append(command)
+            return SimpleNamespace(returncode=0, stdout=json.dumps(config), stderr="")
+
+        with tempfile.TemporaryDirectory() as temp_dir, patch(
+            "automation.opencode_adapter.workflow_stages.execute_stage",
+            return_value=(0, {"state": "CONTINUE"}),
+        ):
+            code, payload = opencode_adapter.workflow_stage(
+                "preflight",
+                Path(temp_dir),
+                arguments="66",
+                runner=runner,
+            )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["state"], "CONTINUE")
+        self.assertEqual(calls, [["opencode", "debug", "config"]])
+
+    def test_unsupported_per_run_model_overrides_fail_before_stage_execution(self):
+        for arguments in (
+            "66 --model planner=provider/model",
+            "66 --model=planner=provider/model",
+            "66 --role-model-profile free-cloud",
+            "66 --role-model-profile=free-cloud",
+        ):
+            with tempfile.TemporaryDirectory() as temp_dir, patch(
+                "automation.opencode_adapter.workflow_stages.execute_stage",
+                side_effect=AssertionError("stage must not run"),
+            ):
+                with self.assertRaises(opencode_adapter.OpenCodeAdapterError) as raised:
+                    opencode_adapter.workflow_stage(
+                        "preflight",
+                        Path(temp_dir),
+                        arguments=arguments,
+                    )
+            self.assertIn("per-run OpenCode model overrides are not supported", str(raised.exception))
 
     def test_missing_current_issue_delegates_to_portable_prepare(self):
         with tempfile.TemporaryDirectory() as temp_dir:
