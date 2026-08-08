@@ -1,0 +1,7 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+
+  // All AutoDev roles use the same local OpenCode/Ollama model unless an
+  // individual autodev-* agent is explicitly overridden.
+  "model": "ollama/<local-model>"
+}
