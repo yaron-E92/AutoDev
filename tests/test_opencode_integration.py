@@ -1,5 +1,6 @@
 import hashlib
 import json
+import re
 import shlex
 import tempfile
 import unittest
@@ -59,6 +60,7 @@ class OpenCodeIntegrationTests(unittest.TestCase):
         self.assertIn("non-retryable-deterministic", agent)
         self.assertIn("repeated-failure fingerprint", agent)
         self.assertNotIn("prepare --role implementer", agent)
+        self.assertNotIn("autodev.py ...", agent)
 
     def test_role_agents_are_subagents_model_free_and_use_exact_bridge_permissions(self):
         files = sorted(path.name for path in (OPEN_CODE_ROOT / "agents").glob("autodev-*.md"))
@@ -76,6 +78,11 @@ class OpenCodeIntegrationTests(unittest.TestCase):
             self.assertNotIn("autodev.ps1", text)
             self.assertNotIn("model:", text)
             self.assertNotIn("api_key", text.casefold())
+
+    def test_reader_planner_and_verifier_remain_non_source_editing(self):
+        for name in ("autodev-reader.md", "autodev-planner.md", "autodev-verifier.md"):
+            text = (OPEN_CODE_ROOT / "agents" / name).read_text(encoding="utf-8")
+            self.assertIn("edit:\n    \"*\": deny", text)
 
     def test_editing_and_verifying_roles_allow_routine_commands_but_deny_vcs_mutation(self):
         for name in ("autodev-implementer.md", "autodev-fixer.md", "autodev-verifier.md"):
@@ -112,6 +119,28 @@ class OpenCodeIntegrationTests(unittest.TestCase):
         self.assertIn("stage --name blocked", body)
         self.assertIn("accept --role verifier --input .codex-run/current/verification-result.json", body)
         self.assertIn("do not run prepare", body.casefold())
+
+    def test_checked_in_bridge_snippets_use_only_real_argparse_commands(self):
+        parser = opencode_adapter.build_parser()
+        paths = list((OPEN_CODE_ROOT / "agents").glob("autodev-*.md")) + list(
+            (OPEN_CODE_ROOT / "commands").glob("autodev-*.md")
+        )
+        pattern = re.compile(r"`(python3? \.opencode/autodev\.py [^`]+)`")
+        seen = 0
+        for path in paths:
+            text = path.read_text(encoding="utf-8")
+            for snippet in pattern.findall(text):
+                seen += 1
+                tokens = shlex.split(snippet)[2:]
+                self.assertIn(tokens[0], {"prepare", "accept", "stage"}, f"{path}: {snippet}")
+                normalized = []
+                for index, token in enumerate(tokens):
+                    if token.startswith("<") and token.endswith(">"):
+                        previous = tokens[index - 1] if index else ""
+                        token = "0" if previous == "--attempt" else "value"
+                    normalized.append(token)
+                parser.parse_args(normalized)
+        self.assertGreater(seen, 10)
 
     def test_install_is_idempotent_and_includes_portable_bridge(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -219,6 +248,31 @@ class OpenCodeIntegrationTests(unittest.TestCase):
             )
             self.assertEqual(template["findings"], [])
 
+    def test_semantic_template_matches_parser_and_structural_errors_are_aggregated(self):
+        template = opencode_adapter.semantic_result_template(["Exact criterion"])
+        parsed = opencode_adapter.parse_semantic_output(
+            json.dumps(template),
+            expected_criteria=["Exact criterion"],
+        )
+        self.assertEqual(parsed["verdict"], "blocked")
+        self.assertEqual(parsed["requirements"][0]["criterion"], "Exact criterion")
+
+        malformed = {
+            "verdict": "APPROVED",
+            "requirements": "not-an-array",
+            "findings": [{"severity": "info", "message": "", "path": 7}],
+            "repair_brief": [],
+        }
+        with self.assertRaises(opencode_adapter.SemanticVerifierError) as raised:
+            opencode_adapter.parse_semantic_output(json.dumps(malformed))
+        message = str(raised.exception)
+        self.assertIn("verdict must be", message)
+        self.assertIn("requirements must be an array", message)
+        self.assertIn("severity must be blocking or warning", message)
+        self.assertIn("message must be non-empty text", message)
+        self.assertIn("path must be text", message)
+        self.assertIn("repair_brief must be text", message)
+
     def test_accept_planner_reuses_existing_six_section_parser_and_pins_artifact(self):
         plan = """1) Where to look
 - automation/workflow_stages.py
@@ -274,17 +328,13 @@ class OpenCodeIntegrationTests(unittest.TestCase):
 
     def test_role_contract_bridge_snippets_match_real_argparse_surface(self):
         parser = opencode_adapter.build_parser()
-        for role, contract in opencode_adapter.role_contracts().items():
+        for contract in opencode_adapter.role_contracts().values():
             accept = str(contract["accept"])
             parser.parse_args(shlex.split(accept)[2:])
-            prepare = str(contract["prepare"])
-            if role in {"fixer", "implementer"}:
-                continue
-            parser.parse_args(shlex.split(prepare)[2:])
-        for repair_kind in ("local", "semantic", "ci"):
-            parser.parse_args(
-                ["prepare", "--role", "fixer", "--arguments", repair_kind]
-            )
+            prepare = contract["prepare"]
+            prepare_commands = prepare if isinstance(prepare, list) else [prepare]
+            for command in prepare_commands:
+                parser.parse_args(shlex.split(str(command))[2:])
 
     def test_semantic_repair_then_pass_preserves_attempt_history(self):
         repair = {
