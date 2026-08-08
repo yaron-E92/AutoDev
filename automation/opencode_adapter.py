@@ -26,6 +26,7 @@ from automation.semantic_verifier import (
     build_schema_repair_prompt,
     build_semantic_prompt,
     collect_changed_files,
+    collect_cross_file_regression_evidence,
     collect_current_diff,
     collect_deterministic_evidence,
     extract_acceptance_criteria,
@@ -287,13 +288,15 @@ def prepare_role(
             ensure_ascii=False,
         )
         changed_files = collect_changed_files(repo)
+        diff = collect_current_diff(repo, changed_files)
         prompt = build_semantic_prompt(
             issue_text=issue_text,
             synthesized_handoff=_read_text(current / "synthesized-handoff.md"),
             plan=_plan_text(current),
             changed_files=changed_files,
-            diff=collect_current_diff(repo, changed_files),
+            diff=diff,
             deterministic_evidence=collect_deterministic_evidence(current),
+            cross_file_regression_evidence=collect_cross_file_regression_evidence(repo, changed_files, diff),
             uncertainty_notes=_read_text(current / "verification-notes.md"),
             template=_read_text(autodev_root / "promptTemplates" / "semantic-verifier.md"),
         )
