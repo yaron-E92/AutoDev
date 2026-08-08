@@ -1,0 +1,17 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+
+  // Reader/synthesizer/planner/verifier inherit the coordinator model during
+  // /autodev-issue-to-pr. Implementer/fixer use the stronger explicit model.
+  "agent": {
+    "autodev-coordinator": {
+      "model": "provider/<lightweight-model>"
+    },
+    "autodev-implementer": {
+      "model": "provider/<strong-coding-model>"
+    },
+    "autodev-fixer": {
+      "model": "provider/<strong-coding-model>"
+    }
+  }
+}
