@@ -10,6 +10,7 @@ Strict rules:
 - Do not write a patch.
 - Do not propose a redesign or unrelated improvement.
 - Judge only the original issue, detectable acceptance criteria, scope, current diff, and supplied deterministic evidence.
+- Explicitly check removed or changed public/cross-file symbols against references in unchanged files. A remaining unchanged reference is a blocking regression unless supplied deterministic evidence proves it remains valid.
 - A warning alone does not block.
 - Use `repair` only for a concrete issue that can be corrected with a targeted patch.
 - Use `blocked` when required evidence or a human decision is missing, or the requested outcome cannot be safely verified.
@@ -35,6 +36,9 @@ Current diff:
 
 Deterministic verification evidence:
 {{DeterministicEvidence}}
+
+Cross-file regression evidence:
+{{CrossFileRegressionEvidence}}
 
 Relevant uncertainty or skipped-check notes:
 {{UncertaintyNotes}}

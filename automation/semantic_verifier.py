@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -29,10 +30,69 @@ MAX_SCHEMA_RETRIES = 1
 MAX_REPAIR_ATTEMPTS = 1
 MAX_DIFF_CHARS = 120_000
 MAX_EVIDENCE_CHARS = 30_000
+MAX_REGRESSION_EVIDENCE_CHARS = 12_000
+MAX_REGRESSION_SYMBOLS = 16
+MAX_REGRESSION_REFERENCES = 24
+MAX_REGRESSION_FILE_BYTES = 300_000
+SEMANTIC_SOURCE_SUFFIXES = {
+    ".cs",
+    ".cshtml",
+    ".razor",
+    ".xaml",
+    ".py",
+    ".js",
+    ".jsx",
+    ".ts",
+    ".tsx",
+    ".java",
+    ".kt",
+    ".kts",
+    ".go",
+    ".rs",
+    ".cpp",
+    ".cc",
+    ".c",
+    ".h",
+    ".hpp",
+}
+SEMANTIC_IGNORED_PARTS = {
+    ".git",
+    ".codex-run",
+    "bin",
+    "obj",
+    "node_modules",
+    "dist",
+    "build",
+    "coverage",
+    ".vs",
+    ".idea",
+    ".vscode",
+    ".venv",
+    "venv",
+    "__pycache__",
+}
+_UNRESOLVED_PLACEHOLDER = re.compile(r"\{\{[A-Za-z][A-Za-z0-9_]*\}\}")
+_LEGACY_ONLY_PLACEHOLDERS = {"{{LocalCheck}}", "{{StackContext}}"}
+_DECLARATION_PATTERNS = (
+    re.compile(r"\b(?:class|interface|record|struct|enum|def|function|func)\s+([A-Za-z_][A-Za-z0-9_]*)"),
+    re.compile(
+        r"\b(?:public|protected|internal|export)\s+"
+        r"(?:(?:static|virtual|override|abstract|sealed|async|readonly|const|partial|required|new)\s+)*"
+        r"(?:[A-Za-z_][A-Za-z0-9_<>,?.\[\]]*\s+)+"
+        r"([A-Za-z_][A-Za-z0-9_]*)\s*(?=\{|=>|\(|=|;)"
+    ),
+    re.compile(r"\b(?:const|let|var)\s+([A-Za-z_][A-Za-z0-9_]*)"),
+)
 
 
 class SemanticVerifierError(ProviderError):
     pass
+
+
+class ChangedFileList(list[str]):
+    def __init__(self, values: list[str], repo: Path) -> None:
+        super().__init__(values)
+        self.repo = repo
 
 
 @dataclass(frozen=True)
@@ -207,10 +267,19 @@ def build_semantic_prompt(
     changed_files: list[str],
     diff: str,
     deterministic_evidence: str,
+    cross_file_regression_evidence: str = "",
     uncertainty_notes: str = "",
     template: str = "",
 ) -> str:
     criteria = extract_acceptance_criteria(issue_text)
+    if not cross_file_regression_evidence:
+        source_repo = getattr(changed_files, "repo", None)
+        if isinstance(source_repo, Path):
+            cross_file_regression_evidence = collect_cross_file_regression_evidence(
+                source_repo,
+                list(changed_files),
+                diff,
+            )
     values = {
         "IssueText": _bounded(issue_text, MAX_EVIDENCE_CHARS),
         "AcceptanceCriteria": (
@@ -228,12 +297,27 @@ def build_semantic_prompt(
             deterministic_evidence,
             MAX_EVIDENCE_CHARS,
         ),
+        "CrossFileRegressionEvidence": (
+            _bounded(cross_file_regression_evidence, MAX_REGRESSION_EVIDENCE_CHARS)
+            or "No removed/changed declaration references were detected in unchanged source files."
+        ),
         "UncertaintyNotes": (
             _bounded(uncertainty_notes, 10_000)
             or "No additional uncertainty notes were recorded."
         ),
     }
-    return render_template(template, values) if template else default_semantic_template(values)
+    rendered = render_template(template, values) if template else default_semantic_template(values)
+    unresolved = sorted(
+        placeholder
+        for placeholder in set(_UNRESOLVED_PLACEHOLDER.findall(rendered))
+        if placeholder not in _LEGACY_ONLY_PLACEHOLDERS
+    )
+    if unresolved:
+        raise SemanticVerifierError(
+            "semantic verifier prompt contains unresolved placeholders: " + ", ".join(unresolved),
+            classification="unresolved_semantic_placeholders",
+        )
+    return rendered
 
 
 def build_semantic_repair_prompt(
@@ -267,7 +351,7 @@ def render_template(template: str, values: dict[str, str]) -> str:
 
 
 def collect_changed_files(repo: Path) -> list[str]:
-    return sorted(
+    values = sorted(
         set(
             _git_lines(repo, ["git", "diff", "--name-only", "--relative", "--", "."])
             + _git_lines(
@@ -277,6 +361,7 @@ def collect_changed_files(repo: Path) -> list[str]:
             + _git_lines(repo, ["git", "ls-files", "--others", "--exclude-standard"])
         )
     )
+    return ChangedFileList(values, repo.expanduser().resolve())
 
 
 def collect_current_diff(
@@ -306,6 +391,58 @@ def collect_current_diff(
         "\n".join(part for part in [tracked, *untracked_blocks] if part),
         MAX_DIFF_CHARS,
     )
+
+
+def collect_cross_file_regression_evidence(
+    repo: Path,
+    changed_files: list[str] | None = None,
+    diff: str | None = None,
+) -> str:
+    changed_files = changed_files if changed_files is not None else collect_changed_files(repo)
+    diff = diff if diff is not None else collect_current_diff(repo, changed_files)
+    symbols = _removed_symbol_candidates(diff)
+    if not symbols:
+        return "No removed/changed declaration-like identifiers were detected in the current diff."
+
+    changed = {path.replace("\\", "/") for path in changed_files}
+    references: list[str] = []
+    for path in repo.rglob("*"):
+        if len(references) >= MAX_REGRESSION_REFERENCES:
+            break
+        if not path.is_file() or path.suffix.casefold() not in SEMANTIC_SOURCE_SUFFIXES:
+            continue
+        relative = path.relative_to(repo).as_posix()
+        if relative in changed or any(part in SEMANTIC_IGNORED_PARTS for part in Path(relative).parts):
+            continue
+        try:
+            if path.stat().st_size > MAX_REGRESSION_FILE_BYTES:
+                continue
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for line_number, line in enumerate(text.splitlines(), start=1):
+            for symbol in symbols:
+                if re.search(r"\b" + re.escape(symbol) + r"\b", line):
+                    references.append(
+                        f"- {symbol} -> {relative}:{line_number}: {_bounded(line.strip(), 240)}"
+                    )
+                    break
+            if len(references) >= MAX_REGRESSION_REFERENCES:
+                break
+
+    lines = ["Removed/changed declaration candidates:"]
+    lines.extend(f"- {symbol}" for symbol in symbols)
+    lines.append("")
+    lines.append("References in unchanged source files:")
+    if references:
+        lines.extend(references)
+    else:
+        lines.append("- No unchanged-file references to the bounded candidates were found.")
+    lines.append("")
+    lines.append(
+        "Verifier instruction: treat a removed/changed symbol that is still referenced by unchanged code as a potential blocking regression unless deterministic evidence proves the reference remains valid."
+    )
+    return _bounded("\n".join(lines), MAX_REGRESSION_EVIDENCE_CHARS)
 
 
 def collect_deterministic_evidence(current_dir: Path) -> str:
@@ -423,13 +560,15 @@ def prepare_semantic_prompt(
         state.get("IssueText", "")
     )
     changed_files = collect_changed_files(repo)
+    diff = collect_current_diff(repo, changed_files)
     prompt = build_semantic_prompt(
         issue_text=issue_text,
         synthesized_handoff=_read_text(current_dir / "synthesized-handoff.md"),
         plan=_read_text(current_dir / "plan.md"),
         changed_files=changed_files,
-        diff=collect_current_diff(repo, changed_files),
+        diff=diff,
         deterministic_evidence=collect_deterministic_evidence(current_dir),
+        cross_file_regression_evidence=collect_cross_file_regression_evidence(repo, changed_files, diff),
         uncertainty_notes=_read_text(current_dir / "verification-notes.md"),
         template=_read_text(template_path),
     )
@@ -503,10 +642,13 @@ Current diff:
 Deterministic verification evidence:
 {values['DeterministicEvidence']}
 
+Cross-file regression evidence:
+{values['CrossFileRegressionEvidence']}
+
 Uncertainty or skipped-check notes:
 {values['UncertaintyNotes']}
 
-Return JSON only with verdict pass, repair, or blocked; requirements using met, missing, or uncertain; findings using blocking or warning; and a targeted repair_brief. Warnings alone do not block.
+Explicitly check removed or changed public/cross-file symbols against unchanged references before returning pass. Return JSON only with verdict pass, repair, or blocked; requirements using met, missing, or uncertain; findings using blocking or warning; and a targeted repair_brief. Warnings alone do not block.
 """
 
 
@@ -777,6 +919,27 @@ def _write_result_pair(
         render_semantic_summary(result, title),
         encoding="utf-8",
     )
+
+
+def _removed_symbol_candidates(diff: str) -> list[str]:
+    candidates: list[str] = []
+    seen: set[str] = set()
+    for raw in diff.splitlines():
+        if not raw.startswith("-") or raw.startswith("---"):
+            continue
+        line = raw[1:].strip()
+        for pattern in _DECLARATION_PATTERNS:
+            match = pattern.search(line)
+            if not match:
+                continue
+            symbol = match.group(1)
+            if len(symbol) < 3 or symbol in seen:
+                continue
+            seen.add(symbol)
+            candidates.append(symbol)
+            if len(candidates) >= MAX_REGRESSION_SYMBOLS:
+                return candidates
+    return candidates
 
 
 def _git_lines(repo: Path, argv: list[str]) -> list[str]:

@@ -13,6 +13,7 @@ from automation.semantic_verifier import (
     SemanticSettings,
     SemanticVerifierError,
     build_semantic_prompt,
+    collect_cross_file_regression_evidence,
     extract_acceptance_criteria,
     invoke_semantic_verifier,
     parse_semantic_output,
@@ -137,6 +138,62 @@ class SemanticVerifierTests(unittest.TestCase):
         self.assertIn("diff --git", prompt)
         self.assertIn("dotnet test passed", prompt)
         self.assertIn("Android build skipped", prompt)
+
+    def test_semantic_prompt_rejects_unknown_unresolved_placeholder(self):
+        with self.assertRaises(SemanticVerifierError) as raised:
+            build_semantic_prompt(
+                issue_text="# Issue",
+                synthesized_handoff="Handoff",
+                plan="Plan",
+                changed_files=[],
+                diff="",
+                deterministic_evidence="checks passed",
+                template="Issue: {{IssueText}}\nMissing: {{MissingRequiredEvidence}}\n",
+            )
+
+        self.assertEqual(raised.exception.classification, "unresolved_semantic_placeholders")
+        self.assertIn("MissingRequiredEvidence", str(raised.exception))
+
+    def test_cross_file_regression_evidence_flags_unchanged_reference_to_removed_symbol(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            src = repo / "src"
+            src.mkdir()
+            changed = src / "CampaignState.cs"
+            unchanged = src / "CampaignViewModel.cs"
+            changed.write_text("public class CampaignState { }\n", encoding="utf-8")
+            unchanged.write_text(
+                "if (campaign.RecoveredStaleActiveCampaign) { Continue(); }\n",
+                encoding="utf-8",
+            )
+            diff = (
+                "diff --git a/src/CampaignState.cs b/src/CampaignState.cs\n"
+                "--- a/src/CampaignState.cs\n"
+                "+++ b/src/CampaignState.cs\n"
+                "@@ -1 +1 @@\n"
+                "-public bool RecoveredStaleActiveCampaign { get; set; }\n"
+                "+public class CampaignState { }\n"
+            )
+
+            evidence = collect_cross_file_regression_evidence(
+                repo,
+                ["src/CampaignState.cs"],
+                diff,
+            )
+            prompt = build_semantic_prompt(
+                issue_text="# Issue",
+                synthesized_handoff="Handoff",
+                plan="Plan",
+                changed_files=["src/CampaignState.cs"],
+                diff=diff,
+                deterministic_evidence="checks passed",
+                cross_file_regression_evidence=evidence,
+            )
+
+        self.assertIn("RecoveredStaleActiveCampaign", evidence)
+        self.assertIn("src/CampaignViewModel.cs:1", evidence)
+        self.assertIn("potential blocking regression", evidence)
+        self.assertIn("src/CampaignViewModel.cs:1", prompt)
 
     def test_schema_retry_uses_verifier_again_and_records_separate_telemetry(self):
         provider = MockProvider(["not json", semantic_result()])

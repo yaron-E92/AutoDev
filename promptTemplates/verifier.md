@@ -41,6 +41,9 @@ Changed files:
 Deterministic verification evidence:
 {{DeterministicEvidence}}
 
+Cross-file regression evidence:
+{{CrossFileRegressionEvidence}}
+
 Relevant uncertainty or skipped-check notes:
 {{UncertaintyNotes}}
 
@@ -70,6 +73,7 @@ When semantic mode is active, return JSON only. Do not use Markdown fences or co
 Semantic rules:
 
 - A `pass` verdict is valid only when every requirement is `met` and no finding is `blocking`.
+- Explicitly check removed or changed public/cross-file symbols against references in unchanged files. A remaining unchanged reference is blocking unless supplied deterministic evidence proves it remains valid.
 - Warnings alone do not block.
 - Use `repair` only for a concrete issue that can be corrected with a targeted patch.
 - Use `blocked` when required evidence or a human decision is missing, or the outcome cannot be safely verified.
