@@ -246,6 +246,14 @@ class EvalHarnessTests(unittest.TestCase):
                 "minimality": {"files_changed": 1, "lines_added": 2, "lines_deleted": 1},
                 "reliability": {"provider_failures": []},
                 "efficiency": {"model_calls": 4, "reported_cost": eval_harness.UNKNOWN},
+                "reproducibility": {
+                    "provider_summary": {
+                        "roles": {
+                            "reader": {"transport": "command", "model": "model-a"},
+                            "implementer": {"transport": "command", "model": "model-b"},
+                        }
+                    }
+                },
             }
         ]
         cases = {"case": {"tags": ["python"]}}
@@ -254,10 +262,15 @@ class EvalHarnessTests(unittest.TestCase):
 
         self.assertEqual(aggregate["profiles"]["a"]["deterministic_passes"], 1)
         self.assertEqual(aggregate["tags"]["python"]["completed"], 1)
+        self.assertEqual(aggregate["provider_transports"]["command"]["runs"], 1)
+        self.assertEqual(aggregate["models"]["model-a"]["runs"], 1)
+        self.assertEqual(aggregate["models"]["model-b"]["runs"], 1)
         self.assertIn("Deterministic", report)
         self.assertIn("Semantic", report)
         self.assertIn("Files", report)
         self.assertIn("Calls", report)
+        self.assertIn("Aggregate by provider transport", report)
+        self.assertIn("Aggregate by model", report)
         self.assertIn("No opaque overall score", report)
 
     def test_parser_accepts_repeated_profile_selection(self):
