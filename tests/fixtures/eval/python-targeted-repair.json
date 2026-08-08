@@ -34,7 +34,7 @@
       "semantic_result": {"verdict": "pass", "requirements": [{"criterion": "Blank optional values do not raise", "status": "met", "evidence": ["automation/example.py"]}], "findings": [], "repair_brief": ""},
       "diff": "diff --git a/automation/example.py b/automation/example.py\nindex 1111111..2222222 100644\n--- a/automation/example.py\n+++ b/automation/example.py\n@@ -10,2 +10,3 @@\n def parse(value):\n+    if not value: return None\n     return value.strip()\n"
     },
-    "mixed-groq-openrouter": {
+    "mixed-groq-openrouter-semantic": {
       "case_version": 1,
       "autodev_commit": "replay-autodev-v1",
       "patch_applies_cleanly": true,
