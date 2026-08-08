@@ -1,0 +1,66 @@
+name: Verify issue 71 rename
+
+on:
+  push:
+    branches:
+      - autodev/issue-71-autodev-run
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - name: Compile Python
+        run: python -m compileall automation area_reader_v2 benchmarks tests
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -v
+      - name: Validate Bash
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' script; do bash -n "$script"; done < <(git ls-files -z -- '*.sh')
+      - name: Validate rename and hygiene
+        shell: bash
+        run: |
+          set -euo pipefail
+          unexpected="$(git grep -n -F '.codex-run' -- . ':(exclude)docs/run-real-issue.md' || true)"
+          if [[ -n "$unexpected" ]]; then
+            printf 'Unexpected legacy runtime path reference:\n%s\n' "$unexpected" >&2
+            exit 1
+          fi
+          grep -F '.codex-run' docs/run-real-issue.md >/dev/null
+          git grep -n -F '.autodev-run' -- . >/dev/null
+          mapfile -d '' forbidden < <(git ls-files -z | grep -zE '(^|/)(\.pytest_cache|__pycache__|\.autodev-run|\.benchmark-results)(/|$)|\.py[co]$' || true)
+          ((${#forbidden[@]} == 0))
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - name: Compile Python
+        run: python -m compileall automation area_reader_v2 benchmarks tests
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -v
+      - name: Validate PowerShell
+        shell: pwsh
+        run: |
+          $failed = $false
+          foreach ($file in @(git ls-files -- '*.ps1')) {
+              $tokens = $null
+              $errors = $null
+              [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path -LiteralPath $file).Path, [ref]$tokens, [ref]$errors) | Out-Null
+              if ($errors.Count -gt 0) {
+                  $errors | ForEach-Object { Write-Host "ERROR ${file}: $($_.Message)" }
+                  $failed = $true
+              }
+          }
+          if ($failed) { exit 1 }
