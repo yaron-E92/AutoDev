@@ -31,7 +31,7 @@
       "semantic_result": {"verdict": "pass", "requirements": [{"criterion": "Existing guard already satisfies the request", "status": "met", "evidence": ["verified existing behavior"]}], "findings": [], "repair_brief": ""},
       "diff": ""
     },
-    "mixed-groq-openrouter": {
+    "mixed-groq-openrouter-semantic": {
       "case_version": 1,
       "autodev_commit": "replay-autodev-v1",
       "patch_applies_cleanly": true,
