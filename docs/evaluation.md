@@ -7,7 +7,7 @@ The default path is replay-only and makes no provider calls:
 ```text
 python -m automation.eval_harness \
   --profile legacy-command \
-  --profile mixed-groq-openrouter
+  --profile mixed-groq-openrouter-semantic
 ```
 
 Results are written beneath the gitignored `.benchmark-results/` directory:
@@ -47,16 +47,23 @@ mixed-groq-openrouter-semantic
 mixed-groq-openrouter-semantic-headroom
 ```
 
-`mixed-groq-openrouter-ponytail` uses AutoDev's existing native Ponytail-derived default role policy. The mixed semantic profiles reuse the existing semantic-verifier configuration. The Headroom profile references the existing Headroom-enabled provider file.
+The mixed variants are intentionally distinct operational configurations:
+
+- `mixed-groq-openrouter`: native prompt policy disabled; semantic verification disabled;
+- `mixed-groq-openrouter-ponytail`: native Ponytail-derived prompt policy enabled; semantic verification disabled;
+- `mixed-groq-openrouter-semantic`: native prompt policy plus semantic verifier enabled;
+- `mixed-groq-openrouter-semantic-headroom`: the semantic profile with optional Headroom compression.
+
+This keeps profile comparisons honest instead of assigning different evaluation names to identical provider configuration.
 
 ## Cheap replay comparison
 
-Compare two recorded profiles across all replay cases:
+Compare the two checked-in recorded profiles across all replay cases:
 
 ```text
 python -m automation.eval_harness \
   --profile legacy-command \
-  --profile mixed-groq-openrouter
+  --profile mixed-groq-openrouter-semantic
 ```
 
 Select individual cases or tags with repeated flags:
@@ -64,12 +71,12 @@ Select individual cases or tags with repeated flags:
 ```text
 python -m automation.eval_harness \
   --profile legacy-command \
-  --profile mixed-groq-openrouter \
+  --profile mixed-groq-openrouter-semantic \
   --case python-targeted-repair \
   --tag python
 ```
 
-Replay mode reads only recorded artifact-shaped metadata, semantic results, run-manifest telemetry, diagnostics, and deterministic diffs. Raw model response text is not a scoring input.
+Replay mode reads only recorded artifact-shaped metadata, semantic results, run-manifest telemetry, diagnostics, and deterministic diffs. Raw model response text is not a scoring input. If a selected profile has no recording for a case, that profile/case result is `unavailable`; the harness does not borrow output from another configuration.
 
 ## Metrics
 
@@ -126,6 +133,8 @@ API keys, authorization headers, token values, passwords, cookies, and resolved 
 ## Comparability
 
 A replay is marked not directly comparable when its recorded case version, target SHA, or captured profile fingerprint does not match the selected inputs. Provider/model, prompt-policy, semantic, and Headroom settings remain visible in reproducibility metadata so a report does not hide which configuration actually produced a result.
+
+Aggregate output is grouped by profile and case tag. Per-result reproducibility metadata retains every role's provider transport and model, so provider/model differences remain explicit rather than being collapsed into one opaque score.
 
 Do not infer statistical significance from the three checked-in smoke cases. They exist to make regressions and obvious configuration differences repeatable.
 
@@ -221,11 +230,14 @@ Ollama account/plan availability remains an Ollama concern. The harness does not
 
 ## Groq/OpenRouter mixed-provider comparison
 
-Copy `examples/providers/groq-openrouter-free.json` if necessary and replace `REPLACE_WITH_OPENROUTER_MODEL:free` with the exact OpenRouter `:free` model to evaluate. Keep `free_only: true`.
+For live use, copy the exact mixed provider configuration you want to evaluate and replace `REPLACE_WITH_OPENROUTER_MODEL:free` with the exact OpenRouter `:free` model. Keep `free_only: true`, then point your local evaluation profile manifest at that copied provider file.
+
+For example, compare Groq-only against the plain mixed configuration:
 
 ```text
 python -m automation.eval_harness \
   --cases-file ./my-live-cases.json \
+  --profiles-file ./my-live-profiles.json \
   --profile groq-only \
   --profile mixed-groq-openrouter \
   --case my-live-case \
