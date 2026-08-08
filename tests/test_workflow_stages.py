@@ -79,6 +79,7 @@ class WorkflowStageTests(unittest.TestCase):
                     clear=False,
                 ),
                 patch("automation.workflow_stages.gh_json", side_effect=[issue, base_ref, base_commit]),
+                patch("automation.workflow_stages.validate_prepared_worktree", return_value="base-sha"),
                 patch("automation.workflow_stages.gh") as gh,
             ):
                 current = workflow_stages.ensure_prepared_issue(repo, "65", autodev_root=REPO_ROOT)
@@ -87,6 +88,9 @@ class WorkflowStageTests(unittest.TestCase):
             self.assertEqual(state["IssueNumber"], 65)
             self.assertEqual(state["BaseSha"], "base-sha")
             self.assertEqual(state["BaseTreeSha"], "tree-sha")
+            self.assertEqual(state["PreparedLocalHeadSha"], "base-sha")
+            self.assertEqual(state["VerificationProofVersion"], 1)
+            self.assertTrue(state["PreparedSnapshotHash"])
             self.assertEqual(state["LocalCheck"], "python -m unittest")
             self.assertEqual(state["Status"], "Prepared")
             self.assertTrue((current / "workspace-snapshot.json").is_file())
@@ -127,6 +131,27 @@ class WorkflowStageTests(unittest.TestCase):
             self.assertIn("base-sha", str(raised.exception))
             gh.assert_not_called()
             self.assertFalse((repo / ".codex-run" / "current" / "state.json").exists())
+
+    def test_prepare_rejects_stale_or_dirty_local_base(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+
+            def stale_runner(command, **kwargs):
+                return SimpleNamespace(returncode=0, stdout="stale-sha\n", stderr="")
+
+            with self.assertRaises(workflow_stages.WorkflowStageError) as stale:
+                workflow_stages.validate_prepared_worktree(repo, "base-sha", runner=stale_runner)
+            self.assertIn("does not match remote base", str(stale.exception))
+
+            def dirty_runner(command, **kwargs):
+                if command[1:3] == ["rev-parse", "HEAD"]:
+                    return SimpleNamespace(returncode=0, stdout="base-sha\n", stderr="")
+                return SimpleNamespace(returncode=0, stdout=" M src/Changed.cs\n?? .codex-run/current/state.json\n", stderr="")
+
+            with self.assertRaises(workflow_stages.WorkflowStageError) as dirty:
+                workflow_stages.validate_prepared_worktree(repo, "base-sha", runner=dirty_runner)
+            self.assertIn("src/Changed.cs", str(dirty.exception))
+            self.assertNotIn(".codex-run", str(dirty.exception))
 
     def test_prepare_reuses_matching_current_issue_without_github_mutation(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -272,6 +297,27 @@ class WorkflowStageTests(unittest.TestCase):
             diagnostics = json.loads((current / "run-diagnostics.json").read_text(encoding="utf-8"))
             self.assertEqual(diagnostics["stage_invocations"]["local-check"], 1)
             self.assertEqual(len(diagnostics["stage_wall_time_ms"]["local-check"]), 1)
+
+    def test_local_check_records_content_bound_source_identity(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            current = self._write_proof_state(repo, LocalCheck="check")
+            (repo / "source.txt").write_text("changed\n", encoding="utf-8")
+
+            passed = workflow_stages.run_local_check(
+                repo,
+                current,
+                workflow_stages.read_state(current),
+                REPO_ROOT,
+                runner=lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout="ok", stderr=""),
+            )
+
+            state = workflow_stages.read_state(current)
+            self.assertTrue(passed)
+            self.assertEqual(state["VerifiedParentSha"], "base-sha")
+            self.assertTrue(state["VerifiedSourceIdentity"])
+            self.assertEqual(state["VerifiedChanges"][0]["path"], "source.txt")
+            self.assertEqual(state["VerifiedChanges"][0]["status"], "modified")
 
     def test_semantic_stage_maps_pass_repair_blocked_and_exhaustion(self):
         repair = {
@@ -428,7 +474,104 @@ class WorkflowStageTests(unittest.TestCase):
             self.assertIn("base-sha", str(raised.exception))
             self.assertIn("malformed fixture", str(raised.exception))
 
+    def test_api_commit_refuses_source_drift_after_local_verification(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            current = self._write_proof_state(
+                repo,
+                RepoFullName="owner/repo",
+                BranchName="autodev/issue-69",
+                LocalCheck="check",
+            )
+            source = repo / "source.txt"
+            source.write_text("verified\n", encoding="utf-8")
+            workflow_stages.run_local_check(
+                repo,
+                current,
+                workflow_stages.read_state(current),
+                REPO_ROOT,
+                runner=lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout="ok", stderr=""),
+            )
+            source.write_text("drifted after verification\n", encoding="utf-8")
+            changes = workflow_stages.workspace_changes(repo, current, workflow_stages.read_state(current))
+
+            with self.assertRaises(workflow_stages.WorkflowStageError) as raised:
+                workflow_stages.create_api_commit(
+                    repo,
+                    workflow_stages.read_state(current),
+                    changes,
+                    current,
+                )
+
+            self.assertIn("no longer matches", str(raised.exception))
+
+    def test_api_commit_persists_verified_tree_parent_and_source_identity(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            current = self._write_proof_state(
+                repo,
+                RepoFullName="owner/repo",
+                BranchName="autodev/issue-69",
+                LocalCheck="check",
+            )
+            source = repo / "source.txt"
+            source.write_text("verified\n", encoding="utf-8")
+            workflow_stages.run_local_check(
+                repo,
+                current,
+                workflow_stages.read_state(current),
+                REPO_ROOT,
+                runner=lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout="ok", stderr=""),
+            )
+            state = workflow_stages.read_state(current)
+            changes = workflow_stages.workspace_changes(repo, current, state)
+
+            with (
+                patch(
+                    "automation.workflow_stages.gh_json",
+                    side_effect=[
+                        {"sha": "blob-sha"},
+                        {"sha": "tree-new"},
+                        {"sha": "commit-new"},
+                        {"tree": {"sha": "tree-new"}, "parents": [{"sha": "base-sha"}]},
+                    ],
+                ),
+                patch(
+                    "automation.workflow_stages.gh",
+                    side_effect=[
+                        SimpleNamespace(returncode=1, stdout="", stderr="not found"),
+                        SimpleNamespace(returncode=0, stdout="", stderr=""),
+                    ],
+                ),
+            ):
+                sha = workflow_stages.create_api_commit(repo, state, changes, current)
+
+            state = workflow_stages.read_state(current)
+            self.assertEqual(sha, "commit-new")
+            self.assertEqual(state["CreatedCommitSha"], "commit-new")
+            self.assertEqual(state["CreatedTreeSha"], "tree-new")
+            self.assertEqual(state["CreatedParentSha"], "base-sha")
+            self.assertEqual(state["ShippedSourceIdentity"], state["VerifiedSourceIdentity"])
+            self.assertTrue(state["ShippedTreeVerified"])
+
+    def test_repair_source_identity_uses_previous_autodev_commit_as_parent(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            current = self._write_proof_state(repo, LastCommitSha="commit-1")
+            snapshot = current / "last-commit-workspace-snapshot.json"
+            workflow_stages.write_workspace_snapshot(repo, snapshot)
+            state = workflow_stages.read_state(current)
+            state["LastCommitSnapshotHash"] = workflow_stages._file_sha256(snapshot)
+            workflow_stages.write_state(current, state)
+            (repo / "source.txt").write_text("repair\n", encoding="utf-8")
+
+            proof = workflow_stages.source_identity(repo, current, workflow_stages.read_state(current))
+
+            self.assertEqual(proof["parent_sha"], "commit-1")
+            self.assertTrue(proof["changes"])
+
     def test_pr_and_ci_reuses_existing_pr_and_records_api_commit(self):
+        ci_success = self._ci_success("commit-sha")
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
             current = self._write_state(
@@ -451,7 +594,8 @@ class WorkflowStageTests(unittest.TestCase):
 
             with (
                 patch("automation.workflow_stages.create_api_commit", return_value="commit-sha") as create_commit,
-                patch("automation.workflow_stages.wait_for_required_checks", return_value=[]),
+                patch("automation.workflow_stages.ensure_pr"),
+                patch("automation.workflow_stages.wait_for_required_checks", return_value=ci_success),
                 patch("automation.workflow_stages.render_legacy_verifier") as render_verifier,
             ):
                 passed = workflow_stages.pr_and_ci(
@@ -468,9 +612,11 @@ class WorkflowStageTests(unittest.TestCase):
             self.assertEqual(state["LastCommitSha"], "commit-sha")
             self.assertEqual(state["PrUrl"], "https://example.test/pr/1")
             self.assertEqual(state["Status"], "CiPassedVerifierPromptRendered")
+            self.assertEqual(state["CiProof"]["state"], "terminal-success")
             self.assertTrue((current / "last-commit-workspace-snapshot.json").is_file())
 
     def test_pr_and_ci_mocked_commit_to_new_pr_path(self):
+        ci_success = self._ci_success("commit-sha")
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
             current = self._write_state(
@@ -497,7 +643,7 @@ class WorkflowStageTests(unittest.TestCase):
             with (
                 patch("automation.workflow_stages.create_api_commit", return_value="commit-sha"),
                 patch("automation.workflow_stages.ensure_pr", side_effect=create_pr) as ensure_pr,
-                patch("automation.workflow_stages.wait_for_required_checks", return_value=[]),
+                patch("automation.workflow_stages.wait_for_required_checks", return_value=ci_success),
                 patch("automation.workflow_stages.render_legacy_verifier"),
             ):
                 passed = workflow_stages.pr_and_ci(
@@ -513,15 +659,57 @@ class WorkflowStageTests(unittest.TestCase):
             self.assertEqual(state["LastCommitSha"], "commit-sha")
             self.assertEqual(state["PrNumber"], 67)
 
-    def test_ensure_pr_does_not_create_duplicate_pr(self):
+    def test_ensure_pr_reuses_existing_pr_without_creating_duplicate(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
-            current = self._write_state(repo, PrUrl="https://example.test/pr/1", PrNumber=1)
+            current = self._write_state(repo, RepoFullName="owner/repo", PrUrl="https://example.test/pr/1", PrNumber=1)
+            with (
+                patch("automation.workflow_stages.gh", side_effect=AssertionError("pr create must not run")),
+                patch("automation.workflow_stages.gh_json", return_value={"number": 1, "headRefOid": "head"}) as view,
+            ):
+                workflow_stages.ensure_pr(repo, current, workflow_stages.read_state(current))
+            view.assert_called_once()
 
-            def runner(*args, **kwargs):
-                self.fail("gh must not run when the PR is already recorded")
+    def test_ci_empty_or_pending_is_never_success(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            self._write_state(repo, RepoFullName="owner/repo", PrNumber=1, LastCommitSha="head")
+            with (
+                patch.dict(os.environ, {"CI_CHECK_POLL_ATTEMPTS": "1", "CI_CHECK_POLL_SECONDS": "0"}, clear=False),
+                patch("automation.workflow_stages._pr_head_sha", return_value="head"),
+                patch("automation.workflow_stages._query_pr_checks", return_value=[]),
+            ):
+                with self.assertRaises(workflow_stages.WorkflowStageError) as empty:
+                    workflow_stages.wait_for_required_checks(repo, workflow_stages.read_state(repo / ".codex-run" / "current"))
+            self.assertEqual(empty.exception.classification, workflow_stages.FAILURE_TRANSIENT)
 
-            workflow_stages.ensure_pr(repo, current, workflow_stages.read_state(current), runner=runner)
+            pending = [{"name": "build", "bucket": "pending", "state": "IN_PROGRESS"}]
+            with (
+                patch.dict(os.environ, {"CI_CHECK_POLL_ATTEMPTS": "1", "CI_CHECK_POLL_SECONDS": "0"}, clear=False),
+                patch("automation.workflow_stages._pr_head_sha", return_value="head"),
+                patch("automation.workflow_stages._query_pr_checks", return_value=pending),
+            ):
+                with self.assertRaises(workflow_stages.WorkflowStageError):
+                    workflow_stages.wait_for_required_checks(repo, workflow_stages.read_state(repo / ".codex-run" / "current"))
+
+    def test_ci_rejects_old_pr_head_and_accepts_terminal_current_head(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            current = self._write_state(repo, RepoFullName="owner/repo", PrNumber=1, LastCommitSha="head-new")
+            with patch("automation.workflow_stages._pr_head_sha", return_value="head-old"):
+                with self.assertRaises(workflow_stages.WorkflowStageError) as old:
+                    workflow_stages.wait_for_required_checks(repo, workflow_stages.read_state(current))
+            self.assertIn("head-old", str(old.exception))
+
+            checks = [{"name": "build", "bucket": "pass", "state": "SUCCESS"}]
+            with (
+                patch("automation.workflow_stages._pr_head_sha", return_value="head-new"),
+                patch("automation.workflow_stages._query_pr_checks", return_value=checks),
+            ):
+                proof = workflow_stages.wait_for_required_checks(repo, workflow_stages.read_state(current))
+            self.assertEqual(proof["state"], "terminal-success")
+            self.assertEqual(proof["head_sha"], "head-new")
+            self.assertEqual(proof["checks"], checks)
 
     def test_ci_failure_renders_repair_and_coordinator_maps_exhaustion(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -539,6 +727,45 @@ class WorkflowStageTests(unittest.TestCase):
             self.assertEqual(repair["state"], "REPAIR")
             self.assertEqual(repair["failure_classification"], workflow_stages.FAILURE_CODE_REPAIRABLE)
             self.assertEqual(blocked["state"], "BLOCKED")
+
+    def test_ready_requires_durable_shipped_tree_and_terminal_ci_proof(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            current = self._write_state(
+                repo,
+                VerificationProofVersion=1,
+                OpenCodeProtocolVersion=1,
+                RepoFullName="owner/repo",
+                LastCommitSha="commit",
+                CreatedCommitSha="commit",
+                CreatedTreeSha="tree",
+                CreatedParentSha="parent",
+                VerifiedParentSha="parent",
+                VerifiedSourceIdentity="identity",
+                ShippedSourceIdentity="identity",
+                ShippedTreeVerified=True,
+                LastLocalCheckPassed=True,
+                LastSemanticVerdict="pass",
+                SemanticSourceIdentity="identity",
+                PrUrl="https://example.test/pr/1",
+                PrNumber=1,
+                CiProof={"head_sha": "commit", "state": "not-observed", "checks": []},
+            )
+            with self.assertRaises(workflow_stages.WorkflowStageError) as missing_ci:
+                workflow_stages.validate_ready_proof(current, workflow_stages.read_state(current))
+            self.assertIn("CI", str(missing_ci.exception))
+
+            state = workflow_stages.read_state(current)
+            state["CiProof"] = self._ci_success("commit")
+            workflow_stages.write_state(current, state)
+            with (
+                patch("automation.workflow_stages._pr_head_sha", return_value="commit"),
+                patch(
+                    "automation.workflow_stages.gh_json",
+                    return_value={"tree": {"sha": "tree"}, "parents": [{"sha": "parent"}]},
+                ),
+            ):
+                workflow_stages.validate_ready_proof(current, workflow_stages.read_state(current))
 
     def test_ready_and_blocked_reuse_existing_issue_state_contract(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -579,13 +806,42 @@ class WorkflowStageTests(unittest.TestCase):
             (repo / "obj" / "generated.txt").write_text("ignored\n", encoding="utf-8")
             (repo / ".codex-run").mkdir()
             (repo / ".codex-run" / "state.txt").write_text("ignored\n", encoding="utf-8")
+            (repo / ".opencode").mkdir()
+            (repo / ".opencode" / "autodev.json").write_text("{}\n", encoding="utf-8")
 
             snapshot = workflow_stages.workspace_snapshot(repo)
 
             self.assertIn("src/file.txt", snapshot)
             self.assertNotIn("obj/generated.txt", snapshot)
             self.assertNotIn(".codex-run/state.txt", snapshot)
+            self.assertNotIn(".opencode/autodev.json", snapshot)
             self.assertTrue(all("\\" not in path for path in snapshot))
+
+    def _write_proof_state(self, repo: Path, **overrides):
+        source = repo / "source.txt"
+        source.write_text("base\n", encoding="utf-8")
+        current = self._write_state(
+            repo,
+            VerificationProofVersion=1,
+            BaseSha="base-sha",
+            BaseTreeSha="base-tree",
+            **overrides,
+        )
+        snapshot = current / "workspace-snapshot.json"
+        workflow_stages.write_workspace_snapshot(repo, snapshot)
+        state = workflow_stages.read_state(current)
+        state["PreparedSnapshotHash"] = workflow_stages._file_sha256(snapshot)
+        workflow_stages.write_state(current, state)
+        return current
+
+    def _ci_success(self, head):
+        return {
+            "head_sha": head,
+            "state": "terminal-success",
+            "checks": [{"name": "build", "bucket": "pass", "state": "SUCCESS"}],
+            "polls": 1,
+            "required_only": True,
+        }
 
     def _write_state(self, repo: Path, **overrides):
         current = repo / ".codex-run" / "current"
