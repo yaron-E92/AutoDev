@@ -1,0 +1,100 @@
+name: Apply issue 71 runtime rename
+
+on:
+  push:
+    branches:
+      - autodev/issue-71-autodev-run
+
+permissions:
+  contents: write
+
+jobs:
+  rename:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Rename AutoDev runtime directory references
+        shell: python
+        run: |
+          import pathlib
+          import subprocess
+
+          old = b".codex-run"
+          new = b".autodev-run"
+          paths = subprocess.check_output(["git", "ls-files", "-z"]).split(b"\0")
+          changed = []
+          for raw in paths:
+              if not raw:
+                  continue
+              path = pathlib.Path(raw.decode("utf-8"))
+              data = path.read_bytes()
+              if old not in data:
+                  continue
+              path.write_bytes(data.replace(old, new))
+              changed.append(path.as_posix())
+
+          # Some files already listed both names before this rename. Keep only the
+          # single canonical generated-artifact entry/pattern after replacement.
+          gitignore = pathlib.Path(".gitignore")
+          if gitignore.is_file():
+              lines = gitignore.read_text(encoding="utf-8").splitlines()
+              output = []
+              seen_autodev_run = False
+              for line in lines:
+                  if line == ".autodev-run/":
+                      if seen_autodev_run:
+                          continue
+                      seen_autodev_run = True
+                  output.append(line)
+              gitignore.write_text("\n".join(output) + "\n", encoding="utf-8")
+
+          ci = pathlib.Path(".github/workflows/ci.yml")
+          if ci.is_file():
+              text = ci.read_text(encoding="utf-8")
+              text = text.replace("\\.autodev-run|\\.autodev-run", "\\.autodev-run")
+              ci.write_text(text, encoding="utf-8")
+
+          # #71 intentionally does not migrate old runs. Leave exactly one
+          # compatibility/history reference explaining the manual rename.
+          docs = pathlib.Path("docs/run-real-issue.md")
+          note = (
+              "\n> Compatibility note: runs created by older AutoDev versions under "
+              "`.codex-run` are not migrated automatically. Rename that directory to "
+              "`.autodev-run` manually before resuming an old run.\n"
+          )
+          text = docs.read_text(encoding="utf-8")
+          if "runs created by older AutoDev versions under `.codex-run`" not in text:
+              docs.write_text(text.rstrip() + "\n" + note, encoding="utf-8")
+
+          # This workflow is a one-shot implementation aid, not part of #71.
+          pathlib.Path(".github/workflows/issue-71-runtime-rename.yml").unlink()
+
+          print(f"Renamed runtime path in {len(changed)} tracked files")
+          for path in changed:
+              print(path)
+
+      - name: Verify old path remains only in compatibility note
+        shell: bash
+        run: |
+          set -euo pipefail
+          unexpected="$(git grep -n -F '.codex-run' -- . ':(exclude)docs/run-real-issue.md' || true)"
+          if [[ -n "$unexpected" ]]; then
+            printf 'Unexpected legacy runtime path reference:\n%s\n' "$unexpected" >&2
+            exit 1
+          fi
+          grep -F '.codex-run' docs/run-real-issue.md >/dev/null
+          git grep -n -F '.autodev-run' -- . >/dev/null
+
+      - name: Commit rename
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "#71: rename runtime directory to .autodev-run"
+          git push origin HEAD:autodev/issue-71-autodev-run
