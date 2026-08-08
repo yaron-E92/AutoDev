@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "profiles": {
+    "legacy-command": {
+      "case_version": 1,
+      "autodev_commit": "replay-autodev-v1",
+      "patch_applies_cleanly": true,
+      "fallback_attempts": 0,
+      "resume_count": 0,
+      "run_manifest": {
+        "schema_version": 1,
+        "run_id": "python-legacy",
+        "target": {"repo_path": "/fixture/python", "github_repo": "fixture/python", "issue_number": 2, "mode": "implement", "base_sha": "fixture-python-v1", "branch": "autodev/python"},
+        "completed_stages": ["issue-selected", "repository-read", "handoff-synthesized", "plan-created", "implementation-generated", "patch-applied", "repair-generated", "deterministic-verified", "semantic-verified"],
+        "stages": {
+          "repair-generated": {"status": "completed", "details": {"kind": "deterministic", "attempt": 1}}
+        },
+        "roles": {},
+        "invocations": [
+          {"role": "reader", "transport": "command", "model": "autodev-reader", "status": "success", "retry_count": 0},
+          {"role": "synthesizer", "transport": "command", "model": "autodev-reader", "status": "success", "retry_count": 0},
+          {"role": "planner", "transport": "command", "model": "autodev-planner", "status": "success", "retry_count": 0},
+          {"role": "implementer", "transport": "command", "model": "autodev-implementer", "status": "success", "retry_count": 0},
+          {"role": "fixer", "transport": "command", "model": "autodev-fixer", "status": "success", "retry_count": 0},
+          {"role": "verifier", "transport": "command", "model": "autodev-verifier", "status": "success", "retry_count": 0}
+        ],
+        "failure": {},
+        "prompt_policy": {"source_version": "ponytail-v4.8.4"},
+        "semantic_verification": {"enabled": true},
+        "pr": {},
+        "invalidations": []
+      },
+      "run_diagnostics": {"stage_wall_time_ms": {"deterministic-verified": [700, 650], "semantic-verified": [800]}},
+      "semantic_result": {"verdict": "pass", "requirements": [{"criterion": "Blank optional values do not raise", "status": "met", "evidence": ["automation/example.py"]}], "findings": [], "repair_brief": ""},
+      "diff": "diff --git a/automation/example.py b/automation/example.py\nindex 1111111..2222222 100644\n--- a/automation/example.py\n+++ b/automation/example.py\n@@ -10,2 +10,3 @@\n def parse(value):\n+    if not value: return None\n     return value.strip()\n"
+    },
+    "mixed-groq-openrouter": {
+      "case_version": 1,
+      "autodev_commit": "replay-autodev-v1",
+      "patch_applies_cleanly": true,
+      "fallback_attempts": 0,
+      "resume_count": 0,
+      "run_manifest": {
+        "schema_version": 1,
+        "run_id": "python-mixed",
+        "target": {"repo_path": "/fixture/python", "github_repo": "fixture/python", "issue_number": 2, "mode": "implement", "base_sha": "fixture-python-v1", "branch": "autodev/python"},
+        "completed_stages": ["issue-selected", "repository-read", "handoff-synthesized", "plan-created", "implementation-generated", "patch-applied", "deterministic-verified", "semantic-verified"],
+        "stages": {},
+        "roles": {},
+        "invocations": [
+          {"role": "reader", "transport": "openai-compatible-chat-completions", "model": "openai/gpt-oss-20b", "status": "success", "retry_count": 0, "usage": {"total_tokens": 420}},
+          {"role": "synthesizer", "transport": "openai-compatible-chat-completions", "model": "openai/gpt-oss-20b", "status": "success", "retry_count": 0, "usage": {"total_tokens": 240}},
+          {"role": "planner", "transport": "openai-compatible-chat-completions", "model": "openai/gpt-oss-20b", "status": "success", "retry_count": 0, "usage": {"total_tokens": 330}},
+          {"role": "implementer", "transport": "openai-compatible-chat-completions", "model": "example/free:free", "status": "success", "retry_count": 0, "usage": {"total_tokens": 610}},
+          {"role": "verifier", "transport": "openai-compatible-chat-completions", "model": "openai/gpt-oss-20b", "status": "success", "retry_count": 0, "usage": {"total_tokens": 300}}
+        ],
+        "failure": {},
+        "prompt_policy": {"source_version": "ponytail-v4.8.4"},
+        "semantic_verification": {"enabled": true},
+        "pr": {},
+        "invalidations": []
+      },
+      "run_diagnostics": {"stage_wall_time_ms": {"deterministic-verified": [600], "semantic-verified": [650]}},
+      "semantic_result": {"verdict": "pass", "requirements": [{"criterion": "Blank optional values do not raise", "status": "met", "evidence": ["automation/example.py"]}], "findings": [], "repair_brief": ""},
+      "diff": "diff --git a/automation/example.py b/automation/example.py\nindex 1111111..2222222 100644\n--- a/automation/example.py\n+++ b/automation/example.py\n@@ -10,2 +10,3 @@\n def parse(value):\n+    if not value: return None\n     return value.strip()\n"
+    }
+  }
+}
