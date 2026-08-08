@@ -54,7 +54,13 @@ Do not invoke another custom command from this command. Use the Task tool only f
 
 For a normal `/autodev-issue-to-pr` request, start at section 1.
 
-For `/autodev-resume`, first run `python .opencode/autodev.py resume` with only any explicitly requested `--invalidate-role <role>` flags. The bridge validates the #37 manifest, repository/base/artifact/worktree state, #69 shipped-tree/CI proof when applicable, and current #66 role-model fingerprints. If it refuses resume, finish `FAILED` with that reason and do not restart from section 1.
+For `/autodev-resume`, first run the installed resume bridge with only any explicitly requested `--invalidate-role <role>` flags:
+
+```text
+python .opencode/autodev.py resume
+```
+
+Use `python3` instead where required. The bridge validates the #37 manifest, repository/base/artifact/worktree state, #69 shipped-tree/CI proof when applicable, and current #66 role-model fingerprints. If it refuses resume, finish `FAILED` with that reason and do not restart from section 1.
 
 On a successful resume, use only the returned durable `next_action` and repair counters:
 
