@@ -42,6 +42,31 @@ class WorkflowStageWrapperTests(unittest.TestCase):
                     20,
                 )
 
+    def test_provider_render_boundary_initializes_shared_shipment_proof(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            current = self._write_state(repo)
+            (repo / "source.txt").write_text("base\n", encoding="utf-8")
+            (current / "workspace-snapshot.json").write_text("{}\n", encoding="utf-8")
+
+            with patch(
+                "automation.workflow_stage_legacy.workflow_stages.validate_prepared_worktree",
+                return_value="base-sha",
+            ):
+                state = workflow_stage_legacy.initialize_shipment_proof(
+                    repo,
+                    current,
+                    workflow_stage_legacy.workflow_stages.read_state(current),
+                )
+
+            self.assertEqual(state["VerificationProofVersion"], 1)
+            self.assertEqual(state["PreparedLocalHeadSha"], "base-sha")
+            self.assertTrue(state["PreparedSnapshotHash"])
+            snapshot = workflow_stage_legacy.workflow_stages.read_json(
+                current / "workspace-snapshot.json"
+            )
+            self.assertIn("source.txt", snapshot)
+
     def test_finalize_scripts_are_thin_shared_python_delegates(self):
         windows = (REPO_ROOT / "windows" / "scripts" / "codex-finalize-current-issue.ps1").read_text(encoding="utf-8")
         linux = (REPO_ROOT / "linux" / "scripts" / "finalize-current-issue.sh").read_text(encoding="utf-8")
@@ -62,13 +87,14 @@ class WorkflowStageWrapperTests(unittest.TestCase):
         self.assertNotIn("gh issue edit", windows)
         self.assertNotIn("github_api", linux)
 
-    def _write_state(self, repo: Path) -> None:
+    def _write_state(self, repo: Path):
         current = repo / ".codex-run" / "current"
         current.mkdir(parents=True)
         (current / "state.json").write_text(
-            '{"IssueNumber":65,"Status":"Prepared","BranchName":"autodev/issue-65"}\n',
+            '{"IssueNumber":65,"Status":"Prepared","BranchName":"autodev/issue-65","BaseSha":"base-sha","BaseTreeSha":"base-tree"}\n',
             encoding="utf-8",
         )
+        return current
 
 
 if __name__ == "__main__":
