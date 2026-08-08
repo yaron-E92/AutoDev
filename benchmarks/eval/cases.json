@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "id": "docs-minimal-change",
+      "version": 1,
+      "title": "Small documentation-only correction",
+      "issue_text": "Update the usage guide with the missing status command example. Do not change runtime code.",
+      "base_commit": "fixture-docs-v1",
+      "tags": ["docs", "minimality"],
+      "source": {
+        "kind": "replay",
+        "replay_file": "../../tests/fixtures/eval/docs-minimal-change.json"
+      },
+      "expected": {
+        "relevant_areas": ["docs"],
+        "verification_commands": ["documentation-only"],
+        "changed_paths": ["docs/guide.md"],
+        "forbidden_paths": ["automation/**", "tests/**"],
+        "no_change": false
+      }
+    },
+    {
+      "id": "python-targeted-repair",
+      "version": 1,
+      "title": "Targeted Python bug repair",
+      "issue_text": "Fix the parser so blank optional values do not raise. Keep the change inside automation/example.py and preserve existing behavior otherwise.",
+      "base_commit": "fixture-python-v1",
+      "tags": ["python", "repair", "minimality"],
+      "source": {
+        "kind": "replay",
+        "replay_file": "../../tests/fixtures/eval/python-targeted-repair.json"
+      },
+      "expected": {
+        "relevant_areas": ["automation"],
+        "verification_commands": ["python -m unittest"],
+        "changed_paths": ["automation/example.py"],
+        "forbidden_paths": ["docs/**", "examples/providers/**"],
+        "no_change": false
+      }
+    },
+    {
+      "id": "no-change-correct",
+      "version": 1,
+      "title": "Already-satisfied issue",
+      "issue_text": "Confirm the requested guard already exists. If behavior is already satisfied, return no code changes.",
+      "base_commit": "fixture-no-change-v1",
+      "tags": ["no-change", "verification", "safeguard"],
+      "source": {
+        "kind": "replay",
+        "replay_file": "../../tests/fixtures/eval/no-change-correct.json"
+      },
+      "expected": {
+        "relevant_areas": ["automation"],
+        "verification_commands": ["python -m unittest"],
+        "changed_paths": [],
+        "forbidden_paths": ["**"],
+        "no_change": true
+      }
+    }
+  ]
+}
