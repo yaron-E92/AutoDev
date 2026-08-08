@@ -9,6 +9,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
@@ -24,6 +25,7 @@ from automation.semantic_verifier import (
 
 AUTODEV_ROOT = Path(__file__).resolve().parents[1]
 CURRENT_DIR = Path(".codex-run") / "current"
+DIAGNOSTICS_FILE = "run-diagnostics.json"
 STAGES = (
     "preflight",
     "prepare",
@@ -38,6 +40,9 @@ STAGES = (
 )
 DEFAULT_MAX_REPAIR_ATTEMPTS = 3
 DEFAULT_MAX_SEMANTIC_REPAIR_ATTEMPTS = 1
+FAILURE_CODE_REPAIRABLE = "code-repairable"
+FAILURE_TRANSIENT = "transient/retryable-infrastructure"
+FAILURE_DETERMINISTIC = "non-retryable-deterministic"
 IGNORED_PREFIXES = (
     ".git/",
     ".codex-run/",
@@ -57,7 +62,14 @@ IGNORED_PREFIXES = (
 
 
 class WorkflowStageError(RuntimeError):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        classification: str = FAILURE_DETERMINISTIC,
+    ) -> None:
+        super().__init__(message)
+        self.classification = classification
 
 
 def issue_number_from_arguments(arguments: str) -> int:
@@ -77,6 +89,41 @@ def execute_stage(
     which: Callable[[str], str | None] = shutil.which,
 ) -> tuple[int, dict[str, object]]:
     repo = repo.expanduser().resolve()
+    started = time.monotonic()
+    invocation_recorded = _record_stage_invocation(repo, name)
+    try:
+        repeated = _repeat_failure_payload(repo, name)
+        if repeated is not None:
+            return repeated
+        code, payload = _execute_stage_impl(
+            name,
+            repo,
+            arguments=arguments,
+            autodev_root=autodev_root,
+            attempt=attempt,
+            reason=reason,
+            runner=runner,
+            which=which,
+        )
+        payload["stage_elapsed_ms"] = int((time.monotonic() - started) * 1000)
+        return code, payload
+    finally:
+        if not invocation_recorded:
+            _record_stage_invocation(repo, name)
+        _record_stage_timing(repo, name, int((time.monotonic() - started) * 1000))
+
+
+def _execute_stage_impl(
+    name: str,
+    repo: Path,
+    *,
+    arguments: str,
+    autodev_root: Path,
+    attempt: int,
+    reason: str,
+    runner: Callable[..., object],
+    which: Callable[[str], str | None],
+) -> tuple[int, dict[str, object]]:
     autodev_root = autodev_root.expanduser().resolve()
     if name not in STAGES:
         raise WorkflowStageError(f"unsupported workflow stage: {name}")
@@ -119,22 +166,25 @@ def execute_stage(
             "FAILED",
             name,
             reason=reason or "OpenCode coordinator failed",
+            failure_classification=FAILURE_DETERMINISTIC,
             next_action="inspect the failure artifacts, correct the setup/provider/subagent failure, then restart intentionally",
         )
 
     state = read_state(current)
 
     if name == "render-implementer":
+        _require_accepted_role(current, state, "planner", "plan.md")
         render_implementer_prompt(repo, current, state, autodev_root)
         return 0, stage_payload(
             repo,
             "CONTINUE",
             name,
             artifact=current / "implementer.md",
-            next_action="delegate to autodev-implementer",
+            next_action="delegate to autodev-implementer; implementer.md is already rendered and must not be prepared again",
         )
 
     if name == "local-check":
+        _require_accepted_role(current, state, "implementer", "commit-message.txt")
         max_attempts = configured_attempt_limit(
             "MAX_REPAIR_ATTEMPTS",
             DEFAULT_MAX_REPAIR_ATTEMPTS,
@@ -155,6 +205,7 @@ def execute_stage(
                 name,
                 reason="deterministic repair-attempt limit exhausted",
                 artifact=current / "local-repair.md",
+                failure_classification=FAILURE_DETERMINISTIC,
                 next_action="mark the run blocked",
                 max_repair_attempts=max_attempts,
             )
@@ -164,6 +215,7 @@ def execute_stage(
             name,
             reason="deterministic verification failed",
             artifact=current / "local-repair.md",
+            failure_classification=FAILURE_CODE_REPAIRABLE,
             next_action="delegate the local repair to autodev-fixer, increment the attempt, then rerun local-check",
             max_repair_attempts=max_attempts,
         )
@@ -174,12 +226,20 @@ def execute_stage(
             DEFAULT_MAX_SEMANTIC_REPAIR_ATTEMPTS,
         )
         result_path = current / "verification-result.json"
+        if not result_path.is_file() or not read_text(result_path).strip():
+            raise WorkflowStageError(
+                "semantic prerequisite not met: .codex-run/current/verification-result.json is missing; "
+                "run the verifier role and accept its result before the semantic stage"
+            )
+        _require_accepted_role(current, state, "verifier", "verification-result.json")
         issue_text = read_text(current / "issue.md") or str(state.get("IssueText", ""))
         result = parse_semantic_output(
             read_text(result_path),
             expected_criteria=extract_acceptance_criteria(issue_text) or None,
         )
         verdict = str(result["verdict"])
+        state["LastSemanticVerdict"] = verdict
+        write_state(current, state)
         if verdict == "pass":
             return 0, stage_payload(
                 repo,
@@ -195,6 +255,7 @@ def execute_stage(
                 name,
                 reason="semantic verifier blocked the run",
                 artifact=result_path,
+                failure_classification=FAILURE_DETERMINISTIC,
                 next_action="mark the run blocked",
                 max_semantic_repair_attempts=max_attempts,
             )
@@ -205,6 +266,7 @@ def execute_stage(
                 name,
                 reason="semantic repair-attempt limit exhausted",
                 artifact=result_path,
+                failure_classification=FAILURE_DETERMINISTIC,
                 next_action="mark the run blocked",
                 max_semantic_repair_attempts=max_attempts,
             )
@@ -221,11 +283,21 @@ def execute_stage(
             name,
             reason=str(result.get("repair_brief", "semantic repair requested")),
             artifact=repair_path,
+            failure_classification=FAILURE_CODE_REPAIRABLE,
             next_action="delegate the semantic repair to autodev-fixer, increment the attempt, rerun local-check, then rerun autodev-verifier",
             max_semantic_repair_attempts=max_attempts,
         )
 
     if name == "pr-and-ci":
+        if state.get("OpenCodeProtocolVersion"):
+            if not bool(state.get("LastLocalCheckPassed")):
+                raise WorkflowStageError(
+                    "pr-and-ci prerequisite not met: deterministic local verification has not passed"
+                )
+            if str(state.get("LastSemanticVerdict", "")) != "pass":
+                raise WorkflowStageError(
+                    "pr-and-ci prerequisite not met: semantic verification has not produced an accepted pass verdict"
+                )
         max_attempts = configured_attempt_limit(
             "MAX_REPAIR_ATTEMPTS",
             DEFAULT_MAX_REPAIR_ATTEMPTS,
@@ -246,6 +318,7 @@ def execute_stage(
                 name,
                 reason="CI repair-attempt limit exhausted",
                 artifact=current / "ci-repair.md",
+                failure_classification=FAILURE_DETERMINISTIC,
                 next_action="mark the run blocked",
                 max_repair_attempts=max_attempts,
             )
@@ -255,6 +328,7 @@ def execute_stage(
             name,
             reason="required PR checks failed",
             artifact=current / "ci-repair.md",
+            failure_classification=FAILURE_CODE_REPAIRABLE,
             next_action="delegate the CI repair to autodev-fixer, increment the attempt, rerun local-check and semantic verification, then retry pr-and-ci",
             max_repair_attempts=max_attempts,
         )
@@ -277,6 +351,7 @@ def execute_stage(
             "BLOCKED",
             name,
             reason=reason,
+            failure_classification=FAILURE_DETERMINISTIC,
             next_action="inspect the current AutoDev artifacts and intervene manually",
         )
 
@@ -322,21 +397,23 @@ def ensure_prepared_issue(
         for item in issue.get("labels", [])
         if isinstance(item, dict) and str(item.get("name", "")).strip()
     ]
-    gh(
-        repo,
-        ["issue", "edit", str(requested_issue), "--repo", repo_full, "--add-label", "autodev:running"],
-        runner=runner,
-    )
 
     base = os.environ.get("BASE_BRANCH", "main").strip() or "main"
     remote = os.environ.get("REMOTE_NAME", "origin").strip() or "origin"
     base_ref = gh_json(repo, ["api", f"repos/{repo_full}/git/ref/heads/{base}"], runner=runner)
-    base_sha = str(base_ref.get("object", {}).get("sha", "")) if isinstance(base_ref.get("object"), dict) else ""
+    base_object = base_ref.get("object", {})
+    base_sha = str(base_object.get("sha", "")) if isinstance(base_object, dict) else ""
     if not base_sha:
-        raise WorkflowStageError(f"could not resolve base branch {base}")
+        raise WorkflowStageError(
+            f"could not resolve prepared base branch {base}; GitHub response: {_json_evidence(base_ref)}"
+        )
     base_commit = gh_json(repo, ["api", f"repos/{repo_full}/git/commits/{base_sha}"], runner=runner)
     tree = base_commit.get("tree", {})
     base_tree_sha = str(tree.get("sha", "")) if isinstance(tree, dict) else ""
+    if not base_tree_sha:
+        raise WorkflowStageError(
+            f"prepared base commit {base_sha} did not contain tree.sha; GitHub response: {_json_evidence(base_commit)}"
+        )
 
     profiles_path = Path(os.environ.get("PROFILES_PATH", str(autodev_root / "codex-profiles.json"))).expanduser()
     profiles_csv, local_check, stack_context = resolve_profiles(
@@ -346,6 +423,12 @@ def ensure_prepared_issue(
         explicit_local_check=os.environ.get("LOCAL_CHECK", ""),
         explicit_stack_context=os.environ.get("STACK_CONTEXT", ""),
         autodev_root=autodev_root,
+    )
+
+    gh(
+        repo,
+        ["issue", "edit", str(requested_issue), "--repo", repo_full, "--add-label", "autodev:running"],
+        runner=runner,
     )
 
     current.parent.mkdir(parents=True, exist_ok=True)
@@ -519,15 +602,15 @@ def run_local_check(
     command = str(state.get("LocalCheck", "")).strip()
     if not command:
         raise WorkflowStageError("state.json has no LocalCheck command")
-    completed = runner(
+    completed = _run_captured(
+        runner,
         command,
         cwd=repo,
         shell=True,
-        text=True,
-        capture_output=True,
-        check=False,
     )
-    output = ((getattr(completed, "stdout", "") or "") + (getattr(completed, "stderr", "") or ""))
+    output = _decoded_text(getattr(completed, "stdout", "")) + _decoded_text(
+        getattr(completed, "stderr", "")
+    )
     write_text(current / "local-check.log", output)
     if int(getattr(completed, "returncode", 1)) == 0:
         state["Status"] = "LocalCheckPassed"
@@ -600,17 +683,27 @@ def create_api_commit(
 ) -> str:
     repo_full = str(state.get("RepoFullName", ""))
     branch = str(state.get("BranchName", ""))
-    parent = str(state.get("LastCommitSha", "")).strip() or str(state.get("BaseSha", ""))
+    base_sha = str(state.get("BaseSha", "")).strip()
+    parent = str(state.get("LastCommitSha", "")).strip() or base_sha
     if not repo_full or not branch or not parent:
         raise WorkflowStageError("state.json is missing repository/branch/base commit information")
-    if parent == str(state.get("BaseSha", "")) and str(state.get("BaseTreeSha", "")).strip():
-        base_tree = str(state["BaseTreeSha"])
-    else:
+
+    base_tree = ""
+    if parent == base_sha:
+        base_tree = str(state.get("BaseTreeSha", "")).strip()
+    if not base_tree:
         parent_commit = gh_json(repo, ["api", f"repos/{repo_full}/git/commits/{parent}"], runner=runner)
         tree = parent_commit.get("tree", {})
         base_tree = str(tree.get("sha", "")) if isinstance(tree, dict) else ""
+        if not base_tree:
+            raise WorkflowStageError(
+                f"could not resolve base tree for API commit parent {parent}; GitHub response: {_json_evidence(parent_commit)}"
+            )
+        if parent == base_sha:
+            state["BaseTreeSha"] = base_tree
+            write_state(current, state)
     if not base_tree:
-        raise WorkflowStageError("could not resolve base tree for API commit")
+        raise WorkflowStageError(f"could not resolve base tree for API commit parent {parent}")
 
     tree_items: list[dict[str, object]] = []
     for change in changes:
@@ -634,7 +727,9 @@ def create_api_commit(
         )
         blob_sha = str(blob.get("sha", ""))
         if not blob_sha:
-            raise WorkflowStageError(f"GitHub API did not return a blob SHA for {relative}")
+            raise WorkflowStageError(
+                f"GitHub API did not return a blob SHA for {relative}; response: {_json_evidence(blob)}"
+            )
         tree_items.append({"path": relative, "mode": "100644", "type": "blob", "sha": blob_sha})
 
     tree = gh_json(
@@ -645,7 +740,9 @@ def create_api_commit(
     )
     tree_sha = str(tree.get("sha", ""))
     if not tree_sha:
-        raise WorkflowStageError("GitHub API did not return a tree SHA")
+        raise WorkflowStageError(
+            f"GitHub API did not return a tree SHA; response: {_json_evidence(tree)}"
+        )
     message = commit_message(current, state)
     commit = gh_json(
         repo,
@@ -655,7 +752,9 @@ def create_api_commit(
     )
     sha = str(commit.get("sha", ""))
     if not sha:
-        raise WorkflowStageError("GitHub API did not return a commit SHA")
+        raise WorkflowStageError(
+            f"GitHub API did not return a commit SHA; response: {_json_evidence(commit)}"
+        )
 
     ref_path = f"heads/{branch}"
     existing = gh(repo, ["api", f"repos/{repo_full}/git/ref/{ref_path}"], runner=runner, check=False)
@@ -715,10 +814,12 @@ def ensure_pr(
         ],
         runner=runner,
     )
-    lines = [line.strip() for line in (getattr(completed, "stdout", "") or "").splitlines() if line.strip()]
+    lines = [line.strip() for line in _decoded_text(getattr(completed, "stdout", "")).splitlines() if line.strip()]
     url = lines[-1] if lines else ""
     if not url:
-        raise WorkflowStageError("gh pr create did not return a PR URL")
+        raise WorkflowStageError(
+            f"gh pr create did not return a PR URL: {_command_reason(completed)}"
+        )
     details = gh_json(repo, ["pr", "view", url, "--repo", repo_full, "--json", "number"], runner=runner)
     state["PrUrl"] = url
     state["PrNumber"] = int(details.get("number", 0) or 0)
@@ -747,18 +848,23 @@ def wait_for_required_checks(
         runner=runner,
         check=False,
     )
-    text = (getattr(completed, "stdout", "") or "").strip()
+    text = _decoded_text(getattr(completed, "stdout", "")).strip()
     if int(getattr(completed, "returncode", 1)) != 0 and not text:
-        stderr = (getattr(completed, "stderr", "") or "").casefold()
+        stderr = _decoded_text(getattr(completed, "stderr", "")).casefold()
         if "no checks" in stderr or "no required" in stderr:
             return []
-        raise WorkflowStageError(_command_reason(completed))
+        raise WorkflowStageError(
+            _command_reason(completed),
+            classification=_command_failure_classification(completed),
+        )
     if not text:
         return []
     try:
         value = json.loads(text)
     except json.JSONDecodeError as exc:
-        raise WorkflowStageError("gh pr checks returned invalid JSON") from exc
+        raise WorkflowStageError(
+            f"gh pr checks returned invalid JSON: {concise(text, 700)}"
+        ) from exc
     return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
 
 
@@ -787,7 +893,7 @@ def render_legacy_verifier(
     repo_full = str(state.get("RepoFullName", ""))
     pr_number = int(state.get("PrNumber", 0) or 0)
     completed = gh(repo, ["pr", "diff", str(pr_number), "--repo", repo_full], runner=runner, check=False)
-    diff = getattr(completed, "stdout", "") or ""
+    diff = _decoded_text(getattr(completed, "stdout", ""))
     prompt = render_template(
         read_text(autodev_root / "promptTemplates" / "verifier.md"),
         {
@@ -946,6 +1052,9 @@ def stage_payload(
     next_action: str = "",
     max_repair_attempts: int | None = None,
     max_semantic_repair_attempts: int | None = None,
+    failure_classification: str = "",
+    failure_fingerprint: str = "",
+    repeated_failure: bool = False,
 ) -> dict[str, object]:
     current = repo / CURRENT_DIR
     state_value = read_json(current / "state.json")
@@ -958,6 +1067,9 @@ def stage_payload(
         "failed_stage": stage if outcome in {"FAILED", "BLOCKED", "REPAIR"} else "",
         "stage": stage,
         "reason": concise(reason),
+        "failure_classification": failure_classification,
+        "failure_fingerprint": failure_fingerprint,
+        "repeated_failure": repeated_failure,
         "artifact_dir": str(current),
         "artifact": str(artifact) if artifact is not None else "",
         "repository_modified": repository_modified(repo, current, state),
@@ -966,11 +1078,61 @@ def stage_payload(
         "pr_url": str(state.get("PrUrl", "")),
         "next_action": next_action,
     }
+    diagnostics = read_json(current / DIAGNOSTICS_FILE)
+    if isinstance(diagnostics, dict):
+        payload["diagnostics"] = {
+            "role_invocations": diagnostics.get("role_invocations", {}),
+            "protocol_correction_attempts": diagnostics.get("protocol_correction_attempts", {}),
+            "stage_invocations": diagnostics.get("stage_invocations", {}),
+            "repeated_identical_failures": diagnostics.get("repeated_identical_failures", 0),
+            "stage_wall_time_ms": diagnostics.get("stage_wall_time_ms", {}),
+        }
     if max_repair_attempts is not None:
         payload["max_repair_attempts"] = max_repair_attempts
     if max_semantic_repair_attempts is not None:
         payload["max_semantic_repair_attempts"] = max_semantic_repair_attempts
     return payload
+
+
+def record_stage_failure(
+    repo: Path,
+    stage: str,
+    error: BaseException,
+    *,
+    requested_issue: int = 0,
+    next_action: str = "correct the reported setup or deterministic stage failure before retrying",
+) -> dict[str, object]:
+    repo = repo.expanduser().resolve()
+    classification = _exception_classification(error)
+    reason = concise(str(error))
+    input_fingerprint = _stage_input_fingerprint(repo, stage)
+    fingerprint = hashlib.sha256(
+        f"{stage}|{classification}|{reason}|{input_fingerprint}".encode("utf-8", errors="replace")
+    ).hexdigest()
+    current = repo / CURRENT_DIR
+    if current.is_dir():
+        diagnostics = _diagnostics(current)
+        failures = diagnostics.setdefault("failure_fingerprints", {})
+        if isinstance(failures, dict):
+            failures[fingerprint] = int(failures.get(fingerprint, 0) or 0) + 1
+        diagnostics["last_failure"] = {
+            "stage": stage,
+            "classification": classification,
+            "reason": reason,
+            "fingerprint": fingerprint,
+            "input_fingerprint": input_fingerprint,
+        }
+        _write_diagnostics(current, diagnostics)
+    return stage_payload(
+        repo,
+        "FAILED",
+        stage,
+        reason=reason,
+        requested_issue=requested_issue,
+        next_action=next_action,
+        failure_classification=classification,
+        failure_fingerprint=fingerprint,
+    )
 
 
 def repository_modified(repo: Path, current: Path, state: dict[str, object]) -> bool:
@@ -1016,17 +1178,18 @@ def gh(
     runner: Callable[..., object] = subprocess.run,
     check: bool = True,
 ):
-    completed = runner(
+    completed = _run_captured(
+        runner,
         ["gh", *arguments],
         cwd=repo,
-        text=True,
-        capture_output=True,
-        input=input_text,
-        check=False,
+        input_text=input_text,
         env=_gh_environment(),
     )
     if check and int(getattr(completed, "returncode", 1)) != 0:
-        raise WorkflowStageError(_command_reason(completed))
+        raise WorkflowStageError(
+            _command_reason(completed),
+            classification=_command_failure_classification(completed),
+        )
     return completed
 
 
@@ -1038,14 +1201,52 @@ def gh_json(
     runner: Callable[..., object] = subprocess.run,
 ) -> dict[str, object]:
     completed = gh(repo, arguments, input_text=input_text, runner=runner)
-    text = (getattr(completed, "stdout", "") or "").strip()
+    text = _decoded_text(getattr(completed, "stdout", "")).strip()
     try:
         value = json.loads(text or "{}")
     except json.JSONDecodeError as exc:
-        raise WorkflowStageError("gh returned invalid JSON") from exc
+        raise WorkflowStageError(
+            f"gh returned invalid JSON for {' '.join(arguments)}: {concise(text, 700)}"
+        ) from exc
     if not isinstance(value, dict):
-        raise WorkflowStageError("gh returned an unexpected JSON value")
+        raise WorkflowStageError(
+            f"gh returned an unexpected JSON value for {' '.join(arguments)}: {concise(text, 700)}"
+        )
     return value
+
+
+def _run_captured(
+    runner: Callable[..., object],
+    command: object,
+    *,
+    cwd: Path,
+    shell: bool = False,
+    input_text: str | None = None,
+    env: dict[str, str] | None = None,
+):
+    kwargs: dict[str, object] = {
+        "cwd": cwd,
+        "text": True,
+        "encoding": "utf-8",
+        "errors": "replace",
+        "capture_output": True,
+        "check": False,
+    }
+    if shell:
+        kwargs["shell"] = True
+    if input_text is not None:
+        kwargs["input"] = input_text
+    if env is not None:
+        kwargs["env"] = env
+    return runner(command, **kwargs)
+
+
+def _decoded_text(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value)
 
 
 def _gh_environment() -> dict[str, str]:
@@ -1055,10 +1256,197 @@ def _gh_environment() -> dict[str, str]:
 
 
 def _command_reason(completed: object) -> str:
-    stderr = getattr(completed, "stderr", "") or ""
-    stdout = getattr(completed, "stdout", "") or ""
+    stderr = _decoded_text(getattr(completed, "stderr", ""))
+    stdout = _decoded_text(getattr(completed, "stdout", ""))
     code = int(getattr(completed, "returncode", 1))
-    return concise((stderr or stdout or f"command exited with {code}").strip())
+    evidence = (stderr or stdout or "no command output").strip()
+    return concise(f"command exited with {code}: {evidence}")
+
+
+def _command_failure_classification(completed: object) -> str:
+    text = (
+        _decoded_text(getattr(completed, "stderr", ""))
+        + " "
+        + _decoded_text(getattr(completed, "stdout", ""))
+    ).casefold()
+    transient_markers = (
+        "timed out",
+        "timeout",
+        "temporarily unavailable",
+        "connection reset",
+        "connection refused",
+        "network",
+        "rate limit",
+        "http 429",
+        "http 500",
+        "http 502",
+        "http 503",
+        "http 504",
+    )
+    return FAILURE_TRANSIENT if any(marker in text for marker in transient_markers) else FAILURE_DETERMINISTIC
+
+
+def _exception_classification(error: BaseException) -> str:
+    classification = str(getattr(error, "classification", "") or "")
+    if classification in {FAILURE_CODE_REPAIRABLE, FAILURE_TRANSIENT, FAILURE_DETERMINISTIC}:
+        return classification
+    if classification in {"rate_limited", "timeout", "network_error", "provider_unavailable"}:
+        return FAILURE_TRANSIENT
+    return FAILURE_DETERMINISTIC
+
+
+def _require_accepted_role(
+    current: Path,
+    state: dict[str, object],
+    role: str,
+    artifact_name: str,
+) -> None:
+    if not state.get("OpenCodeProtocolVersion"):
+        return
+    accepted = state.get("AcceptedRoleArtifacts", {})
+    entry = accepted.get(role) if isinstance(accepted, dict) else None
+    if not isinstance(entry, dict):
+        raise WorkflowStageError(
+            f"stage prerequisite not met: OpenCode role {role} has not been accepted; "
+            f"accept {artifact_name} before continuing"
+        )
+    artifact = current / artifact_name
+    expected = str(entry.get("sha256", ""))
+    actual = _file_sha256(artifact)
+    if not expected or not actual or expected != actual:
+        raise WorkflowStageError(
+            f"stage prerequisite not met: accepted {role} artifact {artifact_name} is missing or changed; "
+            "rerun the role's exact accept command before continuing"
+        )
+
+
+def _repeat_failure_payload(repo: Path, stage: str) -> tuple[int, dict[str, object]] | None:
+    if stage in {"preflight", "prepare", "failed", "blocked", "ready", "status"}:
+        return None
+    current = repo / CURRENT_DIR
+    if not current.is_dir():
+        return None
+    diagnostics = _diagnostics(current)
+    last = diagnostics.get("last_failure", {})
+    if not isinstance(last, dict):
+        return None
+    if last.get("stage") != stage or last.get("classification") != FAILURE_DETERMINISTIC:
+        return None
+    current_input = _stage_input_fingerprint(repo, stage)
+    if not current_input or current_input != str(last.get("input_fingerprint", "")):
+        return None
+    diagnostics["repeated_identical_failures"] = int(
+        diagnostics.get("repeated_identical_failures", 0) or 0
+    ) + 1
+    fingerprint = str(last.get("fingerprint", ""))
+    _write_diagnostics(current, diagnostics)
+    return 1, stage_payload(
+        repo,
+        "FAILED",
+        stage,
+        reason=str(last.get("reason", "identical deterministic stage failure")),
+        failure_classification=FAILURE_DETERMINISTIC,
+        failure_fingerprint=fingerprint,
+        repeated_failure=True,
+        next_action="do not retry this stage unchanged; correct the deterministic workflow/setup state first",
+    )
+
+
+def _stage_input_fingerprint(repo: Path, stage: str) -> str:
+    current = repo / CURRENT_DIR
+    state_value = read_json(current / "state.json")
+    state = state_value if isinstance(state_value, dict) else {}
+    if not state and not current.exists():
+        return ""
+    state_keys = (
+        "IssueNumber",
+        "Status",
+        "BranchName",
+        "BaseSha",
+        "BaseTreeSha",
+        "LastCommitSha",
+        "PrUrl",
+        "PrNumber",
+        "LocalCheck",
+        "LastLocalCheckPassed",
+        "LastSemanticVerdict",
+        "OpenCodeProtocolVersion",
+    )
+    artifacts = {}
+    for name in (
+        "issue.md",
+        "plan.md",
+        "implementer.md",
+        "commit-message.txt",
+        "verification-result.json",
+        "local-repair.md",
+        "verification-repair.md",
+        "ci-repair.md",
+    ):
+        digest = _file_sha256(current / name)
+        if digest:
+            artifacts[name] = digest
+    payload = {
+        "stage": stage,
+        "state": {key: state.get(key) for key in state_keys},
+        "accepted_roles": state.get("AcceptedRoleArtifacts", {}),
+        "artifacts": artifacts,
+        "workspace": workspace_snapshot(repo) if repo.is_dir() else {},
+    }
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, default=str).encode("utf-8", errors="replace")
+    ).hexdigest()
+
+
+def _record_stage_invocation(repo: Path, stage: str) -> bool:
+    current = repo / CURRENT_DIR
+    if not current.is_dir():
+        return False
+    diagnostics = _diagnostics(current)
+    values = diagnostics.setdefault("stage_invocations", {})
+    if isinstance(values, dict):
+        values[stage] = int(values.get(stage, 0) or 0) + 1
+    _write_diagnostics(current, diagnostics)
+    return True
+
+
+def _record_stage_timing(repo: Path, stage: str, elapsed_ms: int) -> None:
+    current = repo / CURRENT_DIR
+    if not current.is_dir():
+        return
+    diagnostics = _diagnostics(current)
+    values = diagnostics.setdefault("stage_wall_time_ms", {})
+    if isinstance(values, dict):
+        entries = values.setdefault(stage, [])
+        if isinstance(entries, list):
+            entries.append(max(0, elapsed_ms))
+    _write_diagnostics(current, diagnostics)
+
+
+def _diagnostics(current: Path) -> dict[str, object]:
+    value = read_json(current / DIAGNOSTICS_FILE)
+    return value if isinstance(value, dict) else {}
+
+
+def _write_diagnostics(current: Path, diagnostics: dict[str, object]) -> None:
+    try:
+        write_json(current / DIAGNOSTICS_FILE, diagnostics)
+    except OSError:
+        pass
+
+
+def _file_sha256(path: Path) -> str:
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return ""
+
+
+def _json_evidence(value: object) -> str:
+    try:
+        return concise(json.dumps(value, ensure_ascii=False, sort_keys=True), 900)
+    except (TypeError, ValueError):
+        return concise(str(value), 900)
 
 
 def concise(value: str, limit: int = 1000) -> str:
@@ -1123,13 +1511,11 @@ def run(argv: list[str] | None = None) -> int:
             reason=args.reason,
         )
     except (WorkflowStageError, SemanticVerifierError, OSError, ValueError) as exc:
-        payload = stage_payload(
+        payload = record_stage_failure(
             repo,
-            "FAILED",
             args.stage,
-            reason=str(exc),
+            exc,
             requested_issue=issue_number_from_arguments(args.arguments),
-            next_action="correct the reported setup or stage failure before retrying",
         )
         print(json.dumps(payload, sort_keys=True))
         return 1
