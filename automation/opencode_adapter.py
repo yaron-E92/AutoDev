@@ -11,6 +11,7 @@ from pathlib import Path
 
 from area_reader_v2 import runner_core as area_reader_core
 from automation import run_real_issue_core as run_core
+from automation import workflow_stages
 from automation.model_output_sanitizer import sanitize_model_output
 from automation.model_providers import ProviderError, load_provider_config
 from automation.prompt_policies import compose_prompt, resolve_prompt_policies
@@ -21,6 +22,7 @@ from automation.semantic_verifier import (
     collect_changed_files,
     collect_current_diff,
     collect_deterministic_evidence,
+    extract_acceptance_criteria,
     parse_semantic_output,
     render_template,
     write_final_verdict,
@@ -31,6 +33,7 @@ from automation.semantic_verifier import (
 AUTODEV_ROOT = Path(__file__).resolve().parents[1]
 CURRENT_DIR = Path(".codex-run") / "current"
 COMMAND_FILES = (
+    "autodev-issue-to-pr.md",
     "autodev-read.md",
     "autodev-plan.md",
     "autodev-implement.md",
@@ -38,6 +41,7 @@ COMMAND_FILES = (
     "autodev-verify.md",
 )
 AGENT_FILES = (
+    "autodev-coordinator.md",
     "autodev-reader.md",
     "autodev-synthesizer.md",
     "autodev-planner.md",
@@ -45,8 +49,11 @@ AGENT_FILES = (
     "autodev-fixer.md",
     "autodev-verifier.md",
 )
+COORDINATOR_STAGES = workflow_stages.STAGES
 MAX_HANDOFF_CHARS = 30_000
 MAX_READER_BUNDLE_CHARS = 24_000
+DEFAULT_MAX_REPAIR_ATTEMPTS = workflow_stages.DEFAULT_MAX_REPAIR_ATTEMPTS
+DEFAULT_MAX_SEMANTIC_REPAIR_ATTEMPTS = workflow_stages.DEFAULT_MAX_SEMANTIC_REPAIR_ATTEMPTS
 
 
 class OpenCodeAdapterError(RuntimeError):
@@ -78,13 +85,14 @@ def install_assets(
             shutil.copyfile(source_file, target_file)
             installed.append(target_file)
 
-    wrapper_source = source / "autodev.ps1"
-    wrapper_target = target / "autodev.ps1"
-    if not wrapper_source.is_file():
-        raise OpenCodeAdapterError(f"missing canonical OpenCode bridge wrapper: {wrapper_source}")
     target.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(wrapper_source, wrapper_target)
-    installed.append(wrapper_target)
+    for wrapper_name in ("autodev.py", "autodev.ps1"):
+        wrapper_source = source / wrapper_name
+        if not wrapper_source.is_file():
+            raise OpenCodeAdapterError(f"missing canonical OpenCode bridge wrapper: {wrapper_source}")
+        wrapper_target = target / wrapper_name
+        shutil.copyfile(wrapper_source, wrapper_target)
+        installed.append(wrapper_target)
 
     config_path = target / "autodev.json"
     config_path.write_text(
@@ -105,8 +113,7 @@ def install_assets(
 
 
 def issue_number_from_arguments(arguments: str) -> int:
-    match = re.search(r"(?<!\d)#?(\d+)(?!\d)", arguments or "")
-    return int(match.group(1)) if match else 0
+    return workflow_stages.issue_number_from_arguments(arguments)
 
 
 def ensure_current_issue(
@@ -116,53 +123,15 @@ def ensure_current_issue(
     *,
     runner=subprocess.run,
 ) -> Path:
-    current = repo / CURRENT_DIR
-    requested_issue = issue_number_from_arguments(arguments)
-    state = _read_json(current / "state.json")
-    current_issue = int(state.get("IssueNumber", 0) or 0) if isinstance(state, dict) else 0
-    if current.is_dir() and (requested_issue == 0 or requested_issue == current_issue):
-        return current
-    if requested_issue == 0:
-        raise OpenCodeAdapterError(
-            "no prepared AutoDev issue is available; pass an issue number to the OpenCode command"
+    try:
+        return workflow_stages.ensure_prepared_issue(
+            repo.expanduser().resolve(),
+            arguments,
+            autodev_root=autodev_root.expanduser().resolve(),
+            runner=runner,
         )
-
-    workflow = autodev_root / "windows" / "scripts" / "issue-to-pr-cycle.ps1"
-    command = [
-        "pwsh",
-        "-NoProfile",
-        "-File",
-        str(workflow),
-        "-Mode",
-        "Prepare",
-        "-WorkingDirectory",
-        str(repo),
-        "-Issue",
-        str(requested_issue),
-        "-ForceCurrent",
-        "-PromptDir",
-        str(autodev_root / "promptTemplates"),
-        "-ProfilesPath",
-        str(autodev_root / "codex-profiles.json"),
-    ]
-    env = dict(os.environ)
-    for name in (
-        "PROVIDER_PROFILE",
-        "PLANNER_PROVIDER",
-        "PLANNER_MODEL",
-        "PLANNER_AGENT_COMMAND",
-        "AGENT_PROVIDER",
-        "AGENT_MODEL",
-    ):
-        env.pop(name, None)
-    completed = runner(command, cwd=repo, env=env, text=True, capture_output=True, check=False)
-    if completed.returncode != 0:
-        detail = (completed.stderr or completed.stdout or "Prepare failed.").strip()
-        raise OpenCodeAdapterError(f"AutoDev Prepare failed: {detail}")
-    state = _read_json(current / "state.json")
-    if not isinstance(state, dict) or int(state.get("IssueNumber", 0) or 0) != requested_issue:
-        raise OpenCodeAdapterError("AutoDev Prepare did not create the requested current issue state")
-    return current
+    except workflow_stages.WorkflowStageError as exc:
+        raise OpenCodeAdapterError(str(exc)) from exc
 
 
 def prepare_role(
@@ -190,7 +159,9 @@ def prepare_role(
             current,
             issue_text,
             str(state.get("LocalCheck", "")),
-            [str(value) for value in state.get("Labels", [])] if isinstance(state.get("Labels"), list) else [],
+            [str(value) for value in state.get("Labels", [])]
+            if isinstance(state.get("Labels"), list)
+            else [],
             str(state.get("StackContext", "")),
         )
         path = current / "planner.md"
@@ -269,10 +240,14 @@ def accept_role(role: str, repo: Path, input_path: Path | None = None) -> list[P
         return []
     if role == "verifier":
         source = input_path or current / "verification-result.json"
-        result = parse_semantic_output(_read_text(source))
+        issue_text = _read_text(current / "issue.md")
+        result = parse_semantic_output(
+            _read_text(source),
+            expected_criteria=extract_acceptance_criteria(issue_text) or None,
+        )
         result_path = current / "verification-result.json"
         _write_text(result_path, json.dumps(result, indent=2, sort_keys=True) + "\n")
-        attempt_path = write_semantic_result(current, 0, result)
+        attempt_path = write_semantic_result(current, _next_semantic_attempt(current), result)
         outputs = [result_path, attempt_path]
         final_path = current / "verification" / "final-verdict.json"
         if result["verdict"] in {"pass", "blocked"}:
@@ -281,6 +256,42 @@ def accept_role(role: str, repo: Path, input_path: Path | None = None) -> list[P
             final_path.unlink(missing_ok=True)
         return outputs
     raise OpenCodeAdapterError(f"unsupported OpenCode role: {role}")
+
+
+def workflow_stage(
+    name: str,
+    repo: Path,
+    *,
+    arguments: str = "",
+    autodev_root: Path = AUTODEV_ROOT,
+    attempt: int = 0,
+    reason: str = "",
+    runner=subprocess.run,
+    which=shutil.which,
+) -> tuple[int, dict[str, object]]:
+    try:
+        return workflow_stages.execute_stage(
+            name,
+            repo,
+            arguments=arguments,
+            autodev_root=autodev_root,
+            attempt=attempt,
+            reason=reason,
+            runner=runner,
+            which=which,
+        )
+    except workflow_stages.WorkflowStageError as exc:
+        raise OpenCodeAdapterError(str(exc)) from exc
+
+
+def _next_semantic_attempt(current: Path) -> int:
+    verification = current / "verification"
+    attempts: list[int] = []
+    for path in verification.glob("semantic-attempt-*.json") if verification.is_dir() else ():
+        match = re.fullmatch(r"semantic-attempt-(\d+)\.json", path.name)
+        if match:
+            attempts.append(int(match.group(1)))
+    return max(attempts, default=-1) + 1
 
 
 def _prepare_reader(repo: Path, current: Path, issue_text: str) -> str:
@@ -365,7 +376,13 @@ def _prepare_synthesizer(current: Path, issue_text: str) -> str:
     return area_reader_core.build_synthesis_prompt(
         issue_text,
         areas,
-        [{"area": "opencode-reader", "brief": brief[:MAX_HANDOFF_CHARS], "metadata": {"source": "reader-brief.md"}}],
+        [
+            {
+                "area": "opencode-reader",
+                "brief": brief[:MAX_HANDOFF_CHARS],
+                "metadata": {"source": "reader-brief.md"},
+            }
+        ],
         facts,
         groups,
     )
@@ -387,7 +404,7 @@ def _fixer_source(current: Path, arguments: str) -> Path:
             current / "ci-repair.md",
         ]
     )
-    existing = []
+    existing: list[Path] = []
     seen: set[Path] = set()
     for path in preferred:
         if path in seen or not path.is_file():
@@ -434,7 +451,7 @@ def _bounded_result(path: Path) -> str:
 
 def _read_state(current: Path) -> dict[str, object]:
     state = _read_json(current / "state.json")
-    if not isinstance(state, dict):
+    if not isinstance(state, dict) or not state:
         raise OpenCodeAdapterError(".codex-run/current/state.json is missing or invalid")
     return state
 
@@ -472,15 +489,31 @@ def build_parser() -> argparse.ArgumentParser:
     install.add_argument("--python", default=os.environ.get("PYTHON", "python"))
 
     prepare = subparsers.add_parser("prepare")
-    prepare.add_argument("--role", choices=("reader", "synthesizer", "planner", "implementer", "fixer", "verifier"), required=True)
+    prepare.add_argument(
+        "--role",
+        choices=("reader", "synthesizer", "planner", "implementer", "fixer", "verifier"),
+        required=True,
+    )
     prepare.add_argument("--repo", default=".")
     prepare.add_argument("--arguments", default="")
     prepare.add_argument("--autodev-root", default=str(AUTODEV_ROOT))
 
     accept = subparsers.add_parser("accept")
-    accept.add_argument("--role", choices=("reader", "synthesizer", "planner", "implementer", "fixer", "verifier"), required=True)
+    accept.add_argument(
+        "--role",
+        choices=("reader", "synthesizer", "planner", "implementer", "fixer", "verifier"),
+        required=True,
+    )
     accept.add_argument("--repo", default=".")
     accept.add_argument("--input", default="")
+
+    stage = subparsers.add_parser("stage")
+    stage.add_argument("--name", choices=COORDINATOR_STAGES, required=True)
+    stage.add_argument("--repo", default=".")
+    stage.add_argument("--arguments", default="")
+    stage.add_argument("--autodev-root", default=str(AUTODEV_ROOT))
+    stage.add_argument("--attempt", type=int, default=0)
+    stage.add_argument("--reason", default="")
     return parser
 
 
@@ -493,7 +526,10 @@ def run(argv: list[str] | None = None) -> int:
                 Path(args.autodev_root),
                 python_command=args.python,
             )
-            print(f"Installed {len(installed)} AutoDev OpenCode assets into {Path(args.target_repo).resolve() / '.opencode'}")
+            print(
+                f"Installed {len(installed)} AutoDev OpenCode assets into "
+                f"{Path(args.target_repo).resolve() / '.opencode'}"
+            )
             return 0
         if args.command == "prepare":
             path = prepare_role(
@@ -513,7 +549,46 @@ def run(argv: list[str] | None = None) -> int:
             for path in paths:
                 print(path)
             return 0
-    except (OpenCodeAdapterError, PromptRunnerError, SemanticVerifierError, ProviderError, OSError, ValueError) as exc:
+        if args.command == "stage":
+            try:
+                code, payload = workflow_stage(
+                    args.name,
+                    Path(args.repo),
+                    arguments=args.arguments,
+                    autodev_root=Path(args.autodev_root),
+                    attempt=args.attempt,
+                    reason=args.reason,
+                )
+            except (
+                OpenCodeAdapterError,
+                PromptRunnerError,
+                SemanticVerifierError,
+                ProviderError,
+                workflow_stages.WorkflowStageError,
+                OSError,
+                ValueError,
+            ) as exc:
+                payload = workflow_stages.stage_payload(
+                    Path(args.repo).expanduser().resolve(),
+                    "FAILED",
+                    args.name,
+                    reason=str(exc),
+                    requested_issue=issue_number_from_arguments(args.arguments),
+                    next_action="correct the reported setup or stage failure before retrying",
+                )
+                print(json.dumps(payload, sort_keys=True))
+                return 1
+            print(json.dumps(payload, sort_keys=True))
+            return code
+    except (
+        OpenCodeAdapterError,
+        PromptRunnerError,
+        SemanticVerifierError,
+        ProviderError,
+        workflow_stages.WorkflowStageError,
+        OSError,
+        ValueError,
+    ) as exc:
         print(str(exc), file=sys.stderr)
         return 1
     return 1
