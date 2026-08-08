@@ -1,0 +1,53 @@
+{
+  "version": 2,
+  "name": "groq-only",
+  "roles": {
+    "reader": {
+      "transport": "openai-compatible-chat-completions",
+      "model": "openai/gpt-oss-20b",
+      "base_url": "https://api.groq.com/openai/v1",
+      "api_key_env": "GROQ_API_KEY",
+      "timeout_seconds": 1800
+    },
+    "synthesizer": {
+      "transport": "openai-compatible-chat-completions",
+      "model": "openai/gpt-oss-20b",
+      "base_url": "https://api.groq.com/openai/v1",
+      "api_key_env": "GROQ_API_KEY",
+      "timeout_seconds": 1800
+    },
+    "planner": {
+      "transport": "openai-compatible-chat-completions",
+      "model": "openai/gpt-oss-20b",
+      "base_url": "https://api.groq.com/openai/v1",
+      "api_key_env": "GROQ_API_KEY",
+      "timeout_seconds": 1800
+    },
+    "implementer": {
+      "transport": "openai-compatible-chat-completions",
+      "model": "openai/gpt-oss-20b",
+      "base_url": "https://api.groq.com/openai/v1",
+      "api_key_env": "GROQ_API_KEY",
+      "timeout_seconds": 2400
+    },
+    "fixer": {
+      "transport": "openai-compatible-chat-completions",
+      "model": "openai/gpt-oss-20b",
+      "base_url": "https://api.groq.com/openai/v1",
+      "api_key_env": "GROQ_API_KEY",
+      "timeout_seconds": 2400
+    },
+    "verifier": {
+      "transport": "openai-compatible-chat-completions",
+      "model": "openai/gpt-oss-20b",
+      "base_url": "https://api.groq.com/openai/v1",
+      "api_key_env": "GROQ_API_KEY",
+      "timeout_seconds": 1800
+    }
+  },
+  "semantic_verification": {
+    "enabled": true,
+    "max_schema_retries": 1,
+    "max_repair_attempts": 1
+  }
+}
