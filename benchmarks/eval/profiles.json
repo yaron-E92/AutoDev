@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "profiles": {
+    "legacy-command": {
+      "provider_config": "examples/providers/codex-command-profile.json",
+      "evaluation": {
+        "max_fix_attempts": 2,
+        "description": "Command-provider/Codex baseline through the operational runner."
+      }
+    },
+    "local-ollama": {
+      "provider_config": "examples/providers/ollama-local-all-roles.json",
+      "evaluation": {
+        "max_fix_attempts": 2,
+        "description": "All-local Ollama role profile."
+      }
+    },
+    "ollama-cloud-nemotron-minimax": {
+      "provider_config": "examples/providers/ollama-cloud-nemotron-minimax.json",
+      "evaluation": {
+        "max_fix_attempts": 2,
+        "description": "Opt-in Ollama Cloud Nemotron/MiniMax profile."
+      }
+    },
+    "groq-only": {
+      "provider_config": "examples/providers/groq-only.json",
+      "evaluation": {
+        "max_fix_attempts": 2,
+        "description": "Groq-only role profile."
+      }
+    },
+    "mixed-groq-openrouter": {
+      "provider_config": "examples/providers/groq-openrouter-free-plain.json",
+      "evaluation": {
+        "max_fix_attempts": 2,
+        "description": "Plain Groq reasoning/verifier with OpenRouter :free implementation/fixer."
+      }
+    },
+    "mixed-groq-openrouter-ponytail": {
+      "provider_config": "examples/providers/groq-openrouter-free-ponytail.json",
+      "evaluation": {
+        "max_fix_attempts": 2,
+        "description": "Mixed provider profile with AutoDev's native Ponytail-derived role policy and semantic verification disabled."
+      }
+    },
+    "mixed-groq-openrouter-semantic": {
+      "provider_config": "examples/providers/groq-openrouter-free.json",
+      "evaluation": {
+        "max_fix_attempts": 2,
+        "description": "Mixed provider profile with native prompt policy and semantic verifier enabled."
+      }
+    },
+    "mixed-groq-openrouter-semantic-headroom": {
+      "provider_config": "examples/providers/groq-openrouter-free-headroom.json",
+      "evaluation": {
+        "max_fix_attempts": 2,
+        "description": "Mixed semantic profile with optional Headroom compression."
+      }
+    }
+  }
+}

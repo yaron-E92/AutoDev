@@ -1,0 +1,18 @@
+{
+  "version": 2,
+  "name": "groq-openrouter-free-plain",
+  "prompt_policy": {
+    "enabled": false
+  },
+  "roles": {
+    "reader": {"transport": "openai-compatible-chat-completions", "model": "openai/gpt-oss-20b", "base_url": "https://api.groq.com/openai/v1", "api_key_env": "GROQ_API_KEY", "timeout_seconds": 1800},
+    "synthesizer": {"transport": "openai-compatible-chat-completions", "model": "openai/gpt-oss-20b", "base_url": "https://api.groq.com/openai/v1", "api_key_env": "GROQ_API_KEY", "timeout_seconds": 1800},
+    "planner": {"transport": "openai-compatible-chat-completions", "model": "openai/gpt-oss-20b", "base_url": "https://api.groq.com/openai/v1", "api_key_env": "GROQ_API_KEY", "timeout_seconds": 1800},
+    "implementer": {"transport": "openai-compatible-chat-completions", "model": "REPLACE_WITH_OPENROUTER_MODEL:free", "base_url": "https://openrouter.ai/api/v1", "api_key_env": "OPENROUTER_API_KEY", "timeout_seconds": 2400, "free_only": true, "headers": {"HTTP-Referer": "https://github.com/yaron-E92/AutoDev", "X-Title": "AutoDev"}},
+    "fixer": {"transport": "openai-compatible-chat-completions", "model": "REPLACE_WITH_OPENROUTER_MODEL:free", "base_url": "https://openrouter.ai/api/v1", "api_key_env": "OPENROUTER_API_KEY", "timeout_seconds": 2400, "free_only": true, "headers": {"HTTP-Referer": "https://github.com/yaron-E92/AutoDev", "X-Title": "AutoDev"}},
+    "verifier": {"transport": "openai-compatible-chat-completions", "model": "openai/gpt-oss-20b", "base_url": "https://api.groq.com/openai/v1", "api_key_env": "GROQ_API_KEY", "timeout_seconds": 1800}
+  },
+  "semantic_verification": {
+    "enabled": false
+  }
+}

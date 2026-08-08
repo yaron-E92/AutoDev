@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "profiles": {
+    "legacy-command": {
+      "case_version": 1,
+      "autodev_commit": "replay-autodev-v1",
+      "patch_applies_cleanly": true,
+      "fallback_attempts": 0,
+      "resume_count": 0,
+      "run_manifest": {
+        "schema_version": 1,
+        "run_id": "no-change-legacy",
+        "target": {"repo_path": "/fixture/no-change", "github_repo": "fixture/no-change", "issue_number": 3, "mode": "implement", "base_sha": "fixture-no-change-v1", "branch": "autodev/no-change"},
+        "completed_stages": ["issue-selected", "repository-read", "handoff-synthesized", "plan-created", "implementation-generated", "patch-applied", "deterministic-verified", "semantic-verified"],
+        "stages": {},
+        "roles": {},
+        "invocations": [
+          {"role": "reader", "transport": "command", "model": "autodev-reader", "status": "success", "retry_count": 0},
+          {"role": "synthesizer", "transport": "command", "model": "autodev-reader", "status": "success", "retry_count": 0},
+          {"role": "planner", "transport": "command", "model": "autodev-planner", "status": "success", "retry_count": 0},
+          {"role": "implementer", "transport": "command", "model": "autodev-implementer", "status": "success", "retry_count": 0},
+          {"role": "verifier", "transport": "command", "model": "autodev-verifier", "status": "success", "retry_count": 0}
+        ],
+        "failure": {},
+        "prompt_policy": {"source_version": "ponytail-v4.8.4"},
+        "semantic_verification": {"enabled": true},
+        "pr": {},
+        "invalidations": []
+      },
+      "run_diagnostics": {"stage_wall_time_ms": {"deterministic-verified": [500], "semantic-verified": [600]}},
+      "semantic_result": {"verdict": "pass", "requirements": [{"criterion": "Existing guard already satisfies the request", "status": "met", "evidence": ["verified existing behavior"]}], "findings": [], "repair_brief": ""},
+      "diff": ""
+    },
+    "mixed-groq-openrouter-semantic": {
+      "case_version": 1,
+      "autodev_commit": "replay-autodev-v1",
+      "patch_applies_cleanly": true,
+      "fallback_attempts": 0,
+      "resume_count": 0,
+      "run_manifest": {
+        "schema_version": 1,
+        "run_id": "no-change-mixed",
+        "target": {"repo_path": "/fixture/no-change", "github_repo": "fixture/no-change", "issue_number": 3, "mode": "implement", "base_sha": "fixture-no-change-v1", "branch": "autodev/no-change"},
+        "completed_stages": ["issue-selected", "repository-read", "handoff-synthesized", "plan-created", "implementation-generated", "patch-applied", "deterministic-verified", "semantic-verified"],
+        "stages": {},
+        "roles": {},
+        "invocations": [
+          {"role": "reader", "transport": "openai-compatible-chat-completions", "model": "openai/gpt-oss-20b", "status": "success", "retry_count": 0, "usage": {"total_tokens": 300}},
+          {"role": "synthesizer", "transport": "openai-compatible-chat-completions", "model": "openai/gpt-oss-20b", "status": "success", "retry_count": 0, "usage": {"total_tokens": 160}},
+          {"role": "planner", "transport": "openai-compatible-chat-completions", "model": "openai/gpt-oss-20b", "status": "success", "retry_count": 0, "usage": {"total_tokens": 220}},
+          {"role": "implementer", "transport": "openai-compatible-chat-completions", "model": "example/free:free", "status": "success", "retry_count": 0, "usage": {"total_tokens": 250}},
+          {"role": "verifier", "transport": "openai-compatible-chat-completions", "model": "openai/gpt-oss-20b", "status": "success", "retry_count": 0, "usage": {"total_tokens": 190}}
+        ],
+        "failure": {},
+        "prompt_policy": {"source_version": "ponytail-v4.8.4"},
+        "semantic_verification": {"enabled": true},
+        "pr": {},
+        "invalidations": []
+      },
+      "run_diagnostics": {"stage_wall_time_ms": {"deterministic-verified": [420], "semantic-verified": [500]}},
+      "semantic_result": {"verdict": "pass", "requirements": [{"criterion": "Existing guard already satisfies the request", "status": "met", "evidence": ["verified existing behavior"]}], "findings": [], "repair_brief": ""},
+      "diff": ""
+    }
+  }
+}
