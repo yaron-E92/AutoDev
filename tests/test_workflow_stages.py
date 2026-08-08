@@ -93,6 +93,41 @@ class WorkflowStageTests(unittest.TestCase):
             self.assertTrue(str(current.resolve()) in state["RunDir"])
             gh.assert_called_once()
 
+    def test_prepare_rejects_missing_remote_base_tree_before_issue_mutation(self):
+        issue = {
+            "number": 67,
+            "title": "Hardening",
+            "body": "Harden it.",
+            "url": "https://example.test/issues/67",
+            "labels": [],
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            (repo / ".git").mkdir()
+            with (
+                patch.dict(
+                    os.environ,
+                    {
+                        "GITHUB_OWNER": "owner",
+                        "GITHUB_REPO": "repo",
+                        "LOCAL_CHECK": "check",
+                    },
+                    clear=False,
+                ),
+                patch(
+                    "automation.workflow_stages.gh_json",
+                    side_effect=[issue, {"object": {"sha": "base-sha"}}, {"tree": {}, "sha": "base-sha"}],
+                ),
+                patch("automation.workflow_stages.gh") as gh,
+            ):
+                with self.assertRaises(workflow_stages.WorkflowStageError) as raised:
+                    workflow_stages.ensure_prepared_issue(repo, "67", autodev_root=REPO_ROOT)
+
+            self.assertIn("tree.sha", str(raised.exception))
+            self.assertIn("base-sha", str(raised.exception))
+            gh.assert_not_called()
+            self.assertFalse((repo / ".codex-run" / "current" / "state.json").exists())
+
     def test_prepare_reuses_matching_current_issue_without_github_mutation(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
@@ -155,9 +190,60 @@ class WorkflowStageTests(unittest.TestCase):
                 )
 
             self.assertEqual(repair["state"], "REPAIR")
+            self.assertEqual(repair["failure_classification"], workflow_stages.FAILURE_CODE_REPAIRABLE)
             self.assertEqual(blocked["state"], "BLOCKED")
             self.assertTrue((current / "local-repair.md").is_file())
             self.assertEqual(workflow_stages.read_state(current)["Status"], "LocalCheckFailed")
+
+    def test_local_check_capture_uses_safe_utf8_replacement_on_invalid_bytes(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            current = self._write_state(repo, LocalCheck="failing-check")
+            (current / "workspace-snapshot.json").write_text("{}\n", encoding="utf-8")
+            calls = []
+
+            def runner(command, **kwargs):
+                calls.append((command, kwargs))
+                return SimpleNamespace(returncode=7, stdout=b"stdout:\x81\n", stderr=b"stderr:\x9d\n")
+
+            _, payload = workflow_stages.execute_stage(
+                "local-check",
+                repo,
+                autodev_root=REPO_ROOT,
+                runner=runner,
+            )
+
+            log = (current / "local-check.log").read_text(encoding="utf-8")
+            self.assertEqual(payload["state"], "REPAIR")
+            self.assertIn("\ufffd", log)
+            self.assertEqual(calls[0][1]["encoding"], "utf-8")
+            self.assertEqual(calls[0][1]["errors"], "replace")
+            self.assertTrue(calls[0][1]["text"])
+
+    def test_gh_failure_preserves_exit_code_and_invalid_bytes_without_decode_crash(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+
+            def runner(*args, **kwargs):
+                return SimpleNamespace(returncode=9, stdout=b"", stderr=b"bad:\x81")
+
+            with self.assertRaises(workflow_stages.WorkflowStageError) as raised:
+                workflow_stages.gh(repo, ["api", "repos/owner/repo"], runner=runner)
+
+            self.assertIn("exited with 9", str(raised.exception))
+            self.assertIn("\ufffd", str(raised.exception))
+
+    def test_gh_json_rejects_replacement_corrupted_machine_json(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+
+            def runner(*args, **kwargs):
+                return SimpleNamespace(returncode=0, stdout=b'{"value":"\x81"}', stderr=b"")
+
+            with self.assertRaises(workflow_stages.WorkflowStageError) as raised:
+                workflow_stages.gh_json(repo, ["api", "repos/owner/repo"], runner=runner)
+
+            self.assertIn("invalid JSON", str(raised.exception))
 
     def test_local_check_passes_with_native_platform_shell(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -180,7 +266,12 @@ class WorkflowStageTests(unittest.TestCase):
             self.assertEqual(payload["state"], "CONTINUE")
             self.assertEqual(calls[0][0], "successful-check")
             self.assertTrue(calls[0][1]["shell"])
+            self.assertEqual(calls[0][1]["encoding"], "utf-8")
+            self.assertEqual(calls[0][1]["errors"], "replace")
             self.assertEqual(workflow_stages.read_state(current)["Status"], "LocalCheckPassed")
+            diagnostics = json.loads((current / "run-diagnostics.json").read_text(encoding="utf-8"))
+            self.assertEqual(diagnostics["stage_invocations"]["local-check"], 1)
+            self.assertEqual(len(diagnostics["stage_wall_time_ms"]["local-check"]), 1)
 
     def test_semantic_stage_maps_pass_repair_blocked_and_exhaustion(self):
         repair = {
@@ -230,6 +321,113 @@ class WorkflowStageTests(unittest.TestCase):
             self.assertEqual(pass_payload["state"], "CONTINUE")
             self.assertTrue((current / "verification-repair.md").is_file())
 
+    def test_semantic_open_code_prerequisite_requires_accepted_result(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            current = self._write_state(
+                repo,
+                OpenCodeProtocolVersion=1,
+                AcceptedRoleArtifacts={},
+            )
+            (current / "issue.md").write_text("# Issue\n", encoding="utf-8")
+
+            with self.assertRaises(workflow_stages.WorkflowStageError) as raised:
+                workflow_stages.execute_stage("semantic", repo)
+
+            self.assertIn("verification-result.json is missing", str(raised.exception))
+
+    def test_recorded_deterministic_failure_suppresses_unchanged_retry(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            current = self._write_state(
+                repo,
+                OpenCodeProtocolVersion=1,
+                AcceptedRoleArtifacts={},
+            )
+            (current / "issue.md").write_text("# Issue\n", encoding="utf-8")
+
+            try:
+                workflow_stages.execute_stage("semantic", repo)
+            except workflow_stages.WorkflowStageError as exc:
+                first = workflow_stages.record_stage_failure(repo, "semantic", exc)
+            else:
+                self.fail("semantic prerequisite should fail")
+
+            code, repeated = workflow_stages.execute_stage("semantic", repo)
+
+            self.assertEqual(first["failure_classification"], workflow_stages.FAILURE_DETERMINISTIC)
+            self.assertEqual(code, 1)
+            self.assertEqual(repeated["state"], "FAILED")
+            self.assertTrue(repeated["repeated_failure"])
+            diagnostics = json.loads((current / "run-diagnostics.json").read_text(encoding="utf-8"))
+            self.assertEqual(diagnostics["repeated_identical_failures"], 1)
+
+    def test_create_api_commit_recovers_and_persists_missing_prepared_tree(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            current = self._write_state(
+                repo,
+                RepoFullName="owner/repo",
+                BaseSha="base-sha",
+                BaseTreeSha="",
+                BranchName="autodev/issue-67",
+            )
+            state = workflow_stages.read_state(current)
+            with (
+                patch(
+                    "automation.workflow_stages.gh_json",
+                    side_effect=[
+                        {"tree": {"sha": "resolved-base-tree"}},
+                        {"sha": "new-tree"},
+                        {"sha": "new-commit"},
+                    ],
+                ),
+                patch(
+                    "automation.workflow_stages.gh",
+                    side_effect=[
+                        SimpleNamespace(returncode=1, stdout="", stderr="not found"),
+                        SimpleNamespace(returncode=0, stdout="", stderr=""),
+                    ],
+                ),
+            ):
+                sha = workflow_stages.create_api_commit(
+                    repo,
+                    state,
+                    [],
+                    current,
+                )
+
+            self.assertEqual(sha, "new-commit")
+            self.assertEqual(
+                workflow_stages.read_state(current)["BaseTreeSha"],
+                "resolved-base-tree",
+            )
+
+    def test_create_api_commit_missing_parent_tree_keeps_underlying_evidence(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            current = self._write_state(
+                repo,
+                RepoFullName="owner/repo",
+                BaseSha="base-sha",
+                BaseTreeSha="",
+                BranchName="autodev/issue-67",
+            )
+            with patch(
+                "automation.workflow_stages.gh_json",
+                return_value={"sha": "base-sha", "tree": {}, "message": "malformed fixture"},
+            ):
+                with self.assertRaises(workflow_stages.WorkflowStageError) as raised:
+                    workflow_stages.create_api_commit(
+                        repo,
+                        workflow_stages.read_state(current),
+                        [],
+                        current,
+                    )
+
+            self.assertIn("base-sha", str(raised.exception))
+            self.assertIn("malformed fixture", str(raised.exception))
+
     def test_pr_and_ci_reuses_existing_pr_and_records_api_commit(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
@@ -272,6 +470,49 @@ class WorkflowStageTests(unittest.TestCase):
             self.assertEqual(state["Status"], "CiPassedVerifierPromptRendered")
             self.assertTrue((current / "last-commit-workspace-snapshot.json").is_file())
 
+    def test_pr_and_ci_mocked_commit_to_new_pr_path(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            current = self._write_state(
+                repo,
+                RepoFullName="owner/repo",
+                Base="main",
+                BaseSha="base",
+                BaseTreeSha="tree",
+                BranchName="autodev/issue-67",
+                IssueTitle="Issue 67",
+                IssueText="# Issue",
+                LocalCheck="check",
+            )
+            (current / "workspace-snapshot.json").write_text("{}\n", encoding="utf-8")
+            (current / "issue.md").write_text("# Issue\n", encoding="utf-8")
+            (current / "plan.md").write_text("Plan\n", encoding="utf-8")
+            (repo / "changed.txt").write_text("changed\n", encoding="utf-8")
+
+            def create_pr(repo_arg, current_arg, state_arg, **kwargs):
+                state_arg["PrUrl"] = "https://example.test/pr/67"
+                state_arg["PrNumber"] = 67
+                workflow_stages.write_state(current_arg, state_arg)
+
+            with (
+                patch("automation.workflow_stages.create_api_commit", return_value="commit-sha"),
+                patch("automation.workflow_stages.ensure_pr", side_effect=create_pr) as ensure_pr,
+                patch("automation.workflow_stages.wait_for_required_checks", return_value=[]),
+                patch("automation.workflow_stages.render_legacy_verifier"),
+            ):
+                passed = workflow_stages.pr_and_ci(
+                    repo,
+                    current,
+                    workflow_stages.read_state(current),
+                    REPO_ROOT,
+                )
+
+            self.assertTrue(passed)
+            ensure_pr.assert_called_once()
+            state = workflow_stages.read_state(current)
+            self.assertEqual(state["LastCommitSha"], "commit-sha")
+            self.assertEqual(state["PrNumber"], 67)
+
     def test_ensure_pr_does_not_create_duplicate_pr(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
@@ -296,6 +537,7 @@ class WorkflowStageTests(unittest.TestCase):
                 _, blocked = workflow_stages.execute_stage("pr-and-ci", repo, autodev_root=REPO_ROOT, attempt=1)
 
             self.assertEqual(repair["state"], "REPAIR")
+            self.assertEqual(repair["failure_classification"], workflow_stages.FAILURE_CODE_REPAIRABLE)
             self.assertEqual(blocked["state"], "BLOCKED")
 
     def test_ready_and_blocked_reuse_existing_issue_state_contract(self):

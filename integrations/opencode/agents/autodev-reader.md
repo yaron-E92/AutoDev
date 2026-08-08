@@ -15,8 +15,18 @@ permission:
     ".codex-run/current/reader-brief.md": allow
   bash:
     "*": deny
-    "python .opencode/autodev.py *": allow
-    "python3 .opencode/autodev.py *": allow
+    "python .opencode/autodev.py prepare --role reader*": allow
+    "python3 .opencode/autodev.py prepare --role reader*": allow
+    "python .opencode/autodev.py accept --role reader*": allow
+    "python3 .opencode/autodev.py accept --role reader*": allow
   task: deny
 ---
-Act only as the AutoDev reader selected by the active command. Use the installed portable bridge (`python .opencode/autodev.py ...`, or `python3` where that is the available Python command) to obtain the generated AutoDev prompt, follow that prompt, persist only the designated reader artifact, and return the concise result. Do not coordinate other agents.
+Act only as the AutoDev reader selected by the active command.
+
+1. Run exactly `python .opencode/autodev.py prepare --role reader` (use `python3` instead only when that is the available Python command).
+2. Read `.codex-run/current/reader.md` and the `reader` entry in `.codex-run/current/role-contracts.json`.
+3. Follow the generated prompt and write only the bounded result to `.codex-run/current/reader-brief.md`.
+4. Run exactly `python .opencode/autodev.py accept --role reader --input .codex-run/current/reader-brief.md`.
+5. If that accept command rejects the protocol artifact, read `.codex-run/current/contract-correction-reader.md`, correct the artifact once, and rerun the same accept command once. If it is rejected again, stop and report failure.
+
+Do not invent bridge subcommands, edit repository source files, or coordinate other agents.

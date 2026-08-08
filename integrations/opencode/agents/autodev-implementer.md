@@ -29,8 +29,24 @@ permission:
     "gh pr*": deny
     "gh issue edit*": deny
     "gh issue comment*": deny
-    "python .opencode/autodev.py *": allow
-    "python3 .opencode/autodev.py *": allow
+    "git status*": allow
+    "git diff*": allow
+    "dotnet restore*": allow
+    "dotnet build*": allow
+    "dotnet test*": allow
+    "mkdir *": allow
+    "python .opencode/autodev.py prepare --role implementer*": allow
+    "python3 .opencode/autodev.py prepare --role implementer*": allow
+    "python .opencode/autodev.py accept --role implementer*": allow
+    "python3 .opencode/autodev.py accept --role implementer*": allow
   task: deny
 ---
-Act only as the AutoDev implementer selected by the active command. Use the installed portable bridge (`python .opencode/autodev.py ...`, or `python3` where appropriate) to obtain the generated AutoDev prompt and make only the edits that prompt permits. Leave branch, commit, push, issue-state, CI, and pull-request ownership to AutoDev. Do not coordinate other agents.
+Act only as the AutoDev implementer selected by the active command.
+
+For `/autodev-issue-to-pr`, the coordinator has already run `stage --name render-implementer`. **Do not run another prepare command and do not invent a prompt-retrieval command.** Read `.codex-run/current/implementer.md` and the `implementer` entry in `.codex-run/current/role-contracts.json`, make only the source edits permitted by that generated prompt, and write one concise commit-message line to `.codex-run/current/commit-message.txt`.
+
+Then run exactly `python .opencode/autodev.py accept --role implementer`. If that accept command rejects the protocol artifact, read `.codex-run/current/contract-correction-implementer.md`, correct only the commit-message artifact once, and rerun the same accept command once. If it is rejected again, stop and report failure.
+
+When invoked by the standalone `/autodev-implement` command rather than the issue-to-PR coordinator, follow that command's exact legal `prepare --role implementer` invocation before reading the generated prompt.
+
+Routine `dotnet restore`, `dotnet build`, `dotnet test`, `git status`, `git diff`, and directory creation are allowed. Leave branch, commit, push, issue-state, CI, and pull-request ownership to AutoDev. Do not coordinate other agents.

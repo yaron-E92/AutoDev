@@ -66,9 +66,19 @@ BLOCKED
 FAILED
 ```
 
-`PR_READY` means commit/PR/required-CI handling succeeded and the issue was marked ready for human review. `BLOCKED` means an expected deterministic, semantic, or CI gate stopped progress. `FAILED` means setup, subagent execution, or an underlying stage failed unexpectedly.
+`PR_READY` means commit/PR/required-CI handling succeeded and the issue was marked ready for human review. `BLOCKED` means an expected bounded repair loop or semantic decision stopped progress. `FAILED` means a stage cannot safely continue, including deterministic setup/protocol failures and exhausted unchanged retries.
 
-On `BLOCKED` or `FAILED`, the coordinator reports the issue number, AutoDev branch, completed/failed stage, concise reason, artifact directory, whether the workspace has uncommitted changes relative to the current AutoDev snapshot, whether a commit or PR exists, the PR URL when available, and the recommended next action.
+Stage JSON also reports a failure classification when applicable:
+
+```text
+code-repairable
+transient/retryable-infrastructure
+non-retryable-deterministic
+```
+
+Only `code-repairable` outcomes are delegated to the fixer. A deterministic failure is not retried unchanged merely because another model turn is available.
+
+On `BLOCKED` or `FAILED`, the coordinator reports the issue number, AutoDev branch, completed/failed stage, failure classification, concise reason, artifact directory, whether the workspace has uncommitted changes relative to the current AutoDev snapshot, whether a commit or PR exists, the PR URL when available, and the recommended next action.
 
 ## Shared stage architecture
 
@@ -90,17 +100,19 @@ PowerShell/Bash workflows ----------┘        +-> prepare/state/artifacts
 
 `automation.workflow_stages` performs no model calls. Model-heavy reader, synthesizer, planner, implementer, fixer, and verifier work stays in isolated OpenCode Tasks (or in the existing provider-backed workflows when OpenCode is not being used).
 
-The coordinator uses the installed portable bridge:
+The coordinator uses the installed portable bridge with exact stage invocations such as:
 
 ```text
-python .opencode/autodev.py stage --name <stage>
+python .opencode/autodev.py stage --name preflight --arguments "123"
+python .opencode/autodev.py stage --name prepare --arguments "123"
+python .opencode/autodev.py stage --name render-implementer
+python .opencode/autodev.py stage --name local-check --attempt 0
+python .opencode/autodev.py stage --name semantic --attempt 0
+python .opencode/autodev.py stage --name pr-and-ci --attempt 0
+python .opencode/autodev.py stage --name ready
 ```
 
-or:
-
-```text
-python3 .opencode/autodev.py stage --name <stage>
-```
+Use `python3` instead only where that is the available Python command. Models are not expected to invent bridge verbs or abbreviated subcommands.
 
 The bridge reads `.opencode/autodev.json`, adds the configured AutoDev checkout to `PYTHONPATH`, and invokes `automation.opencode_adapter` with the configured Python command.
 
@@ -114,25 +126,65 @@ FAILED
 PR_READY
 ```
 
+## Deterministic role protocol
+
+Python, not the model conversation, defines each role's legal bridge commands and output contract. Preparing an OpenCode run writes:
+
+```text
+.codex-run/current/role-contracts.json
+```
+
+The generated contract covers reader, synthesizer, planner, implementer, fixer, and verifier, including the exact prepare/accept commands, required output artifact, format constraints, and bounded handoff size where applicable.
+
+Planner preparation also writes:
+
+```text
+.codex-run/current/plan.template.md
+```
+
+from the same six headings used by the existing planner parser.
+
+Verifier preparation writes:
+
+```text
+.codex-run/current/verification-result.template.json
+```
+
+from the canonical semantic-verifier schema. Detectable acceptance criteria are pre-populated verbatim. The verifier fills parser-supported values only; a clean pass may use an empty `findings` array.
+
+When a reader/planner/implementer/verifier protocol artifact is malformed, AutoDev allows **one** format-correction attempt for that role invocation. It writes:
+
+```text
+.codex-run/current/contract-correction-<role>.md
+```
+
+with the complete validation error, exact role contract, generated template where applicable, a bounded copy of the rejected artifact, and the exact accept command to rerun. A second rejection is terminal. This correction allowance is separate from deterministic code repair, semantic code repair, and CI repair limits.
+
+Accepted role artifacts are SHA-256 pinned in `state.json`. OpenCode stages that depend on a model-produced artifact fail before further work if that accepted artifact is missing or changed.
+
+The coordinator-specific implementer path is intentionally different from the standalone `/autodev-implement` command: after `stage --name render-implementer`, the implementer reads the already-rendered `.codex-run/current/implementer.md` and **does not prepare/render it again**.
+
 ## Coordinator flow
 
 ```text
 preflight
   -> portable prepare
-  -> Task: isolated reader
-  -> Task: isolated synthesizer
-  -> Task: isolated planner
+  -> Task: isolated reader -> exact accept
+  -> Task: isolated synthesizer -> exact accept
+  -> Task: isolated planner -> exact accept
   -> shared render-implementer stage
-  -> Task: isolated implementer
+  -> Task: isolated implementer -> exact accept
   -> shared local-check stage
-       -> repair: isolated fixer -> local-check again
-  -> Task: isolated semantic verifier
-       -> repair: shared semantic repair artifact -> isolated fixer
-                  -> local-check -> semantic verifier again
-       -> blocked: stop safely
+       -> code-repairable: isolated fixer -> local-check again
+  -> Task: isolated semantic verifier -> exact accept
+  -> shared semantic stage
+       -> code-repairable: shared semantic repair artifact -> isolated fixer
+                           -> local-check -> semantic verifier again
+       -> blocked/deterministic failure: stop safely
   -> shared pr-and-ci stage
-       -> CI repair: ci-repair.md -> isolated fixer
-                     -> local-check -> semantic verifier -> pr-and-ci again
+       -> code-repairable CI: ci-repair.md -> isolated fixer
+                              -> local-check -> semantic verifier -> pr-and-ci again
+       -> base/ref/tree/setup failure: fail without fixer
   -> shared ready stage
   -> PR_READY
 ```
@@ -145,6 +197,22 @@ MAX_SEMANTIC_REPAIR_ATTEMPTS
 ```
 
 The defaults remain 3 deterministic/CI repairs and 1 semantic repair unless configured differently.
+
+AutoDev fingerprints deterministic stage failures from bounded state/artifact/workspace hashes. Repeating the same deterministic stage with unchanged relevant inputs returns the previous failure as `repeated_failure: true` instead of executing it again.
+
+## Subprocess and GitHub diagnostics
+
+Captured subprocess output is decoded explicitly as UTF-8 with replacement on both Windows and Linux. Invalid console bytes therefore cannot crash the workflow with the host locale decoder. Replacement-decoded **machine JSON is still parsed strictly**: corrupted `gh` JSON fails deterministically rather than being accepted.
+
+GitHub failures retain the original process exit code plus bounded stderr/stdout evidence. Prepare validates the remote base commit and `tree.sha` before persisting the prepared run. API commit creation reuses that prepared `BaseTreeSha`; older/missing state is resolved from the exact prepared parent commit, never silently from local `HEAD`.
+
+Lightweight counters and timings are persisted in:
+
+```text
+.codex-run/current/run-diagnostics.json
+```
+
+including role invocations, protocol-correction attempts, stage invocations, repeated identical deterministic failures, and per-stage wall time. Secrets and model transcripts are not fingerprint inputs.
 
 ## Prerequisites
 
@@ -217,23 +285,28 @@ Running the installer again updates those named files and leaves unrelated `.ope
 
 Reader, synthesizer, planner, implementer, fixer, and verifier work runs in isolated OpenCode subagent contexts. Child role agents retain `task: deny`; only the primary coordinator can invoke the six allowlisted AutoDev roles.
 
-State passes through the existing bounded artifacts rather than role chat transcripts:
+State passes through bounded artifacts rather than role chat transcripts:
 
 ```text
 .codex-run/current/issue.md
+.codex-run/current/role-contracts.json
 .codex-run/current/reader-brief.md
 .codex-run/current/synthesized-handoff.md
+.codex-run/current/plan.template.md
 .codex-run/current/plan.md
 .codex-run/current/implementer.md
 .codex-run/current/commit-message.txt
 .codex-run/current/local-check.log
 .codex-run/current/local-repair.md
+.codex-run/current/verification-result.template.json
 .codex-run/current/verification-result.json
 .codex-run/current/verification/semantic-attempt-*.json
 .codex-run/current/verification/final-verdict.json
 .codex-run/current/verification-repair.md
 .codex-run/current/ci-summary.json
 .codex-run/current/ci-repair.md
+.codex-run/current/contract-correction-<role>.md
+.codex-run/current/run-diagnostics.json
 .codex-run/current/state.json
 ```
 
@@ -245,14 +318,14 @@ The coordinator has:
 
 ```text
 edit: deny
-read: small current state/verifier-result artifacts only
-bash: portable AutoDev bridge plus safe git status/diff
+read: small current state/diagnostic/contract/verifier-result artifacts only
+bash: exact AutoDev stage bridge commands plus safe git status/diff
 task: deny all, then allow only the six autodev-* role agents
 ```
 
-Implementer/fixer may edit target source but deny branch/commit/push/PR/issue mutation. Reader/planner/verifier remain read-oriented. Child roles cannot recursively invoke Task.
+Implementer/fixer may edit target source but still deny branch/commit/push/PR/issue mutation. Routine `git status`, `git diff`, `dotnet restore`, `dotnet build`, `dotnet test`, and directory creation are explicitly allowlisted where needed so normal implementation/verification does not degrade into repeated approval prompts. Reader/planner remain read-oriented, and the verifier may write only the designated semantic result. Child roles cannot recursively invoke Task.
 
-Both `python .opencode/autodev.py ...` and `python3 .opencode/autodev.py ...` are allowlisted so the same generated agent definitions work with normal Windows and Linux Python command naming.
+Role agents allow only their legal AutoDev `prepare`/`accept` bridge forms instead of a wildcard bridge permission. Both `python` and `python3` forms are present for normal Windows/Linux command naming.
 
 ## Provider and model selection
 
@@ -274,7 +347,13 @@ This OpenCode model selection is separate from AutoDev provider profiles used by
 
 AutoDev's #34 prompt-policy layer is applied when the bridge renders each role prompt. An external OpenCode Ponytail plugin is not required. If one is installed, configure or disable it for `autodev-*` agents so it does not inject a contradictory second policy.
 
-Role isolation and the coordinator do not require Headroom. #36 remains the optional provider-side Headroom implementation for provider-backed workflows; OpenCode does not add another Headroom routing path.
+Role isolation and the coordinator do not require Headroom. #36 remains optional. After deterministic CI is clean, an operator who intentionally uses the Headroom CLI with OpenCode can run the real smoke path from a target repository as:
+
+```text
+headroom wrap opencode
+```
+
+then invoke `/autodev-issue-to-pr <issue>`. That real provider/tool smoke run is intentionally operator-run and is not part of ordinary offline/mock CI.
 
 ## Advanced/manual role controls
 
@@ -302,4 +381,4 @@ automation.prompt_runner
 automation.run_real_issue
 ```
 
-OpenCode no longer uses `windows/scripts/issue-to-pr-cycle.ps1` as its backend. PowerShell and Bash remain supported frontends, while portable OpenCode stages use the shared Python implementation.
+OpenCode does not use `windows/scripts/issue-to-pr-cycle.ps1` as its backend. PowerShell and Bash remain supported frontends, while portable OpenCode stages use the shared Python implementation.

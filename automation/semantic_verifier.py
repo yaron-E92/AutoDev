@@ -92,6 +92,27 @@ def extract_acceptance_criteria(issue_text: str) -> list[str]:
     return criteria
 
 
+def semantic_result_template(expected_criteria: list[str] | None = None) -> dict[str, object]:
+    """Return a parser-compatible, fail-safe semantic result skeleton.
+
+    The blocked/uncertain defaults prevent an untouched template from being mistaken
+    for approval while keeping every enum value valid for parse_semantic_output().
+    """
+    return {
+        "verdict": "blocked",
+        "requirements": [
+            {
+                "criterion": criterion,
+                "status": "uncertain",
+                "evidence": [],
+            }
+            for criterion in (expected_criteria or [])
+        ],
+        "findings": [],
+        "repair_brief": "",
+    }
+
+
 def parse_semantic_output(
     output: str,
     *,
@@ -104,18 +125,18 @@ def parse_semantic_output(
         value = json.loads(cleaned)
     except json.JSONDecodeError as exc:
         raise _malformed("semantic verifier output was not valid JSON") from exc
-    if not isinstance(value, dict):
-        raise _malformed("semantic verifier output must be a JSON object")
 
-    verdict = value.get("verdict")
-    if verdict not in ALLOWED_VERDICTS:
-        raise _malformed("semantic verifier verdict must be pass, repair, or blocked")
+    schema_errors = _semantic_schema_errors(value)
+    if schema_errors:
+        raise _malformed(
+            "semantic verifier output schema errors: " + "; ".join(schema_errors)
+        )
+    assert isinstance(value, dict)
 
-    requirements = _parse_requirements(value.get("requirements"))
-    findings = _parse_findings(value.get("findings"))
-    repair_brief = value.get("repair_brief", "")
-    if not isinstance(repair_brief, str):
-        raise _malformed("semantic verifier repair_brief must be text")
+    verdict = str(value["verdict"])
+    requirements = _parse_requirements(value["requirements"])
+    findings = _parse_findings(value["findings"])
+    repair_brief = str(value.get("repair_brief", ""))
 
     if expected_criteria:
         reported = {str(item["criterion"]).strip().casefold() for item in requirements}
@@ -155,19 +176,26 @@ def build_schema_repair_prompt(
     original_prompt: str,
     invalid_output: str,
     error: str,
+    *,
+    expected_criteria: list[str] | None = None,
 ) -> str:
+    template = json.dumps(
+        semantic_result_template(expected_criteria),
+        indent=2,
+        ensure_ascii=False,
+    )
     return (
         original_prompt.rstrip()
-        + "\n\nYour previous response was rejected because it did not match the required JSON schema.\n"
-        + f"Validation error: {error}\n\n"
+        + "\n\nYour previous response was rejected because it did not match the required JSON contract.\n"
+        + f"Validation errors: {error}\n\n"
         + "Previous response:\n"
         + _bounded(invalid_output, 20_000)
-        + "\n\nReturn corrected JSON only using this exact shape:\n"
-        + '{"verdict":"pass|repair|blocked","requirements":[{"criterion":"text",'
-        + '"status":"met|missing|uncertain","evidence":["reference"]}],'
-        + '"findings":[{"severity":"blocking|warning","message":"text","path":"optional"}],'
-        + '"repair_brief":"text or empty"}\n'
-        + "Do not add Markdown fences or commentary.\n"
+        + "\n\nCorrect the complete artifact once. Start from this exact parser-compatible template, "
+        + "preserve every pre-populated criterion verbatim, and use only these values: "
+        + "verdict=pass|repair|blocked, status=met|missing|uncertain, "
+        + "severity=blocking|warning. A clean pass may use findings: [].\n"
+        + template
+        + "\nDo not add Markdown fences or commentary.\n"
     )
 
 
@@ -373,7 +401,12 @@ def invoke_semantic_verifier(
                 raise
             current_prompt = compose_prompt(
                 "verifier",
-                build_schema_repair_prompt(prompt, output, str(exc)),
+                build_schema_repair_prompt(
+                    prompt,
+                    output,
+                    str(exc),
+                    expected_criteria=expected_criteria,
+                ),
                 policies["verifier"],
             )
     raise _malformed("semantic verifier did not produce a valid result")
@@ -615,6 +648,61 @@ def run(argv: list[str] | None = None) -> int:
     return 2
 
 
+def _semantic_schema_errors(value: object) -> list[str]:
+    if not isinstance(value, dict):
+        return ["top-level value must be a JSON object"]
+
+    errors: list[str] = []
+    verdict = value.get("verdict")
+    if verdict not in ALLOWED_VERDICTS:
+        errors.append("verdict must be pass, repair, or blocked")
+
+    requirements = value.get("requirements")
+    if not isinstance(requirements, list):
+        errors.append("requirements must be an array")
+    else:
+        for index, item in enumerate(requirements):
+            if not isinstance(item, dict):
+                errors.append(f"requirement {index} must be an object")
+                continue
+            criterion = item.get("criterion")
+            status = item.get("status")
+            evidence = item.get("evidence")
+            if not isinstance(criterion, str) or not criterion.strip():
+                errors.append(f"requirement {index} criterion must be non-empty text")
+            if status not in ALLOWED_REQUIREMENT_STATUSES:
+                errors.append(
+                    f"requirement {index} status must be met, missing, or uncertain"
+                )
+            if not isinstance(evidence, list) or any(
+                not isinstance(entry, str) for entry in evidence
+            ):
+                errors.append(f"requirement {index} evidence must be a string array")
+
+    findings = value.get("findings")
+    if not isinstance(findings, list):
+        errors.append("findings must be an array")
+    else:
+        for index, item in enumerate(findings):
+            if not isinstance(item, dict):
+                errors.append(f"finding {index} must be an object")
+                continue
+            severity = item.get("severity")
+            message = item.get("message")
+            path = item.get("path", "")
+            if severity not in ALLOWED_FINDING_SEVERITIES:
+                errors.append(f"finding {index} severity must be blocking or warning")
+            if not isinstance(message, str) or not message.strip():
+                errors.append(f"finding {index} message must be non-empty text")
+            if not isinstance(path, str):
+                errors.append(f"finding {index} path must be text")
+
+    repair_brief = value.get("repair_brief", "")
+    if not isinstance(repair_brief, str):
+        errors.append("repair_brief must be text")
+    return errors
+
+
 def _parse_requirements(value: object) -> list[dict[str, object]]:
     if not isinstance(value, list):
         raise _malformed("semantic verifier requirements must be an array")
@@ -700,15 +788,19 @@ def _git_text(repo: Path, argv: list[str]) -> str:
         argv,
         cwd=repo,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         capture_output=True,
         check=False,
     )
     if completed.returncode != 0:
+        evidence = (completed.stderr or completed.stdout or "").strip()
         raise SemanticVerifierError(
-            f"semantic evidence command failed: {' '.join(argv)}",
+            f"semantic evidence command failed ({completed.returncode}): {' '.join(argv)}: "
+            f"{_bounded(evidence, 1000)}",
             classification="evidence_collection_failed",
         )
-    return completed.stdout
+    return completed.stdout or ""
 
 
 def _is_tracked(repo: Path, relative: str) -> bool:
@@ -716,6 +808,8 @@ def _is_tracked(repo: Path, relative: str) -> bool:
         ["git", "ls-files", "--error-unmatch", "--", relative],
         cwd=repo,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         capture_output=True,
         check=False,
     )

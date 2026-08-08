@@ -5,9 +5,10 @@ subtask: true
 ---
 Use the installed portable AutoDev bridge for issue/task `$ARGUMENTS`.
 
-1. Run `python .opencode/autodev.py prepare --role reader --arguments "$ARGUMENTS"` (use `python3` instead where that is the available Python command).
-2. Read `.codex-run/current/reader.md` and follow that generated AutoDev prompt exactly.
-3. Write only the resulting factual reader brief to `.codex-run/current/reader-brief.md`.
-4. Run the portable bridge `accept --role reader --input .codex-run/current/reader-brief.md`.
+1. Run exactly `python .opencode/autodev.py prepare --role reader --arguments "$ARGUMENTS"` (use `python3` instead only when that is the available Python command).
+2. Read `.codex-run/current/reader.md` and the generated reader contract in `.codex-run/current/role-contracts.json`.
+3. Write only the bounded factual reader brief to `.codex-run/current/reader-brief.md`.
+4. Run exactly `python .opencode/autodev.py accept --role reader --input .codex-run/current/reader-brief.md`.
+5. If rejected, use `.codex-run/current/contract-correction-reader.md` for the single allowed protocol correction, then rerun that exact accept command once.
 
-Do not delegate to another agent and do not edit repository source files.
+Do not invent bridge subcommands, delegate to another agent, or edit repository source files.

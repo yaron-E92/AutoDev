@@ -5,9 +5,10 @@ subtask: true
 ---
 Use the installed portable AutoDev bridge for issue/task `$ARGUMENTS`.
 
-1. Run `python .opencode/autodev.py prepare --role verifier --arguments "$ARGUMENTS"` (use `python3` instead where that is the available Python command).
-2. Read `.codex-run/current/verifier.md` and follow that generated AutoDev prompt exactly.
-3. Write only the required semantic JSON to `.codex-run/current/verification-result.json`.
-4. Run the portable bridge `accept --role verifier --input .codex-run/current/verification-result.json`.
+1. Run exactly `python .opencode/autodev.py prepare --role verifier --arguments "$ARGUMENTS"` (use `python3` instead only when that is the available Python command).
+2. Read `.codex-run/current/verifier.md`, `.codex-run/current/verification-result.template.json`, and the generated verifier contract.
+3. Preserve every pre-populated acceptance criterion exactly and write only parser-compatible semantic JSON to `.codex-run/current/verification-result.json`.
+4. Run exactly `python .opencode/autodev.py accept --role verifier --input .codex-run/current/verification-result.json`.
+5. If rejected, use `.codex-run/current/contract-correction-verifier.md` for the single allowed protocol correction, then rerun that exact accept command once.
 
-Do not edit repository source files and do not delegate to another agent.
+Do not invent bridge subcommands, edit repository source files, or delegate to another agent.
