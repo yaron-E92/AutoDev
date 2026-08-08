@@ -277,7 +277,7 @@ The idempotent installer creates or refreshes only AutoDev-owned files:
     autodev-verifier.md
 ```
 
-Running the installer again updates those named files and leaves unrelated `.opencode` commands, agents, and configuration untouched.
+Running the installer again updates those named files and leaves unrelated `.opencode` commands, agents, and configuration untouched. It does not create, edit, or replace project `opencode.json` / `opencode.jsonc` files, so project role-model mappings remain user-owned.
 
 `autodev.json` contains only the machine-local AutoDev checkout path and Python command. It contains no API keys. Keep it local unless contributors intentionally share identical paths. Command/agent Markdown may be committed if the target repository wants them discoverable for everyone.
 
@@ -327,21 +327,178 @@ Implementer/fixer may edit target source but still deny branch/commit/push/PR/is
 
 Role agents allow only their legal AutoDev `prepare`/`accept` bridge forms instead of a wildcard bridge permission. Both `python` and `python3` forms are present for normal Windows/Linux command naming.
 
-## Provider and model selection
+## Role → model mapping
 
-Checked-in OpenCode commands and agents deliberately do not declare a model. Provider/model selection remains in OpenCode user/project/session configuration; AutoDev does not hardcode Groq, OpenRouter, Ollama, or a specific model.
+OpenCode, not AutoDev, is the model-routing source of truth for the OpenCode frontend. OpenCode model IDs use `provider/model-id` syntax, and OpenCode configuration can assign a `model` to each custom agent. The checked-in AutoDev agents intentionally contain no `model:` field so installing or syncing AutoDev never hardcodes a provider or model.
 
-Example role intent may be:
+OpenCode's normal resolution rules apply:
+
+- an explicit `agent.<name>.model` wins for that agent;
+- an unmapped primary agent uses OpenCode's globally configured/current model;
+- an unmapped subagent inherits the model of the primary agent that invoked it;
+- for `/autodev-issue-to-pr`, that invoking primary is `autodev-coordinator`;
+- for standalone `/autodev-read`, `/autodev-plan`, `/autodev-implement`, `/autodev-fix`, and `/autodev-verify`, the subagent inherits from the primary agent invoking that standalone command unless the AutoDev role has its own explicit mapping.
+
+| AutoDev role | OpenCode agent | Explicit model | If omitted |
+| --- | --- | --- | --- |
+| Coordinator | `autodev-coordinator` | configurable | OpenCode global/current primary model |
+| Reader | `autodev-reader` | configurable | invoking primary; coordinator in issue-to-PR |
+| Synthesizer | `autodev-synthesizer` | configurable | invoking primary; coordinator in issue-to-PR |
+| Planner | `autodev-planner` | configurable | invoking primary; coordinator in issue-to-PR |
+| Implementer | `autodev-implementer` | configurable | invoking primary; coordinator in issue-to-PR |
+| Fixer | `autodev-fixer` | configurable | invoking primary; coordinator in issue-to-PR |
+| Verifier | `autodev-verifier` | configurable | invoking primary; coordinator in issue-to-PR |
+
+Configure these mappings in ordinary OpenCode project/user configuration. For a target repository, use its existing `opencode.json` or `opencode.jsonc`; the AutoDev installer does not modify either file.
+
+### Inspect the resolved mapping
+
+Before running an issue-to-PR cycle:
 
 ```text
-reader/synthesizer/planner/verifier -> one reasoning model/provider
-implementer/fixer                   -> a coding model/provider
-coordinator                          -> a smaller orchestration model
+python -m automation.opencode_adapter models --repo .
 ```
 
-Explicit role-to-model mapping, effective-mapping inspection, reusable mapping profiles, and safe per-run overrides are tracked separately by #66. Until then, configure the `autodev-*` agents through normal OpenCode configuration.
+or, in a target repo with the portable bridge installed:
 
-This OpenCode model selection is separate from AutoDev provider profiles used by the non-OpenCode/headless workflows.
+```text
+python .opencode/autodev.py models --repo .
+```
+
+Use `python3` where appropriate. The command asks OpenCode for its merged resolved configuration with `opencode debug config`, extracts only the global model plus the seven `autodev-*` agent mappings, validates them, and prints only model-resolution information. It never prints or persists the rest of the resolved OpenCode configuration.
+
+Example output:
+
+```text
+AutoDev OpenCode role models:
+coordinator   groq/<coordinator-model> (explicit)
+reader        groq/<coordinator-model> (inherited from autodev-coordinator during /autodev-issue-to-pr; invoking primary for standalone role commands)
+synthesizer   groq/<coordinator-model> (inherited from autodev-coordinator during /autodev-issue-to-pr; invoking primary for standalone role commands)
+planner       groq/<planner-model> (explicit)
+implementer   openrouter/<implementation-model> (explicit)
+fixer         openrouter/<implementation-model> (explicit)
+verifier      groq/<verifier-model> (explicit)
+```
+
+If neither an AutoDev role nor the static global config resolves to a concrete model, introspection reports inheritance from the OpenCode current/default model instead of guessing. A model selected dynamically inside an already-running TUI with `/models` is session state and may therefore be more specific than a separate `opencode debug config` process can prove.
+
+The coordinator preflight performs the same structural validation before reader/planner/etc. work. AutoDev rejects malformed explicit `provider/model` identifiers and `agent.autodev-*` model mappings for unknown AutoDev roles. It does not guess provider availability, authentication, billing, or free-tier eligibility; those remain OpenCode/provider responsibilities.
+
+### Example 1: one model for every role
+
+A global OpenCode model is enough when all AutoDev roles should follow the same model:
+
+```jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "provider/<model-id>"
+}
+```
+
+`autodev-coordinator` uses that primary/default model, and its unmapped child roles inherit it during `/autodev-issue-to-pr`.
+
+### Example 2: mixed Groq/OpenRouter roles
+
+```jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  "agent": {
+    "autodev-coordinator": {
+      "model": "groq/<coordinator-model>"
+    },
+    "autodev-reader": {
+      "model": "groq/<reader-model>"
+    },
+    "autodev-synthesizer": {
+      "model": "groq/<synthesizer-model>"
+    },
+    "autodev-planner": {
+      "model": "groq/<planner-model>"
+    },
+    "autodev-implementer": {
+      "model": "openrouter/<implementation-model>"
+    },
+    "autodev-fixer": {
+      "model": "openrouter/<fixer-model>"
+    },
+    "autodev-verifier": {
+      "model": "groq/<verifier-model>"
+    }
+  }
+}
+```
+
+The provider/model values above are placeholders, not promises about availability, price, or a free tier.
+
+### Example 3: all-local Ollama
+
+```jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "ollama/<local-model>"
+}
+```
+
+All unmapped AutoDev roles follow the local OpenCode model. You may still override individual `autodev-*` agents if different local models are useful.
+
+### Example 4: cheap coordinator + stronger implementer
+
+```jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  "agent": {
+    "autodev-coordinator": {
+      "model": "provider/<lightweight-model>"
+    },
+    "autodev-implementer": {
+      "model": "provider/<strong-coding-model>"
+    },
+    "autodev-fixer": {
+      "model": "provider/<strong-coding-model>"
+    }
+  }
+}
+```
+
+During `/autodev-issue-to-pr`, reader/synthesizer/planner/verifier inherit the coordinator model in this example, while implementer/fixer use the stronger explicit mapping.
+
+### `/models`, credentials, and free routes
+
+OpenCode's `/models` command changes the active/default model for the session. It does not replace an explicit `agent.autodev-*.model` mapping. Use explicit agent mappings when a role must stay pinned to a particular route.
+
+Credentials remain in normal OpenCode/provider/user environment configuration. Do not put API keys in `.opencode/autodev.json`, AutoDev agent Markdown, or role-model examples.
+
+A model that is free today may change availability or pricing later. AutoDev therefore does not label any provider/model as guaranteed free and never chooses a paid/default fallback when an explicit AutoDev role mapping is malformed. Mapping errors fail visibly.
+
+### Per-run model flags are intentionally unsupported
+
+Current documented OpenCode behavior provides agent-level and command-level model configuration, but does not provide AutoDev with a documented per-Task child-model selector that the coordinator can safely apply independently to each child invocation. Therefore these forms are rejected rather than ignored:
+
+```text
+/autodev-issue-to-pr 123 --model planner=provider/model-a
+/autodev-issue-to-pr 123 --role-model-profile free-cloud
+```
+
+Configure `agent.autodev-*.model` in OpenCode configuration before starting the session instead. AutoDev does not rewrite agent Markdown, duplicate model-specific agents, restart OpenCode, or mutate global user configuration behind the user's back.
+
+Named AutoDev role-model profiles are not added here because OpenCode already provides reusable config files through its normal configuration mechanisms, including custom config selected before startup with `OPENCODE_CONFIG`. This avoids creating a second model-routing layer that competes with OpenCode.
+
+### OpenCode mapping vs headless AutoDev provider profiles
+
+These are separate configuration surfaces:
+
+```text
+OpenCode role-model mapping
+  -> opencode.json / opencode.jsonc
+  -> agent.autodev-*.model
+  -> controls OpenCode agents
+
+AutoDev provider profile
+  -> provider-profile JSON used by automation.run_real_issue / prompt_runner
+  -> controls non-OpenCode/headless model transports
+```
+
+Changing one does not configure the other.
 
 ## Ponytail and Headroom
 
