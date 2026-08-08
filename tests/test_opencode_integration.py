@@ -1,4 +1,6 @@
+import hashlib
 import json
+import shlex
 import tempfile
 import unittest
 from pathlib import Path
@@ -29,6 +31,7 @@ class OpenCodeIntegrationTests(unittest.TestCase):
             self.assertNotIn("autodev.ps1", text)
             self.assertNotIn("model:", text)
             self.assertNotIn("api_key", text.casefold())
+            self.assertNotIn("portable bridge `accept", text)
 
     def test_coordinator_is_primary_portable_and_task_allowlisted(self):
         command = (OPEN_CODE_ROOT / "commands" / "autodev-issue-to-pr.md").read_text(encoding="utf-8")
@@ -53,8 +56,11 @@ class OpenCodeIntegrationTests(unittest.TestCase):
             self.assertIn(f'"{role}": allow', agent)
         self.assertNotIn("model:", agent)
         self.assertNotIn("api_key", agent.casefold())
+        self.assertIn("non-retryable-deterministic", agent)
+        self.assertIn("repeated-failure fingerprint", agent)
+        self.assertNotIn("prepare --role implementer", agent)
 
-    def test_role_agents_are_subagents_model_free_and_portable(self):
+    def test_role_agents_are_subagents_model_free_and_use_exact_bridge_permissions(self):
         files = sorted(path.name for path in (OPEN_CODE_ROOT / "agents").glob("autodev-*.md"))
         self.assertEqual(files, sorted(opencode_adapter.AGENT_FILES))
 
@@ -64,19 +70,24 @@ class OpenCodeIntegrationTests(unittest.TestCase):
             text = (OPEN_CODE_ROOT / "agents" / name).read_text(encoding="utf-8")
             self.assertIn("mode: subagent", text)
             self.assertIn("task: deny", text)
-            self.assertIn('"python .opencode/autodev.py *": allow', text)
-            self.assertIn('"python3 .opencode/autodev.py *": allow', text)
+            self.assertIn(".opencode/autodev.py", text)
+            self.assertNotIn('"python .opencode/autodev.py *": allow', text)
+            self.assertNotIn('"python3 .opencode/autodev.py *": allow', text)
             self.assertNotIn("autodev.ps1", text)
             self.assertNotIn("model:", text)
             self.assertNotIn("api_key", text.casefold())
 
-    def test_implementer_and_fixer_keep_vcs_mutation_denied(self):
-        for name in ("autodev-implementer.md", "autodev-fixer.md"):
+    def test_editing_and_verifying_roles_allow_routine_commands_but_deny_vcs_mutation(self):
+        for name in ("autodev-implementer.md", "autodev-fixer.md", "autodev-verifier.md"):
             text = (OPEN_CODE_ROOT / "agents" / name).read_text(encoding="utf-8")
             self.assertIn('"git commit*": deny', text)
             self.assertIn('"git push*": deny', text)
             self.assertIn('"gh pr*": deny', text)
             self.assertIn('"gh issue edit*": deny', text)
+            self.assertIn('"git status*": allow', text)
+            self.assertIn('"git diff*": allow', text)
+            self.assertIn('"dotnet build*": allow', text)
+            self.assertIn('"dotnet test*": allow', text)
             self.assertIn('"*.env": deny', text)
 
     def test_coordinator_contract_orders_isolated_happy_path_and_repairs(self):
@@ -99,7 +110,8 @@ class OpenCodeIntegrationTests(unittest.TestCase):
         self.assertIn("ciRepairAttempt", body)
         self.assertIn("stage --name failed", body)
         self.assertIn("stage --name blocked", body)
-        self.assertNotIn("PowerShell workflow", body.split("Do not route", 1)[-1] if "Do not route" in body else "")
+        self.assertIn("accept --role verifier --input .codex-run/current/verification-result.json", body)
+        self.assertIn("do not run prepare", body.casefold())
 
     def test_install_is_idempotent_and_includes_portable_bridge(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -145,7 +157,7 @@ class OpenCodeIntegrationTests(unittest.TestCase):
 
             self.assertTrue(actual.samefile(current))
 
-    def test_planner_prepare_uses_bounded_artifacts_and_existing_policy(self):
+    def test_planner_prepare_writes_contract_and_parser_template(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
             current = self._write_state(
@@ -169,12 +181,45 @@ class OpenCodeIntegrationTests(unittest.TestCase):
 
             path = opencode_adapter.prepare_role("planner", repo, "65", autodev_root=REPO_ROOT)
             prompt = path.read_text(encoding="utf-8")
+            template = (current / "plan.template.md").read_text(encoding="utf-8")
+            contracts = json.loads((current / "role-contracts.json").read_text(encoding="utf-8"))
 
             self.assertIn("Bounded handoff", prompt)
             self.assertIn("Role-specific prompt policy (lite; autodev-ponytail-v1)", prompt)
             self.assertIn("# GitHub Issue #65", prompt)
+            for heading in opencode_adapter.REQUIRED_PLAN_HEADINGS:
+                self.assertIn(heading, template)
+            self.assertEqual(contracts["protocol_correction_limit"], 1)
+            self.assertEqual(set(contracts["roles"]), set(opencode_adapter.ROLE_NAMES))
 
-    def test_accept_planner_reuses_existing_six_section_parser(self):
+    def test_verifier_prepare_prepopulates_exact_acceptance_criteria(self):
+        issue_text = "# Issue\n\n## Acceptance criteria\n- First exact criterion\n- Second exact criterion\n"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            current = self._write_state(
+                repo,
+                IssueNumber=67,
+                IssueText=issue_text,
+                LocalCheck="check",
+                StackContext="Python",
+            )
+            (current / "issue.md").write_text(issue_text, encoding="utf-8")
+            (current / "plan.md").write_text("Plan\n", encoding="utf-8")
+            with (
+                patch("automation.opencode_adapter.collect_changed_files", return_value=[]),
+                patch("automation.opencode_adapter.collect_current_diff", return_value=""),
+                patch("automation.opencode_adapter.collect_deterministic_evidence", return_value="passed"),
+            ):
+                opencode_adapter.prepare_role("verifier", repo, "67", autodev_root=REPO_ROOT)
+
+            template = json.loads((current / "verification-result.template.json").read_text(encoding="utf-8"))
+            self.assertEqual(
+                [item["criterion"] for item in template["requirements"]],
+                ["First exact criterion", "Second exact criterion"],
+            )
+            self.assertEqual(template["findings"], [])
+
+    def test_accept_planner_reuses_existing_six_section_parser_and_pins_artifact(self):
         plan = """1) Where to look
 - automation/workflow_stages.py
 2) Files / areas likely to touch
@@ -190,15 +235,56 @@ class OpenCodeIntegrationTests(unittest.TestCase):
 """
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
-            current = repo / ".codex-run" / "current"
-            current.mkdir(parents=True)
+            current = self._write_state(repo)
             plan_path = current / "plan.md"
             plan_path.write_text(plan, encoding="utf-8")
 
             outputs = opencode_adapter.accept_role("planner", repo, plan_path)
+            state = json.loads((current / "state.json").read_text(encoding="utf-8"))
 
             self.assertEqual(len(outputs), 1)
             self.assertTrue(outputs[0].samefile(plan_path))
+            accepted = state["AcceptedRoleArtifacts"]["planner"]
+            self.assertEqual(
+                accepted["sha256"],
+                hashlib.sha256(plan_path.read_bytes()).hexdigest(),
+            )
+
+    def test_protocol_rejection_allows_exactly_one_correction(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            current = self._write_state(repo)
+            plan = current / "plan.md"
+            plan.write_text("not a valid six-section plan\n", encoding="utf-8")
+            (current / "plan.template.md").write_text(
+                "\n\n".join(opencode_adapter.REQUIRED_PLAN_HEADINGS) + "\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(opencode_adapter.OpenCodeAdapterError) as first:
+                opencode_adapter.accept_role("planner", repo, plan)
+            self.assertIn("one correction is allowed", str(first.exception))
+            self.assertTrue((current / "contract-correction-planner.md").is_file())
+
+            with self.assertRaises(opencode_adapter.OpenCodeAdapterError) as second:
+                opencode_adapter.accept_role("planner", repo, plan)
+            self.assertIn("correction limit exhausted", str(second.exception))
+            diagnostics = json.loads((current / "run-diagnostics.json").read_text(encoding="utf-8"))
+            self.assertEqual(diagnostics["protocol_correction_attempts"]["planner"], 1)
+
+    def test_role_contract_bridge_snippets_match_real_argparse_surface(self):
+        parser = opencode_adapter.build_parser()
+        for role, contract in opencode_adapter.role_contracts().items():
+            accept = str(contract["accept"])
+            parser.parse_args(shlex.split(accept)[2:])
+            prepare = str(contract["prepare"])
+            if role in {"fixer", "implementer"}:
+                continue
+            parser.parse_args(shlex.split(prepare)[2:])
+        for repair_kind in ("local", "semantic", "ci"):
+            parser.parse_args(
+                ["prepare", "--role", "fixer", "--arguments", repair_kind]
+            )
 
     def test_semantic_repair_then_pass_preserves_attempt_history(self):
         repair = {
@@ -215,8 +301,7 @@ class OpenCodeIntegrationTests(unittest.TestCase):
         }
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
-            current = repo / ".codex-run" / "current"
-            current.mkdir(parents=True)
+            current = self._write_state(repo)
             result_path = current / "verification-result.json"
 
             result_path.write_text(json.dumps(repair), encoding="utf-8")
@@ -231,13 +316,13 @@ class OpenCodeIntegrationTests(unittest.TestCase):
     def test_reader_handoff_rejects_unbounded_result(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
-            current = repo / ".codex-run" / "current"
-            current.mkdir(parents=True)
+            current = self._write_state(repo)
             result = current / "reader-brief.md"
             result.write_text("x" * (opencode_adapter.MAX_HANDOFF_CHARS + 1), encoding="utf-8")
 
             with self.assertRaises(opencode_adapter.OpenCodeAdapterError):
                 opencode_adapter.accept_role("reader", repo, result)
+            self.assertTrue((current / "contract-correction-reader.md").is_file())
 
     def test_opencode_adapter_has_no_windows_workflow_backend(self):
         adapter = (REPO_ROOT / "automation" / "opencode_adapter.py").read_text(encoding="utf-8")
