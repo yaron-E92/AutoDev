@@ -30,24 +30,24 @@
       }
     },
     "mixed-groq-openrouter": {
-      "provider_config": "examples/providers/groq-openrouter-free.json",
+      "provider_config": "examples/providers/groq-openrouter-free-plain.json",
       "evaluation": {
         "max_fix_attempts": 2,
-        "description": "Groq reasoning/verifier with OpenRouter :free implementation/fixer."
+        "description": "Plain Groq reasoning/verifier with OpenRouter :free implementation/fixer."
       }
     },
     "mixed-groq-openrouter-ponytail": {
-      "provider_config": "examples/providers/groq-openrouter-free.json",
+      "provider_config": "examples/providers/groq-openrouter-free-ponytail.json",
       "evaluation": {
         "max_fix_attempts": 2,
-        "description": "Mixed profile using AutoDev's native Ponytail-derived default role policies."
+        "description": "Mixed provider profile with AutoDev's native Ponytail-derived role policy and semantic verification disabled."
       }
     },
     "mixed-groq-openrouter-semantic": {
       "provider_config": "examples/providers/groq-openrouter-free.json",
       "evaluation": {
         "max_fix_attempts": 2,
-        "description": "Mixed profile with the configured semantic verifier gate."
+        "description": "Mixed provider profile with native prompt policy and semantic verifier enabled."
       }
     },
     "mixed-groq-openrouter-semantic-headroom": {
