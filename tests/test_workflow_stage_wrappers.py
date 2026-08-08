@@ -67,6 +67,29 @@ class WorkflowStageWrapperTests(unittest.TestCase):
             )
             self.assertIn("source.txt", snapshot)
 
+    def test_provider_semantic_pass_binds_to_current_verified_source(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            current = self._write_state(repo)
+            state = workflow_stage_legacy.workflow_stages.read_state(current)
+            state["VerificationProofVersion"] = 1
+            state["VerifiedSourceIdentity"] = "verified-source"
+            workflow_stage_legacy.workflow_stages.write_state(current, state)
+            verification = current / "verification"
+            verification.mkdir()
+            (verification / "final-verdict.json").write_text(
+                '{"verdict":"pass","requirements":[],"findings":[],"repair_brief":""}\n',
+                encoding="utf-8",
+            )
+
+            state = workflow_stage_legacy.sync_semantic_proof(
+                current,
+                workflow_stage_legacy.workflow_stages.read_state(current),
+            )
+
+            self.assertEqual(state["LastSemanticVerdict"], "pass")
+            self.assertEqual(state["SemanticSourceIdentity"], "verified-source")
+
     def test_finalize_scripts_are_thin_shared_python_delegates(self):
         windows = (REPO_ROOT / "windows" / "scripts" / "codex-finalize-current-issue.ps1").read_text(encoding="utf-8")
         linux = (REPO_ROOT / "linux" / "scripts" / "finalize-current-issue.sh").read_text(encoding="utf-8")
