@@ -1202,6 +1202,10 @@ def gh_json(
 ) -> dict[str, object]:
     completed = gh(repo, arguments, input_text=input_text, runner=runner)
     text = _decoded_text(getattr(completed, "stdout", "")).strip()
+    if "\ufffd" in text:
+        raise WorkflowStageError(
+            f"gh returned invalid JSON for {' '.join(arguments)}: output contained invalid UTF-8 bytes: {concise(text, 700)}"
+        )
     try:
         value = json.loads(text or "{}")
     except json.JSONDecodeError as exc:
