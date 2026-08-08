@@ -23,6 +23,7 @@ from automation.prompt_runner import (
 )
 from automation.semantic_verifier import (
     SemanticVerifierError,
+    build_schema_repair_prompt,
     build_semantic_prompt,
     collect_changed_files,
     collect_current_diff,
@@ -649,25 +650,40 @@ def _raise_contract_rejection(
     contract = role_contracts().get(role, {})
     source = input_path or _contract_output_path(current, role)
     previous = _bounded_text(_read_text(source), 8_000) if source is not None else ""
-    template = ""
-    if role == "planner":
-        template = _read_text(current / "plan.template.md")
-    elif role == "verifier":
-        template = _read_text(current / "verification-result.template.json")
     correction = current / f"contract-correction-{role}.md"
-    _write_text(
-        correction,
-        "# AutoDev protocol correction\n\n"
-        "This is the only protocol-format correction attempt allowed for the current role invocation.\n\n"
-        f"Role: `{role}`\n\n"
-        f"Validation errors:\n\n```text\n{error}\n```\n\n"
-        "Exact role contract:\n\n```json\n"
-        + json.dumps(contract, indent=2, sort_keys=True)
-        + "\n```\n\n"
-        + ("Exact generated template:\n\n```text\n" + template + "\n```\n\n" if template else "")
-        + ("Bounded previous output:\n\n```text\n" + previous + "\n```\n\n" if previous else "")
-        + f"Correct the designated output artifact once, then rerun exactly:\n\n`{contract.get('accept', '')}`\n",
-    )
+
+    if role == "verifier":
+        issue_text = _read_text(current / "issue.md")
+        schema_correction = build_schema_repair_prompt(
+            "",
+            previous,
+            str(error),
+            expected_criteria=extract_acceptance_criteria(issue_text) or None,
+        )
+        correction_body = (
+            "# AutoDev protocol correction\n\n"
+            "This is the only protocol-format correction attempt allowed for the current verifier invocation.\n\n"
+            "Exact role contract:\n\n```json\n"
+            + json.dumps(contract, indent=2, sort_keys=True)
+            + "\n```\n\n"
+            + schema_correction
+            + f"\nAfter correcting `.codex-run/current/verification-result.json`, rerun exactly:\n\n`{contract.get('accept', '')}`\n"
+        )
+    else:
+        template = _read_text(current / "plan.template.md") if role == "planner" else ""
+        correction_body = (
+            "# AutoDev protocol correction\n\n"
+            "This is the only protocol-format correction attempt allowed for the current role invocation.\n\n"
+            f"Role: `{role}`\n\n"
+            f"Validation errors:\n\n```text\n{error}\n```\n\n"
+            "Exact role contract:\n\n```json\n"
+            + json.dumps(contract, indent=2, sort_keys=True)
+            + "\n```\n\n"
+            + ("Exact generated template:\n\n```text\n" + template + "\n```\n\n" if template else "")
+            + ("Bounded previous output:\n\n```text\n" + previous + "\n```\n\n" if previous else "")
+            + f"Correct the designated output artifact once, then rerun exactly:\n\n`{contract.get('accept', '')}`\n"
+        )
+    _write_text(correction, correction_body)
     raise OpenCodeAdapterError(
         f"{role} protocol artifact rejected; one correction is allowed using {correction}; "
         f"then rerun exactly: {contract.get('accept', '')}"
