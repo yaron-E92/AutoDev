@@ -369,7 +369,7 @@ Repository hygiene on Linux:
 ```bash
 mapfile -d '' forbidden < <(
   git ls-files -z |
-    grep -zE '(^|/)(\.pytest_cache|__pycache__|\.autodev-run|\.autodev-run|\.benchmark-results)(/|$)|\.py[co]$' || true
+    grep -zE '(^|/)(\.pytest_cache|__pycache__|\.autodev-run|\.benchmark-results)(/|$)|\.py[co]$' || true
 )
 
 if ((${#forbidden[@]} > 0)); then
