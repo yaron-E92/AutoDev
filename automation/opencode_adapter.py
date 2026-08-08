@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 
 from area_reader_v2 import runner_core as area_reader_core
+from automation import opencode_resume
 from automation import run_real_issue_core as run_core
 from automation import workflow_stages
 from automation.model_output_sanitizer import sanitize_model_output
@@ -42,6 +43,8 @@ AUTODEV_ROOT = Path(__file__).resolve().parents[1]
 CURRENT_DIR = Path(".autodev-run") / "current"
 COMMAND_FILES = (
     "autodev-issue-to-pr.md",
+    "autodev-status.md",
+    "autodev-resume.md",
     "autodev-read.md",
     "autodev-plan.md",
     "autodev-implement.md",
@@ -376,6 +379,7 @@ def prepare_role(
     current = ensure_current_issue(repo, autodev_root, arguments)
     _ensure_opencode_protocol(current)
     _begin_role_invocation(current, role)
+    opencode_resume.begin_role(repo, role, arguments)
     state = _read_state(current)
     issue_text = _read_text(current / "issue.md") or str(state.get("IssueText", ""))
     policies = _resolved_policies(repo, state)
@@ -478,6 +482,9 @@ def accept_role(role: str, repo: Path, input_path: Path | None = None) -> list[P
         _raise_contract_rejection(current, role, input_path, exc)
     _mark_role_accepted(current, role, outputs)
     _reset_current_correction(current, role)
+    if opencode_resume.has_manifest(repo):
+        mappings = resolve_opencode_model_mappings(repo)
+        opencode_resume.checkpoint_role(repo, role, outputs, mappings)
     return outputs
 
 
@@ -558,6 +565,7 @@ def workflow_stage(
         if name == "preflight" and payload.get("state") == "CONTINUE":
             resolve_opencode_model_mappings(repo, runner=runner)
     except workflow_stages.WorkflowStageError as exc:
+        opencode_resume.checkpoint_failure(repo, name, exc)
         raise OpenCodeAdapterError(
             str(exc),
             classification=exc.classification,
@@ -566,9 +574,12 @@ def workflow_stage(
     current = repo / CURRENT_DIR
     if name == "prepare" and payload.get("state") == "CONTINUE" and current.is_dir():
         _ensure_opencode_protocol(current)
+        opencode_resume.create_open_code_manifest(repo, _read_state(current))
     elif name == "render-implementer" and payload.get("state") == "CONTINUE" and current.is_dir():
         _ensure_opencode_protocol(current)
         _begin_role_invocation(current, "implementer")
+    if name != "prepare" and opencode_resume.has_manifest(repo):
+        opencode_resume.checkpoint_stage(repo, name, payload, attempt)
     return code, payload
 
 
@@ -960,6 +971,14 @@ def build_parser() -> argparse.ArgumentParser:
     models = subparsers.add_parser("models")
     models.add_argument("--repo", default=".")
 
+    status = subparsers.add_parser("status")
+    status.add_argument("--repo", default=".")
+    status.add_argument("--invalidate-role", action="append", choices=ROLE_NAMES, default=[])
+
+    resume = subparsers.add_parser("resume")
+    resume.add_argument("--repo", default=".")
+    resume.add_argument("--invalidate-role", action="append", choices=ROLE_NAMES, default=[])
+
     prepare = subparsers.add_parser("prepare")
     prepare.add_argument(
         "--role",
@@ -1007,6 +1026,28 @@ def run(argv: list[str] | None = None) -> int:
             mappings = resolve_opencode_model_mappings(Path(args.repo))
             print(render_model_mappings(mappings))
             return 0
+        if args.command == "status":
+            repo = Path(args.repo).expanduser().resolve()
+            mappings = resolve_opencode_model_mappings(repo)
+            print(
+                opencode_resume.status_text(
+                    repo,
+                    mappings,
+                    requested_invalidations=args.invalidate_role,
+                ),
+                end="",
+            )
+            return 0
+        if args.command == "resume":
+            repo = Path(args.repo).expanduser().resolve()
+            mappings = resolve_opencode_model_mappings(repo)
+            payload = opencode_resume.resume(
+                repo,
+                mappings,
+                invalidated_roles=set(args.invalidate_role),
+            )
+            print(json.dumps(payload, sort_keys=True))
+            return 0
         if args.command == "prepare":
             path = prepare_role(
                 args.role,
@@ -1051,6 +1092,7 @@ def run(argv: list[str] | None = None) -> int:
                     exc,
                     requested_issue=issue_number_from_arguments(args.arguments),
                 )
+                opencode_resume.checkpoint_failure(repo, args.name, exc)
                 print(json.dumps(payload, sort_keys=True))
                 return 1
             print(json.dumps(payload, sort_keys=True))
