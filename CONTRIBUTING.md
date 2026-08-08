@@ -191,9 +191,9 @@ Allowed responsibilities:
 - mark issue `codex:in-progress`
 - resolve profiles
 - read base commit/tree from GitHub API
-- create `.codex-run/current/state.json`
-- create `.codex-run/current/workspace-snapshot.json`
-- render `.codex-run/current/planner.md`
+- create `.autodev-run/current/state.json`
+- create `.autodev-run/current/workspace-snapshot.json`
+- render `.autodev-run/current/planner.md`
 
 Not allowed:
 
@@ -242,7 +242,7 @@ Allowed responsibilities:
 - mark issue ready for review
 - mark issue blocked
 - add issue comments
-- update `.codex-run/current/state.json`
+- update `.autodev-run/current/state.json`
 
 Not allowed:
 
@@ -369,7 +369,7 @@ Repository hygiene on Linux:
 ```bash
 mapfile -d '' forbidden < <(
   git ls-files -z |
-    grep -zE '(^|/)(\.pytest_cache|__pycache__|\.autodev-run|\.codex-run|\.benchmark-results)(/|$)|\.py[co]$' || true
+    grep -zE '(^|/)(\.pytest_cache|__pycache__|\.autodev-run|\.benchmark-results)(/|$)|\.py[co]$' || true
 )
 
 if ((${#forbidden[@]} > 0)); then
@@ -416,7 +416,7 @@ Before testing with a real issue:
 3. Ensure KeePass token loads.
 4. Ensure `gh issue list` works.
 5. Run the prepare script.
-6. Confirm `.codex-run/current/state.json` and `planner.md` are created.
+6. Confirm `.autodev-run/current/state.json` and `planner.md` are created.
 7. Let Codex implement a tiny change.
 8. Run `LocalCheck`.
 9. Run `PrAndCi`.
@@ -465,7 +465,7 @@ pwsh -File "$env:USERPROFILE\codex-tools\codex-mark-current-issue.ps1" `
   -Status ReadyForReview
 ```
 
-If `.codex-run/current` is stale, archive it manually or rerun prepare with the appropriate force/current handling.
+If `.autodev-run/current` is stale, archive it manually or rerun prepare with the appropriate force/current handling.
 
 ---
 

@@ -80,7 +80,7 @@ function Test-IsIgnoredWorkspacePath {
 
     $ignoredPrefixes = @(
         ".git/",
-        ".codex-run/",
+        ".autodev-run/",
         "bin/",
         "obj/",
         "node_modules/",
@@ -224,7 +224,7 @@ Write-Host "Using GitHub repository: $RepoFullName"
 
 $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
 
-$runRoot = ".codex-run"
+$runRoot = ".autodev-run"
 $currentDir = Join-Path $runRoot "current"
 $statePath = Join-Path $currentDir "state.json"
 
@@ -237,7 +237,7 @@ if (Test-Path $currentDir) {
     else {
         $archiveDir = Join-Path $runRoot "archive-$timestamp"
         Move-Item -Path $currentDir -Destination $archiveDir
-        Write-Host "Archived previous .codex-run/current to $archiveDir"
+        Write-Host "Archived previous .autodev-run/current to $archiveDir"
     }
 }
 

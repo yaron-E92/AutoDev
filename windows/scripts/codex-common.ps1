@@ -301,7 +301,7 @@ function Initialize-GitHubCliEnvironment {
     )
 
     if ([string]::IsNullOrWhiteSpace($GhConfigDir)) {
-        $GhConfigDir = Join-Path (Get-Location) ".codex-run\gh-config"
+        $GhConfigDir = Join-Path (Get-Location) ".autodev-run\gh-config"
     }
 
     $GhConfigDir = [System.IO.Path]::GetFullPath($GhConfigDir)

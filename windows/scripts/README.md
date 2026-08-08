@@ -39,7 +39,7 @@ Run one issue through the existing workflow:
   -ProviderProfile C:\src\AutoDev\examples\providers\groq-openrouter-free.json
 ```
 
-The same profile independently configures `reader`, `synthesizer`, `planner`, `implementer`, `fixer`, and `verifier`. Model response text is parsed separately from `.codex-run/current/model-invocations.json` telemetry.
+The same profile independently configures `reader`, `synthesizer`, `planner`, `implementer`, `fixer`, and `verifier`. Model response text is parsed separately from `.autodev-run/current/model-invocations.json` telemetry.
 
 ## Other checked-in profiles
 

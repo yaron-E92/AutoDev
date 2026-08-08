@@ -39,7 +39,7 @@ from automation.semantic_verifier import (
 
 
 AUTODEV_ROOT = Path(__file__).resolve().parents[1]
-CURRENT_DIR = Path(".codex-run") / "current"
+CURRENT_DIR = Path(".autodev-run") / "current"
 COMMAND_FILES = (
     "autodev-issue-to-pr.md",
     "autodev-read.md",
@@ -80,34 +80,34 @@ class OpenCodeAdapterError(RuntimeError):
 def role_contracts() -> dict[str, dict[str, object]]:
     return {
         "reader": {
-            "input_artifact": ".codex-run/current/reader.md",
-            "output_artifact": ".codex-run/current/reader-brief.md",
+            "input_artifact": ".autodev-run/current/reader.md",
+            "output_artifact": ".autodev-run/current/reader-brief.md",
             "format": "bounded text/Markdown handoff",
             "max_chars": MAX_HANDOFF_CHARS,
             "prepare": "python .opencode/autodev.py prepare --role reader",
-            "accept": "python .opencode/autodev.py accept --role reader --input .codex-run/current/reader-brief.md",
+            "accept": "python .opencode/autodev.py accept --role reader --input .autodev-run/current/reader-brief.md",
         },
         "synthesizer": {
-            "input_artifact": ".codex-run/current/synthesizer.md",
-            "output_artifact": ".codex-run/current/synthesized-handoff.md",
+            "input_artifact": ".autodev-run/current/synthesizer.md",
+            "output_artifact": ".autodev-run/current/synthesized-handoff.md",
             "format": "bounded text/Markdown cross-area handoff",
             "max_chars": MAX_HANDOFF_CHARS,
             "prepare": "python .opencode/autodev.py prepare --role synthesizer",
-            "accept": "python .opencode/autodev.py accept --role synthesizer --input .codex-run/current/synthesized-handoff.md",
+            "accept": "python .opencode/autodev.py accept --role synthesizer --input .autodev-run/current/synthesized-handoff.md",
         },
         "planner": {
-            "input_artifact": ".codex-run/current/planner.md",
-            "template_artifact": ".codex-run/current/plan.template.md",
-            "output_artifact": ".codex-run/current/plan.md",
+            "input_artifact": ".autodev-run/current/planner.md",
+            "template_artifact": ".autodev-run/current/plan.template.md",
+            "output_artifact": ".autodev-run/current/plan.md",
             "format": "exact six-section AutoDev plan",
             "required_sections": list(REQUIRED_PLAN_HEADINGS),
             "max_chars": MAX_HANDOFF_CHARS,
             "prepare": "python .opencode/autodev.py prepare --role planner",
-            "accept": "python .opencode/autodev.py accept --role planner --input .codex-run/current/plan.md",
+            "accept": "python .opencode/autodev.py accept --role planner --input .autodev-run/current/plan.md",
         },
         "implementer": {
-            "input_artifact": ".codex-run/current/implementer.md",
-            "output_artifact": ".codex-run/current/commit-message.txt",
+            "input_artifact": ".autodev-run/current/implementer.md",
+            "output_artifact": ".autodev-run/current/commit-message.txt",
             "format": "one non-empty commit-message line, maximum 200 characters",
             "max_chars": 200,
             "prepare": "python .opencode/autodev.py prepare --role implementer",
@@ -127,12 +127,12 @@ def role_contracts() -> dict[str, dict[str, object]]:
             "accept": "python .opencode/autodev.py accept --role fixer",
         },
         "verifier": {
-            "input_artifact": ".codex-run/current/verifier.md",
-            "template_artifact": ".codex-run/current/verification-result.template.json",
-            "output_artifact": ".codex-run/current/verification-result.json",
+            "input_artifact": ".autodev-run/current/verifier.md",
+            "template_artifact": ".autodev-run/current/verification-result.template.json",
+            "output_artifact": ".autodev-run/current/verification-result.json",
             "format": "strict semantic JSON using only parser-supported fields/enums and exact pre-populated acceptance criteria",
             "prepare": "python .opencode/autodev.py prepare --role verifier",
-            "accept": "python .opencode/autodev.py accept --role verifier --input .codex-run/current/verification-result.json",
+            "accept": "python .opencode/autodev.py accept --role verifier --input .autodev-run/current/verification-result.json",
         },
     }
 
@@ -249,7 +249,7 @@ def prepare_role(
         )
         prompt += (
             "\n\nAutoDev deterministic output contract:\n"
-            "Use `.codex-run/current/plan.template.md` as the exact six-section structure. "
+            "Use `.autodev-run/current/plan.template.md` as the exact six-section structure. "
             "Do not add preamble, scratchpad, or extra top-level sections.\n"
         )
         path = current / "planner.md"
@@ -265,8 +265,8 @@ def prepare_role(
         )
         prompt += (
             "\n\nAutoDev deterministic output contract:\n"
-            "Write one concise commit-message line to `.codex-run/current/commit-message.txt` "
-            "and run the exact accept command from `.codex-run/current/role-contracts.json`.\n"
+            "Write one concise commit-message line to `.autodev-run/current/commit-message.txt` "
+            "and run the exact accept command from `.autodev-run/current/role-contracts.json`.\n"
         )
         path = current / "implementer.md"
     elif role == "fixer":
@@ -302,7 +302,7 @@ def prepare_role(
         )
         prompt += (
             "\n\nAutoDev deterministic JSON contract:\n"
-            "Start from `.codex-run/current/verification-result.template.json`. Preserve every pre-populated "
+            "Start from `.autodev-run/current/verification-result.template.json`. Preserve every pre-populated "
             "criterion verbatim. Use only verdict pass|repair|blocked, requirement status "
             "met|missing|uncertain, and finding severity blocking|warning. Evidence must be string arrays; "
             "findings may be [] for a clean pass. Return/write JSON only.\n"
@@ -320,7 +320,7 @@ def accept_role(role: str, repo: Path, input_path: Path | None = None) -> list[P
     repo = repo.expanduser().resolve()
     current = repo / CURRENT_DIR
     if not current.is_dir():
-        raise OpenCodeAdapterError(".codex-run/current is missing; prepare the role first")
+        raise OpenCodeAdapterError(".autodev-run/current is missing; prepare the role first")
     _write_role_contracts(current)
     try:
         outputs = _accept_role_once(role, current, input_path)
@@ -356,7 +356,7 @@ def _accept_role_once(role: str, current: Path, input_path: Path | None) -> list
         target = current / "commit-message.txt"
         message = sanitize_model_output(_read_text(target)).splitlines()
         if not message or not message[0].strip():
-            raise OpenCodeAdapterError("implementer must write .codex-run/current/commit-message.txt")
+            raise OpenCodeAdapterError("implementer must write .autodev-run/current/commit-message.txt")
         _write_text(target, message[0].strip()[:200] + "\n")
         return [target]
     if role == "fixer":
@@ -617,7 +617,7 @@ def _mark_role_accepted(current: Path, role: str, outputs: list[Path]) -> None:
     state = state_value
     contract = role_contracts().get(role, {})
     relative = str(contract.get("output_artifact", ""))
-    path = current / Path(relative).name if relative.startswith(".codex-run/current/") else None
+    path = current / Path(relative).name if relative.startswith(".autodev-run/current/") else None
     digest = _file_sha256(path) if path is not None else ""
     accepted = state.setdefault("AcceptedRoleArtifacts", {})
     if isinstance(accepted, dict):
@@ -670,7 +670,7 @@ def _raise_contract_rejection(
             + json.dumps(contract, indent=2, sort_keys=True)
             + "\n```\n\n"
             + schema_correction
-            + f"\nAfter correcting `.codex-run/current/verification-result.json`, rerun exactly:\n\n`{contract.get('accept', '')}`\n"
+            + f"\nAfter correcting `.autodev-run/current/verification-result.json`, rerun exactly:\n\n`{contract.get('accept', '')}`\n"
         )
     else:
         template = _read_text(current / "plan.template.md") if role == "planner" else ""
@@ -703,7 +703,7 @@ def _reset_current_correction(current: Path, role: str) -> None:
 
 def _contract_output_path(current: Path, role: str) -> Path | None:
     relative = str(role_contracts().get(role, {}).get("output_artifact", ""))
-    if relative.startswith(".codex-run/current/"):
+    if relative.startswith(".autodev-run/current/"):
         return current / Path(relative).name
     return None
 
@@ -765,7 +765,7 @@ def _bounded_text(value: str, limit: int) -> str:
 def _read_state(current: Path) -> dict[str, object]:
     state = _read_json(current / "state.json")
     if not isinstance(state, dict) or not state:
-        raise OpenCodeAdapterError(".codex-run/current/state.json is missing or invalid")
+        raise OpenCodeAdapterError(".autodev-run/current/state.json is missing or invalid")
     return state
 
 

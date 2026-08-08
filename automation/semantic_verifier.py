@@ -57,7 +57,7 @@ SEMANTIC_SOURCE_SUFFIXES = {
 }
 SEMANTIC_IGNORED_PARTS = {
     ".git",
-    ".codex-run",
+    ".autodev-run",
     "bin",
     "obj",
     "node_modules",

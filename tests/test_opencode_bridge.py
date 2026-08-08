@@ -86,7 +86,7 @@ class OpenCodeBridgeTests(unittest.TestCase):
     def test_linux_current_profile_verifier_uses_resolved_profiles(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
-            current = repo / ".codex-run" / "current"
+            current = repo / ".autodev-run" / "current"
             current.mkdir(parents=True)
             (current / "state.json").write_text(
                 json.dumps({"ProfilesCsv": "backend,maui"}),
@@ -104,7 +104,7 @@ class OpenCodeBridgeTests(unittest.TestCase):
             self.assertEqual(command[-2:], ["--profiles", "backend,maui"])
 
     def _write_state(self, repo: Path, issue_number: int) -> None:
-        current = repo / ".codex-run" / "current"
+        current = repo / ".autodev-run" / "current"
         current.mkdir(parents=True)
         (current / "state.json").write_text(
             json.dumps({"IssueNumber": issue_number}),

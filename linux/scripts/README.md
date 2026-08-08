@@ -49,7 +49,7 @@ linux/scripts/issue-to-pr-cycle.sh \
 
 Omit `--issue` to select the next eligible `autodev:ready` issue. `--description` and `--description-file` remain available for local task descriptions.
 
-The profile independently configures `reader`, `synthesizer`, `planner`, `implementer`, `fixer`, and `verifier`. Linux preparation forwards the profile to the shared area-reader planner. Invocation telemetry is written separately to `.codex-run/current/model-invocations.json`.
+The profile independently configures `reader`, `synthesizer`, `planner`, `implementer`, `fixer`, and `verifier`. Linux preparation forwards the profile to the shared area-reader planner. Invocation telemetry is written separately to `.autodev-run/current/model-invocations.json`.
 
 ## Checked-in profiles
 

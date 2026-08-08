@@ -24,7 +24,7 @@ from automation.semantic_verifier import (
 
 
 AUTODEV_ROOT = Path(__file__).resolve().parents[1]
-CURRENT_DIR = Path(".codex-run") / "current"
+CURRENT_DIR = Path(".autodev-run") / "current"
 DIAGNOSTICS_FILE = "run-diagnostics.json"
 VERIFICATION_PROOF_VERSION = 1
 DEFAULT_CI_CHECK_POLL_ATTEMPTS = 12
@@ -48,7 +48,7 @@ FAILURE_TRANSIENT = "transient/retryable-infrastructure"
 FAILURE_DETERMINISTIC = "non-retryable-deterministic"
 IGNORED_PREFIXES = (
     ".git/",
-    ".codex-run/",
+    ".autodev-run/",
     ".opencode/",
     "bin/",
     "obj/",
@@ -232,7 +232,7 @@ def _execute_stage_impl(
         result_path = current / "verification-result.json"
         if not result_path.is_file() or not read_text(result_path).strip():
             raise WorkflowStageError(
-                "semantic prerequisite not met: .codex-run/current/verification-result.json is missing; "
+                "semantic prerequisite not met: .autodev-run/current/verification-result.json is missing; "
                 "run the verifier role and accept its result before the semantic stage"
             )
         _require_accepted_role(current, state, "verifier", "verification-result.json")
@@ -1954,7 +1954,7 @@ def concise(value: str, limit: int = 1000) -> str:
 def read_state(current: Path) -> dict[str, object]:
     state = read_json(current / "state.json")
     if not isinstance(state, dict) or not state:
-        raise WorkflowStageError(".codex-run/current/state.json is missing or invalid")
+        raise WorkflowStageError(".autodev-run/current/state.json is missing or invalid")
     return state
 
 

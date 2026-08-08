@@ -105,7 +105,7 @@ class PromptRunnerTests(unittest.TestCase):
 
     def test_planner_stdout_is_written_to_plan_file(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            plan_path = Path(temp_dir) / ".codex-run" / "current" / "plan.md"
+            plan_path = Path(temp_dir) / ".autodev-run" / "current" / "plan.md"
 
             plan = six_section_plan()
             prompt_runner.handle_planner_output(plan, plan_path)

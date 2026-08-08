@@ -111,7 +111,7 @@ class WorkflowStageWrapperTests(unittest.TestCase):
         self.assertNotIn("github_api", linux)
 
     def _write_state(self, repo: Path):
-        current = repo / ".codex-run" / "current"
+        current = repo / ".autodev-run" / "current"
         current.mkdir(parents=True)
         (current / "state.json").write_text(
             '{"IssueNumber":65,"Status":"Prepared","BranchName":"autodev/issue-65","BaseSha":"base-sha","BaseTreeSha":"base-tree"}\n',

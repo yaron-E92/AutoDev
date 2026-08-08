@@ -1,6 +1,6 @@
 # OpenCode frontend
 
-AutoDev's OpenCode integration is an optional cross-platform frontend over shared Python workflow stages. OpenCode owns isolated model conversations; AutoDev remains the source of truth for issue preparation, `.codex-run/current` artifacts, deterministic verification, semantic-verification contracts, repair limits, commits, CI, pull requests, and issue status.
+AutoDev's OpenCode integration is an optional cross-platform frontend over shared Python workflow stages. OpenCode owns isolated model conversations; AutoDev remains the source of truth for issue preparation, `.autodev-run/current` artifacts, deterministic verification, semantic-verification contracts, repair limits, commits, CI, pull requests, and issue status.
 
 Normal OpenCode execution does **not** require the Windows PowerShell issue-to-PR workflow. Windows and Linux use the same `automation.workflow_stages` backend.
 
@@ -131,7 +131,7 @@ PR_READY
 Python, not the model conversation, defines each role's legal bridge commands and output contract. Preparing an OpenCode run writes:
 
 ```text
-.codex-run/current/role-contracts.json
+.autodev-run/current/role-contracts.json
 ```
 
 The generated contract covers reader, synthesizer, planner, implementer, fixer, and verifier, including the exact prepare/accept commands, required output artifact, format constraints, and bounded handoff size where applicable.
@@ -139,7 +139,7 @@ The generated contract covers reader, synthesizer, planner, implementer, fixer, 
 Planner preparation also writes:
 
 ```text
-.codex-run/current/plan.template.md
+.autodev-run/current/plan.template.md
 ```
 
 from the same six headings used by the existing planner parser.
@@ -147,7 +147,7 @@ from the same six headings used by the existing planner parser.
 Verifier preparation writes:
 
 ```text
-.codex-run/current/verification-result.template.json
+.autodev-run/current/verification-result.template.json
 ```
 
 from the canonical semantic-verifier schema. Detectable acceptance criteria are pre-populated verbatim. The verifier fills parser-supported values only; a clean pass may use an empty `findings` array.
@@ -155,14 +155,14 @@ from the canonical semantic-verifier schema. Detectable acceptance criteria are 
 When a reader/planner/implementer/verifier protocol artifact is malformed, AutoDev allows **one** format-correction attempt for that role invocation. It writes:
 
 ```text
-.codex-run/current/contract-correction-<role>.md
+.autodev-run/current/contract-correction-<role>.md
 ```
 
 with the complete validation error, exact role contract, generated template where applicable, a bounded copy of the rejected artifact, and the exact accept command to rerun. A second rejection is terminal. This correction allowance is separate from deterministic code repair, semantic code repair, and CI repair limits.
 
 Accepted role artifacts are SHA-256 pinned in `state.json`. OpenCode stages that depend on a model-produced artifact fail before further work if that accepted artifact is missing or changed.
 
-The coordinator-specific implementer path is intentionally different from the standalone `/autodev-implement` command: after `stage --name render-implementer`, the implementer reads the already-rendered `.codex-run/current/implementer.md` and **does not prepare/render it again**.
+The coordinator-specific implementer path is intentionally different from the standalone `/autodev-implement` command: after `stage --name render-implementer`, the implementer reads the already-rendered `.autodev-run/current/implementer.md` and **does not prepare/render it again**.
 
 ## Coordinator flow
 
@@ -209,7 +209,7 @@ GitHub failures retain the original process exit code plus bounded stderr/stdout
 Lightweight counters and timings are persisted in:
 
 ```text
-.codex-run/current/run-diagnostics.json
+.autodev-run/current/run-diagnostics.json
 ```
 
 including role invocations, protocol-correction attempts, stage invocations, repeated identical deterministic failures, and per-stage wall time. Secrets and model transcripts are not fingerprint inputs.
@@ -288,26 +288,26 @@ Reader, synthesizer, planner, implementer, fixer, and verifier work runs in isol
 State passes through bounded artifacts rather than role chat transcripts:
 
 ```text
-.codex-run/current/issue.md
-.codex-run/current/role-contracts.json
-.codex-run/current/reader-brief.md
-.codex-run/current/synthesized-handoff.md
-.codex-run/current/plan.template.md
-.codex-run/current/plan.md
-.codex-run/current/implementer.md
-.codex-run/current/commit-message.txt
-.codex-run/current/local-check.log
-.codex-run/current/local-repair.md
-.codex-run/current/verification-result.template.json
-.codex-run/current/verification-result.json
-.codex-run/current/verification/semantic-attempt-*.json
-.codex-run/current/verification/final-verdict.json
-.codex-run/current/verification-repair.md
-.codex-run/current/ci-summary.json
-.codex-run/current/ci-repair.md
-.codex-run/current/contract-correction-<role>.md
-.codex-run/current/run-diagnostics.json
-.codex-run/current/state.json
+.autodev-run/current/issue.md
+.autodev-run/current/role-contracts.json
+.autodev-run/current/reader-brief.md
+.autodev-run/current/synthesized-handoff.md
+.autodev-run/current/plan.template.md
+.autodev-run/current/plan.md
+.autodev-run/current/implementer.md
+.autodev-run/current/commit-message.txt
+.autodev-run/current/local-check.log
+.autodev-run/current/local-repair.md
+.autodev-run/current/verification-result.template.json
+.autodev-run/current/verification-result.json
+.autodev-run/current/verification/semantic-attempt-*.json
+.autodev-run/current/verification/final-verdict.json
+.autodev-run/current/verification-repair.md
+.autodev-run/current/ci-summary.json
+.autodev-run/current/ci-repair.md
+.autodev-run/current/contract-correction-<role>.md
+.autodev-run/current/run-diagnostics.json
+.autodev-run/current/state.json
 ```
 
 Reader/synthesizer handoffs remain bounded. Planner output continues through AutoDev's existing six-section parser. Semantic JSON continues through the #35 schema and preserves successive `semantic-attempt-N.json` artifacts across repair cycles.

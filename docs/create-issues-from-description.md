@@ -164,7 +164,7 @@ linux/scripts/create-issues-from-description.sh \
   --yes
 ```
 
-Created issues are logged to `.codex-run/issue-creation-log.jsonl` by default. Override that path with `--creation-log`.
+Created issues are logged to `.autodev-run/issue-creation-log.jsonl` by default. Override that path with `--creation-log`.
 
 ## Safety Behavior
 

@@ -10,7 +10,7 @@ AUTODEV_ROOT = Path(__file__).resolve().parents[1]
 
 
 def current_profiles(repo: Path) -> str:
-    state_path = repo / ".codex-run" / "current" / "state.json"
+    state_path = repo / ".autodev-run" / "current" / "state.json"
     try:
         state = json.loads(state_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:

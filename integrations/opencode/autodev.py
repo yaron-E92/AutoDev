@@ -10,7 +10,7 @@ from pathlib import Path
 
 
 def _current_issue_number() -> int:
-    state_path = Path.cwd() / ".codex-run" / "current" / "state.json"
+    state_path = Path.cwd() / ".autodev-run" / "current" / "state.json"
     try:
         state = json.loads(state_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):

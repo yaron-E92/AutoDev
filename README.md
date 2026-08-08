@@ -497,7 +497,7 @@ The scripts render these templates using placeholders such as:
 The automation agent reads the rendered files under:
 
 ```text
-.codex-run/current/
+.autodev-run/current/
 ```
 
 ---
@@ -531,7 +531,7 @@ The prepare script:
 - reads base SHA/tree SHA from GitHub API
 - snapshots workspace files
 - renders `planner.md`
-- writes `.codex-run/current/state.json`
+- writes `.autodev-run/current/state.json`
 
 It does **not** run `git fetch`.
 It does **not** create a local branch.
@@ -662,7 +662,7 @@ Limitations:
 - Binary files can technically be committed via base64 blobs, but this workflow is meant for code/text.
 - Workspace should be reasonably aligned with the GitHub base branch.
 - Local checks may still create ignored files such as `bin`, `obj`, `node_modules`, or build output.
-- The workflow assumes one active `.codex-run/current` at a time.
+- The workflow assumes one active `.autodev-run/current` at a time.
 
 Recommended issue types:
 

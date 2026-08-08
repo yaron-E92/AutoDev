@@ -14,7 +14,7 @@ from typing import Callable, Iterable, TextIO
 from urllib import error, request
 
 
-DEFAULT_CREATION_LOG = Path(".codex-run") / "issue-creation-log.jsonl"
+DEFAULT_CREATION_LOG = Path(".autodev-run") / "issue-creation-log.jsonl"
 DEFAULT_MODEL = "devstral-small2-12k"
 DEFAULT_OLLAMA_URL = "http://localhost:11434/api/chat"
 DEFAULT_MODEL_NUM_PREDICT = 3500
