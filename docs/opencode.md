@@ -80,6 +80,27 @@ Only `code-repairable` outcomes are delegated to the fixer. A deterministic fail
 
 On `BLOCKED` or `FAILED`, the coordinator reports the issue number, AutoDev branch, completed/failed stage, failure classification, concise reason, artifact directory, whether the workspace has uncommitted changes relative to the current AutoDev snapshot, whether a commit or PR exists, the PR URL when available, and the recommended next action.
 
+### Durable status and resume
+
+OpenCode chat history is not workflow memory. Each new OpenCode issue-to-PR run also checkpoints #37's durable manifest at:
+
+```text
+.autodev-run/current/run-manifest.json
+```
+
+After an interruption or in a fresh OpenCode process, use:
+
+```text
+/autodev-status
+/autodev-resume
+```
+
+`/autodev-status` is read-only and reports completed stages, the next valid action, repair counters, drift/resume blockers, commit/PR identity, and the next #66 model role/model. `/autodev-resume` validates the manifest/artifacts, prepared repository/base identity, direct-edit source identity, and any #69 shipped-tree/PR-head/CI proof before entering the existing coordinator at the manifest-selected boundary. Completed model-heavy work is not replayed merely because the OpenCode process changed.
+
+Role-model changes continue to use normal #66 OpenCode configuration. Use `--invalidate-role <role>` only when intentionally invalidating completed #37 checkpoints affected by a changed role configuration.
+
+See [OpenCode status and resume](opencode-resume.md) for interruption/recovery details and the Windows-first resume flow.
+
 ## Shared stage architecture
 
 The frontend shape is:
@@ -262,6 +283,8 @@ The idempotent installer creates or refreshes only AutoDev-owned files:
   autodev.ps1          # Windows convenience wrapper
   commands/
     autodev-issue-to-pr.md
+    autodev-status.md
+    autodev-resume.md
     autodev-read.md
     autodev-plan.md
     autodev-implement.md
@@ -289,6 +312,7 @@ State passes through bounded artifacts rather than role chat transcripts:
 
 ```text
 .autodev-run/current/issue.md
+.autodev-run/current/run-manifest.json
 .autodev-run/current/role-contracts.json
 .autodev-run/current/reader-brief.md
 .autodev-run/current/synthesized-handoff.md
@@ -310,7 +334,7 @@ State passes through bounded artifacts rather than role chat transcripts:
 .autodev-run/current/state.json
 ```
 
-Reader/synthesizer handoffs remain bounded. Planner output continues through AutoDev's existing six-section parser. Semantic JSON continues through the #35 schema and preserves successive `semantic-attempt-N.json` artifacts across repair cycles.
+`run-manifest.json` is the #37 authority for completed stages, invalidation, failure, and next-stage/resume decisions. Reader/synthesizer handoffs remain bounded. Planner output continues through AutoDev's existing six-section parser. Semantic JSON continues through the #35 schema and preserves successive `semantic-attempt-N.json` artifacts across repair cycles.
 
 ## Coordinator and role permissions
 
@@ -318,8 +342,8 @@ The coordinator has:
 
 ```text
 edit: deny
-read: small current state/diagnostic/contract/verifier-result artifacts only
-bash: exact AutoDev stage bridge commands plus safe git status/diff
+read: small current state/manifest/diagnostic/contract/verifier-result artifacts only
+bash: exact AutoDev stage/status/resume bridge commands plus safe git status/diff
 task: deny all, then allow only the six autodev-* role agents
 ```
 
