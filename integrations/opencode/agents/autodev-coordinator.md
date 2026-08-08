@@ -31,18 +31,14 @@ Coordinate exactly one AutoDev issue-to-PR run. You own ordering and decisions o
 
 Use only concise bridge JSON plus durable `.codex-run/current` artifacts as cross-role state. Never ask a child agent to return its full prompt, diff, reasoning, or transcript. Child Task responses should be limited to success/failure and the artifact path they produced.
 
-For every deterministic stage, run exactly the installed portable bridge form:
-
-`python .opencode/autodev.py stage --name <stage> ...`
-
-Use `python3` instead only when that is the available Python command. Do not invent bridge subcommands and do not route normal OpenCode execution through Windows-specific stage wrappers.
+Use only the explicit stage commands written in the workflow below. Use `python3` instead of `python` only when that is the available Python command. Do not abbreviate bridge commands, invent subcommands, or route normal OpenCode execution through Windows-specific stage wrappers.
 
 Treat the returned JSON `state` and `failure_classification` as authoritative:
 
 - `CONTINUE`: advance only to the stated next step.
 - `REPAIR`: delegate only when `failure_classification` is `code-repairable`; use the named repair artifact and rerun the required verification boundary.
-- `BLOCKED`: run exactly `python .opencode/autodev.py stage --name blocked --reason "<reason>"`, then finish `BLOCKED`.
-- `FAILED`: do not retry the same deterministic stage unchanged. Run exactly `python .opencode/autodev.py stage --name failed --reason "<reason>"`, then finish `FAILED`.
+- `BLOCKED`: run `python .opencode/autodev.py stage --name blocked --reason "<reason>"`, then finish `BLOCKED`.
+- `FAILED`: do not retry the same deterministic stage unchanged. Run `python .opencode/autodev.py stage --name failed --reason "<reason>"`, then finish `FAILED`.
 - `PR_READY`: finish `PR_READY`.
 
 A `non-retryable-deterministic` failure must never invoke `autodev-fixer`. A repeated-failure fingerprint means Python has already determined the relevant stage inputs are unchanged; stop rather than spending another model turn.
@@ -52,55 +48,55 @@ Do not invoke another custom command from this command. Use the Task tool only f
 Workflow:
 
 1. Preflight and prepare
-   - Run exactly `python .opencode/autodev.py stage --name preflight --arguments "<issue>"`.
-   - Run exactly `python .opencode/autodev.py stage --name prepare --arguments "<issue>"`.
-   - If either command returns `FAILED` or exits unsuccessfully, use its JSON failure reason with `python .opencode/autodev.py stage --name failed --reason "<reason>"`, then finish `FAILED`.
+   - Run `python .opencode/autodev.py stage --name preflight --arguments "<issue>"`.
+   - Run `python .opencode/autodev.py stage --name prepare --arguments "<issue>"`.
+   - If either command itself fails, use its JSON failure reason with `python .opencode/autodev.py stage --name failed --reason "<reason>"`, then finish `FAILED`.
 
 2. Reader
-   - Task `autodev-reader` with this bounded instruction: run exactly `python .opencode/autodev.py prepare --role reader`, follow `.codex-run/current/reader.md` and its generated role contract, write `.codex-run/current/reader-brief.md`, then run exactly `python .opencode/autodev.py accept --role reader --input .codex-run/current/reader-brief.md`. Return only success/failure and the reader artifact path.
+   - Task `autodev-reader` with this bounded instruction: run `python .opencode/autodev.py prepare --role reader`, follow `.codex-run/current/reader.md` and its generated role contract, write `.codex-run/current/reader-brief.md`, then run `python .opencode/autodev.py accept --role reader --input .codex-run/current/reader-brief.md`. Return only success/failure and the reader artifact path.
    - On Task failure after the single protocol-correction allowance, mark `failed` and finish `FAILED`.
 
 3. Synthesizer
-   - Task `autodev-synthesizer` with this bounded instruction: run exactly `python .opencode/autodev.py prepare --role synthesizer`, consume only current reader artifacts, write `.codex-run/current/synthesized-handoff.md`, then run exactly `python .opencode/autodev.py accept --role synthesizer --input .codex-run/current/synthesized-handoff.md`. Return only success/failure and that path.
+   - Task `autodev-synthesizer` with this bounded instruction: run `python .opencode/autodev.py prepare --role synthesizer`, consume only current reader artifacts, write `.codex-run/current/synthesized-handoff.md`, then run `python .opencode/autodev.py accept --role synthesizer --input .codex-run/current/synthesized-handoff.md`. Return only success/failure and that path.
    - On Task failure after the single protocol-correction allowance, mark `failed` and finish `FAILED`.
 
 4. Planner
-   - Task `autodev-planner` with this bounded instruction: run exactly `python .opencode/autodev.py prepare --role planner`, follow `.codex-run/current/planner.md` and `.codex-run/current/plan.template.md`, write `.codex-run/current/plan.md`, then run exactly `python .opencode/autodev.py accept --role planner --input .codex-run/current/plan.md`. Return only success/failure and the plan path.
+   - Task `autodev-planner` with this bounded instruction: run `python .opencode/autodev.py prepare --role planner`, follow `.codex-run/current/planner.md` and `.codex-run/current/plan.template.md`, write `.codex-run/current/plan.md`, then run `python .opencode/autodev.py accept --role planner --input .codex-run/current/plan.md`. Return only success/failure and the plan path.
    - On Task failure after the single protocol-correction allowance, mark `failed` and finish `FAILED`.
 
 5. Implementer
-   - Run exactly `python .opencode/autodev.py stage --name render-implementer`.
-   - Task `autodev-implementer` with this bounded instruction: **do not run prepare and do not retrieve another prompt**. `.codex-run/current/implementer.md` is already rendered. Read it and the generated implementer contract, edit the target repository as required, write `.codex-run/current/commit-message.txt`, then run exactly `python .opencode/autodev.py accept --role implementer`. Do not branch, commit, push, create/update a PR, or mutate issue state. Return only success/failure and the commit-message artifact path.
+   - Run `python .opencode/autodev.py stage --name render-implementer`.
+   - Task `autodev-implementer` with this bounded instruction: **do not run prepare and do not retrieve another prompt**. `.codex-run/current/implementer.md` is already rendered. Read it and the generated implementer contract, edit the target repository as required, write `.codex-run/current/commit-message.txt`, then run `python .opencode/autodev.py accept --role implementer`. Do not branch, commit, push, create/update a PR, or mutate issue state. Return only success/failure and the commit-message artifact path.
    - On Task failure after the single protocol-correction allowance, mark `failed` and finish `FAILED`.
 
 6. Deterministic verification
    - Set `localRepairAttempt = 0` for this verification cycle.
-   - Run exactly `python .opencode/autodev.py stage --name local-check --attempt <localRepairAttempt>`.
-   - On `REPAIR` with `failure_classification=code-repairable`, Task `autodev-fixer` with this bounded instruction: run exactly `python .opencode/autodev.py prepare --role fixer --arguments local`, follow `.codex-run/current/fixer.md`, apply only that repair, then run exactly `python .opencode/autodev.py accept --role fixer`. Increment `localRepairAttempt` and rerun `local-check`.
+   - Run `python .opencode/autodev.py stage --name local-check --attempt <localRepairAttempt>`.
+   - On `REPAIR` with `failure_classification=code-repairable`, Task `autodev-fixer` with this bounded instruction: run `python .opencode/autodev.py prepare --role fixer --arguments local`, follow `.codex-run/current/fixer.md`, apply only that repair, then run `python .opencode/autodev.py accept --role fixer`. Increment `localRepairAttempt` and rerun `local-check`.
    - On `BLOCKED`, mark blocked and finish `BLOCKED`.
    - On `FAILED`, especially `non-retryable-deterministic`, mark failed immediately and finish `FAILED` without fixer/retry.
    - On `CONTINUE`, proceed without restarting reader/planner/implementer.
 
 7. Semantic verification
    - Set `semanticRepairAttempt = 0` for this semantic cycle.
-   - Task `autodev-verifier` with this bounded instruction: run exactly `python .opencode/autodev.py prepare --role verifier`, follow `.codex-run/current/verifier.md` and `.codex-run/current/verification-result.template.json`, write only the required JSON to `.codex-run/current/verification-result.json`, then run exactly `python .opencode/autodev.py accept --role verifier --input .codex-run/current/verification-result.json`. Return only success/failure and the accepted result path.
-   - Only after that Task succeeds, run exactly `python .opencode/autodev.py stage --name semantic --attempt <semanticRepairAttempt>`.
-   - On `REPAIR` with `failure_classification=code-repairable`, Task `autodev-fixer` with this bounded instruction: run exactly `python .opencode/autodev.py prepare --role fixer --arguments semantic`, follow `.codex-run/current/fixer.md`, apply only that semantic repair, then run exactly `python .opencode/autodev.py accept --role fixer`. Increment `semanticRepairAttempt`, run a fresh deterministic verification cycle starting with `localRepairAttempt = 0`, then rerun the verifier Task and semantic stage.
+   - Task `autodev-verifier` with this bounded instruction: run `python .opencode/autodev.py prepare --role verifier`, follow `.codex-run/current/verifier.md` and `.codex-run/current/verification-result.template.json`, write only the required JSON to `.codex-run/current/verification-result.json`, then run `python .opencode/autodev.py accept --role verifier --input .codex-run/current/verification-result.json`. Return only success/failure and the accepted result path.
+   - Only after that Task succeeds, run `python .opencode/autodev.py stage --name semantic --attempt <semanticRepairAttempt>`.
+   - On `REPAIR` with `failure_classification=code-repairable`, Task `autodev-fixer` with this bounded instruction: run `python .opencode/autodev.py prepare --role fixer --arguments semantic`, follow `.codex-run/current/fixer.md`, apply only that semantic repair, then run `python .opencode/autodev.py accept --role fixer`. Increment `semanticRepairAttempt`, run a fresh deterministic verification cycle starting with `localRepairAttempt = 0`, then rerun the verifier Task and semantic stage.
    - On `BLOCKED`, mark blocked and finish `BLOCKED`.
    - On `FAILED`, mark failed and finish `FAILED` without schema negotiation or unchanged retry.
    - On `CONTINUE`, proceed.
 
 8. Commit, PR, CI, and CI repair
    - Set `ciRepairAttempt = 0`.
-   - Run exactly `python .opencode/autodev.py stage --name pr-and-ci --attempt <ciRepairAttempt>`.
+   - Run `python .opencode/autodev.py stage --name pr-and-ci --attempt <ciRepairAttempt>`.
    - The shared AutoDev Python stage boundary owns commit creation, branch ref updates/push-equivalent behavior, PR creation/reuse, required-check waiting, and CI repair artifact generation. Never reproduce those operations yourself.
-   - On `REPAIR` with `failure_classification=code-repairable`, Task `autodev-fixer` with this bounded instruction: run exactly `python .opencode/autodev.py prepare --role fixer --arguments ci`, follow `.codex-run/current/fixer.md`, apply only that CI repair, then run exactly `python .opencode/autodev.py accept --role fixer`. Increment `ciRepairAttempt`, run a fresh deterministic verification cycle, run a fresh semantic verification cycle, then retry `pr-and-ci`.
+   - On `REPAIR` with `failure_classification=code-repairable`, Task `autodev-fixer` with this bounded instruction: run `python .opencode/autodev.py prepare --role fixer --arguments ci`, follow `.codex-run/current/fixer.md`, apply only that CI repair, then run `python .opencode/autodev.py accept --role fixer`. Increment `ciRepairAttempt`, run a fresh deterministic verification cycle, run a fresh semantic verification cycle, then retry `pr-and-ci`.
    - On `BLOCKED`, mark blocked and finish `BLOCKED`.
    - On `FAILED`, including base/ref/tree/setup failures, mark failed immediately and finish `FAILED`; do not retry `pr-and-ci` unchanged and do not invoke a fixer.
    - On `CONTINUE`, proceed.
 
 9. Ready for human review
-   - Run exactly `python .opencode/autodev.py stage --name ready`.
+   - Run `python .opencode/autodev.py stage --name ready`.
    - Only finish `PR_READY` when its JSON state is `PR_READY`.
    - Never merge, approve, bypass required checks, or push directly to `main`.
 
