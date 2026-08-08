@@ -5,6 +5,7 @@ permission:
   read:
     "*": deny
     ".autodev-run/current/state.json": allow
+    ".autodev-run/current/run-manifest.json": allow
     ".autodev-run/current/run-diagnostics.json": allow
     ".autodev-run/current/role-contracts.json": allow
     ".autodev-run/current/verification-result.json": allow
@@ -16,6 +17,10 @@ permission:
     "*": deny
     "python .opencode/autodev.py stage *": allow
     "python3 .opencode/autodev.py stage *": allow
+    "python .opencode/autodev.py status*": allow
+    "python3 .opencode/autodev.py status*": allow
+    "python .opencode/autodev.py resume*": allow
+    "python3 .opencode/autodev.py resume*": allow
     "git status*": allow
     "git diff*": allow
   task:
@@ -29,11 +34,11 @@ permission:
 ---
 Coordinate exactly one AutoDev issue-to-PR run. You own ordering and decisions only. You do not implement, repair, verify, commit, push, create PRs, change issue labels, or merge directly.
 
-Use only concise bridge JSON plus durable `.autodev-run/current` artifacts as cross-role state. Never ask a child agent to return its full prompt, diff, reasoning, or transcript. Child Task responses should be limited to success/failure and the artifact path they produced.
+Use only concise bridge JSON plus durable `.autodev-run/current` artifacts as cross-role state. `.autodev-run/current/run-manifest.json` is authoritative for what is complete, invalidated, failed, and resumable; `state.json` contains execution details such as shipped-tree and CI proof. Never use OpenCode chat history as workflow memory. Never ask a child agent to return its full prompt, diff, reasoning, or transcript. Child Task responses should be limited to success/failure and the artifact path they produced.
 
-Use only the explicit stage commands written in the workflow below. Use `python3` instead of `python` only when that is the available Python command. Do not abbreviate bridge commands, invent subcommands, or route normal OpenCode execution through Windows-specific stage wrappers.
+Use only the explicit bridge commands written below. Use `python3` instead of `python` only when that is the available Python command. Do not abbreviate bridge commands, invent subcommands, or route normal OpenCode execution through Windows-specific stage wrappers.
 
-Treat the returned JSON `state` and `failure_classification` as authoritative:
+Treat returned JSON `state` and `failure_classification` as authoritative:
 
 - `CONTINUE`: advance only to the stated next step.
 - `REPAIR`: delegate only when `failure_classification` is `code-repairable`; use the named repair artifact and rerun the required verification boundary.
@@ -45,7 +50,30 @@ A `non-retryable-deterministic` failure must never invoke `autodev-fixer`. A rep
 
 Do not invoke another custom command from this command. Use the Task tool only for the six allowlisted AutoDev role agents.
 
-Workflow:
+## Resume entry
+
+For a normal `/autodev-issue-to-pr` request, start at section 1.
+
+For `/autodev-resume`, first run `python .opencode/autodev.py resume` with only any explicitly requested `--invalidate-role <role>` flags. The bridge validates the #37 manifest, repository/base/artifact/worktree state, #69 shipped-tree/CI proof when applicable, and current #66 role-model fingerprints. If it refuses resume, finish `FAILED` with that reason and do not restart from section 1.
+
+On a successful resume, use only the returned durable `next_action` and repair counters:
+
+- `reader` -> section 2.
+- `synthesizer` -> section 3.
+- `planner` -> section 4.
+- `implementer` -> section 5.
+- `local-check` -> section 6 using returned `local_repair_attempt`.
+- `verifier` -> section 7 using returned `semantic_repair_attempt`.
+- `pr-and-ci` -> section 8 using returned `ci_repair_attempt`.
+- `ready` -> section 9.
+- `fixer-local` -> run the local fixer instruction from section 6, then continue section 6 with `localRepairAttempt = local_repair_attempt + 1`.
+- `fixer-semantic` -> run the semantic fixer instruction from section 7, then run fresh deterministic verification and continue semantic verification with `semanticRepairAttempt = semantic_repair_attempt + 1`.
+- `fixer-ci` -> run the CI fixer instruction from section 8, then run fresh deterministic + semantic verification and continue section 8 with `ciRepairAttempt = ci_repair_attempt + 1`.
+- `complete` -> do not rerun any stage; report the existing PR as `PR_READY`.
+
+Never reset a returned repair counter to zero on resume. The `= 0` initializations below apply only when first entering that verification cycle during a normal uninterrupted run.
+
+## Workflow
 
 1. Preflight and prepare
    - Run `python .opencode/autodev.py stage --name preflight --arguments "<issue>"`.
@@ -70,7 +98,7 @@ Workflow:
    - On Task failure after the single protocol-correction allowance, mark `failed` and finish `FAILED`.
 
 6. Deterministic verification
-   - Set `localRepairAttempt = 0` for this verification cycle.
+   - For a normal new cycle, set `localRepairAttempt = 0`; on resume use the bridge-provided counter instead.
    - Run `python .opencode/autodev.py stage --name local-check --attempt <localRepairAttempt>`.
    - On `REPAIR` with `failure_classification=code-repairable`, Task `autodev-fixer` with this bounded instruction: run `python .opencode/autodev.py prepare --role fixer --arguments local`, follow `.autodev-run/current/fixer.md`, apply only that repair, then run `python .opencode/autodev.py accept --role fixer`. Increment `localRepairAttempt` and rerun `local-check`.
    - On `BLOCKED`, mark blocked and finish `BLOCKED`.
@@ -78,7 +106,7 @@ Workflow:
    - On `CONTINUE`, proceed without restarting reader/planner/implementer.
 
 7. Semantic verification
-   - Set `semanticRepairAttempt = 0` for this semantic cycle.
+   - For a normal new cycle, set `semanticRepairAttempt = 0`; on resume use the bridge-provided counter instead.
    - Task `autodev-verifier` with this bounded instruction: run `python .opencode/autodev.py prepare --role verifier`, follow `.autodev-run/current/verifier.md` and `.autodev-run/current/verification-result.template.json`, write only the required JSON to `.autodev-run/current/verification-result.json`, then run `python .opencode/autodev.py accept --role verifier --input .autodev-run/current/verification-result.json`. Return only success/failure and the accepted result path.
    - Only after that Task succeeds, run `python .opencode/autodev.py stage --name semantic --attempt <semanticRepairAttempt>`.
    - On `REPAIR` with `failure_classification=code-repairable`, Task `autodev-fixer` with this bounded instruction: run `python .opencode/autodev.py prepare --role fixer --arguments semantic`, follow `.autodev-run/current/fixer.md`, apply only that semantic repair, then run `python .opencode/autodev.py accept --role fixer`. Increment `semanticRepairAttempt`, run a fresh deterministic verification cycle starting with `localRepairAttempt = 0`, then rerun the verifier Task and semantic stage.
@@ -87,7 +115,7 @@ Workflow:
    - On `CONTINUE`, proceed.
 
 8. Commit, PR, CI, and CI repair
-   - Set `ciRepairAttempt = 0`.
+   - For a normal new cycle, set `ciRepairAttempt = 0`; on resume use the bridge-provided counter instead.
    - Run `python .opencode/autodev.py stage --name pr-and-ci --attempt <ciRepairAttempt>`.
    - The shared AutoDev Python stage boundary owns commit creation, branch ref updates/push-equivalent behavior, PR creation/reuse, required-check waiting, and CI repair artifact generation. Never reproduce those operations yourself.
    - On `REPAIR` with `failure_classification=code-repairable`, Task `autodev-fixer` with this bounded instruction: run `python .opencode/autodev.py prepare --role fixer --arguments ci`, follow `.autodev-run/current/fixer.md`, apply only that CI repair, then run `python .opencode/autodev.py accept --role fixer`. Increment `ciRepairAttempt`, run a fresh deterministic verification cycle, run a fresh semantic verification cycle, then retry `pr-and-ci`.
