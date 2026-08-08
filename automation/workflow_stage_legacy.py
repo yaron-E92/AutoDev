@@ -41,6 +41,43 @@ def render_verification_repair(
     workflow_stages.write_state(current, state)
 
 
+def initialize_shipment_proof(
+    repo: Path,
+    current: Path,
+    state: dict[str, object],
+) -> dict[str, object]:
+    if state.get("VerificationProofVersion"):
+        return state
+    base_sha = str(state.get("BaseSha", "")).strip()
+    base_tree_sha = str(state.get("BaseTreeSha", "")).strip()
+    if not base_sha or not base_tree_sha:
+        raise workflow_stages.WorkflowStageError(
+            "cannot initialize shipped-tree proof because prepared BaseSha/BaseTreeSha is missing"
+        )
+    local_head = workflow_stages.validate_prepared_worktree(repo, base_sha)
+    snapshot_path = current / "workspace-snapshot.json"
+    workflow_stages.write_workspace_snapshot(repo, snapshot_path)
+    snapshot_hash = workflow_stages._file_sha256(snapshot_path)
+    if not snapshot_hash:
+        raise workflow_stages.WorkflowStageError(
+            "cannot initialize shipped-tree proof because the workspace snapshot is missing"
+        )
+    state["VerificationProofVersion"] = workflow_stages.VERIFICATION_PROOF_VERSION
+    state["PreparedLocalHeadSha"] = local_head
+    state["PreparedSnapshotHash"] = snapshot_hash
+    state["PrHeadSha"] = ""
+    workflow_stages.write_state(current, state)
+    workflow_stages._record_shipment_diagnostics(
+        current,
+        prepared_base_sha=base_sha,
+        prepared_base_tree=base_tree_sha,
+        prepared_local_head=local_head,
+        prepared_snapshot_hash=snapshot_hash,
+        proof_initialized_at="RenderImplementerPrompt",
+    )
+    return state
+
+
 def run_mode(mode: str, repo: Path, autodev_root: Path) -> int:
     repo = repo.expanduser().resolve()
     autodev_root = autodev_root.expanduser().resolve()
@@ -48,6 +85,7 @@ def run_mode(mode: str, repo: Path, autodev_root: Path) -> int:
     state = workflow_stages.read_state(current)
 
     if mode == "RenderImplementerPrompt":
+        state = initialize_shipment_proof(repo, current, state)
         workflow_stages.render_implementer_prompt(repo, current, state, autodev_root)
         print("RENDERED_IMPLEMENTER_PROMPT")
         return 0
