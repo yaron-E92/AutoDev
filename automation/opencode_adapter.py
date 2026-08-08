@@ -58,12 +58,17 @@ AGENT_FILES = (
     "autodev-verifier.md",
 )
 ROLE_NAMES = ("reader", "synthesizer", "planner", "implementer", "fixer", "verifier")
+OPENCODE_ROLE_NAMES = ("coordinator", *ROLE_NAMES)
+AUTODEV_AGENT_BY_ROLE = {role: f"autodev-{role}" for role in OPENCODE_ROLE_NAMES}
 COORDINATOR_STAGES = workflow_stages.STAGES
 MAX_HANDOFF_CHARS = 30_000
 MAX_READER_BUNDLE_CHARS = 24_000
 OPENCODE_PROTOCOL_VERSION = 1
 DEFAULT_MAX_REPAIR_ATTEMPTS = workflow_stages.DEFAULT_MAX_REPAIR_ATTEMPTS
 DEFAULT_MAX_SEMANTIC_REPAIR_ATTEMPTS = workflow_stages.DEFAULT_MAX_SEMANTIC_REPAIR_ATTEMPTS
+_UNSUPPORTED_MODEL_OVERRIDE = re.compile(
+    r"(?<!\S)--(?:model|role-model-profile)(?=$|[\s=])"
+)
 
 
 class OpenCodeAdapterError(RuntimeError):
@@ -193,6 +198,150 @@ def issue_number_from_arguments(arguments: str) -> int:
     return workflow_stages.issue_number_from_arguments(arguments)
 
 
+def reject_unsupported_model_overrides(arguments: str) -> None:
+    if _UNSUPPORTED_MODEL_OVERRIDE.search(arguments or ""):
+        raise OpenCodeAdapterError(
+            "per-run OpenCode model overrides are not supported because OpenCode does not document "
+            "per-Task child-model selection; configure agent.autodev-*.model in opencode.json/jsonc "
+            "before starting the OpenCode session"
+        )
+
+
+def resolve_opencode_model_mappings(
+    repo: Path,
+    *,
+    runner=subprocess.run,
+) -> dict[str, dict[str, str]]:
+    repo = repo.expanduser().resolve()
+    try:
+        completed = runner(
+            ["opencode", "debug", "config"],
+            cwd=repo,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            capture_output=True,
+            check=False,
+        )
+    except OSError as exc:
+        raise OpenCodeAdapterError(
+            "OpenCode model mapping introspection requires the `opencode` CLI"
+        ) from exc
+    returncode = int(getattr(completed, "returncode", 1))
+    if returncode != 0:
+        raise OpenCodeAdapterError(
+            f"opencode debug config failed with exit code {returncode}; fix OpenCode configuration before running AutoDev"
+        )
+    raw = str(getattr(completed, "stdout", "") or "").strip()
+    try:
+        config = json.loads(raw or "{}")
+    except json.JSONDecodeError as exc:
+        raise OpenCodeAdapterError(
+            "opencode debug config returned invalid JSON; AutoDev cannot safely resolve role models"
+        ) from exc
+    if not isinstance(config, dict):
+        raise OpenCodeAdapterError(
+            "opencode debug config returned an unexpected value; AutoDev cannot safely resolve role models"
+        )
+    return model_mappings_from_config(config)
+
+
+def model_mappings_from_config(config: dict[str, object]) -> dict[str, dict[str, str]]:
+    global_model = _configured_model(config.get("model"), "OpenCode global/default model")
+    raw_agents = config.get("agent", {})
+    if raw_agents is None:
+        raw_agents = {}
+    if not isinstance(raw_agents, dict):
+        raise OpenCodeAdapterError("OpenCode resolved `agent` configuration must be an object")
+
+    known_agents = set(AUTODEV_AGENT_BY_ROLE.values())
+    for agent_name, value in raw_agents.items():
+        name = str(agent_name)
+        if not name.startswith("autodev-") or name in known_agents:
+            continue
+        if isinstance(value, dict) and "model" in value:
+            raise OpenCodeAdapterError(
+                f"unknown AutoDev OpenCode role mapping: agent.{name}.model"
+            )
+
+    explicit: dict[str, str] = {}
+    for role, agent_name in AUTODEV_AGENT_BY_ROLE.items():
+        value = raw_agents.get(agent_name, {})
+        if value is None:
+            value = {}
+        if not isinstance(value, dict):
+            raise OpenCodeAdapterError(f"OpenCode agent.{agent_name} configuration must be an object")
+        if "model" in value:
+            explicit[role] = _configured_model(
+                value.get("model"),
+                f"OpenCode agent.{agent_name}.model",
+                required=True,
+            )
+
+    coordinator_model = explicit.get("coordinator", global_model)
+    report: dict[str, dict[str, str]] = {}
+    for role in OPENCODE_ROLE_NAMES:
+        agent_name = AUTODEV_AGENT_BY_ROLE[role]
+        if role in explicit:
+            report[role] = {
+                "agent": agent_name,
+                "source": "explicit",
+                "model": explicit[role],
+                "inherits_from": "",
+            }
+            continue
+        if role == "coordinator":
+            report[role] = {
+                "agent": agent_name,
+                "source": "inherited",
+                "model": global_model,
+                "inherits_from": (
+                    "OpenCode global/default model"
+                    if global_model
+                    else "OpenCode current/default model (runtime /models selection may apply)"
+                ),
+            }
+            continue
+        report[role] = {
+            "agent": agent_name,
+            "source": "inherited",
+            "model": coordinator_model,
+            "inherits_from": (
+                "autodev-coordinator during /autodev-issue-to-pr; invoking primary for standalone role commands"
+            ),
+        }
+    return report
+
+
+def _configured_model(value: object, label: str, *, required: bool = False) -> str:
+    if value is None and not required:
+        return ""
+    if not isinstance(value, str) or not value.strip():
+        raise OpenCodeAdapterError(f"{label} must be a non-empty provider/model identifier")
+    model = value.strip()
+    if any(character.isspace() for character in model):
+        raise OpenCodeAdapterError(f"{label} must be a provider/model identifier without whitespace")
+    provider, separator, model_id = model.partition("/")
+    if not separator or not provider or not model_id or model_id.startswith("/"):
+        raise OpenCodeAdapterError(f"{label} must use provider/model syntax")
+    return model
+
+
+def render_model_mappings(mappings: dict[str, dict[str, str]]) -> str:
+    lines = ["AutoDev OpenCode role models:"]
+    for role in OPENCODE_ROLE_NAMES:
+        value = mappings[role]
+        model = value.get("model", "")
+        if value.get("source") == "explicit":
+            resolution = f"{model} (explicit)"
+        elif model:
+            resolution = f"{model} (inherited from {value.get('inherits_from', '')})"
+        else:
+            resolution = f"inherited from {value.get('inherits_from', '')}"
+        lines.append(f"{role:<13} {resolution}")
+    return "\n".join(lines)
+
+
 def ensure_current_issue(
     repo: Path,
     autodev_root: Path,
@@ -221,6 +370,7 @@ def prepare_role(
     *,
     autodev_root: Path = AUTODEV_ROOT,
 ) -> Path:
+    reject_unsupported_model_overrides(arguments)
     repo = repo.expanduser().resolve()
     autodev_root = autodev_root.expanduser().resolve()
     current = ensure_current_issue(repo, autodev_root, arguments)
@@ -392,6 +542,7 @@ def workflow_stage(
     runner=subprocess.run,
     which=shutil.which,
 ) -> tuple[int, dict[str, object]]:
+    reject_unsupported_model_overrides(arguments)
     repo = repo.expanduser().resolve()
     try:
         code, payload = workflow_stages.execute_stage(
@@ -404,6 +555,8 @@ def workflow_stage(
             runner=runner,
             which=which,
         )
+        if name == "preflight" and payload.get("state") == "CONTINUE":
+            resolve_opencode_model_mappings(repo, runner=runner)
     except workflow_stages.WorkflowStageError as exc:
         raise OpenCodeAdapterError(
             str(exc),
@@ -804,6 +957,9 @@ def build_parser() -> argparse.ArgumentParser:
     install.add_argument("--autodev-root", default=str(AUTODEV_ROOT))
     install.add_argument("--python", default=os.environ.get("PYTHON", "python"))
 
+    models = subparsers.add_parser("models")
+    models.add_argument("--repo", default=".")
+
     prepare = subparsers.add_parser("prepare")
     prepare.add_argument(
         "--role",
@@ -846,6 +1002,10 @@ def run(argv: list[str] | None = None) -> int:
                 f"Installed {len(installed)} AutoDev OpenCode assets into "
                 f"{Path(args.target_repo).resolve() / '.opencode'}"
             )
+            return 0
+        if args.command == "models":
+            mappings = resolve_opencode_model_mappings(Path(args.repo))
+            print(render_model_mappings(mappings))
             return 0
         if args.command == "prepare":
             path = prepare_role(
