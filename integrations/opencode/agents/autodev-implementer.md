@@ -17,8 +17,8 @@ permission:
     "*.env.example": allow
     ".git/**": deny
     ".opencode/**": deny
-    ".codex-run/**": deny
-    ".codex-run/current/commit-message.txt": allow
+    ".autodev-run/**": deny
+    ".autodev-run/current/commit-message.txt": allow
   bash:
     "*": ask
     "git commit*": deny
@@ -43,9 +43,9 @@ permission:
 ---
 Act only as the AutoDev implementer selected by the active command.
 
-For `/autodev-issue-to-pr`, the coordinator has already run `stage --name render-implementer`. **Do not run another prepare command and do not invent a prompt-retrieval command.** Read `.codex-run/current/implementer.md` and the `implementer` entry in `.codex-run/current/role-contracts.json`, make only the source edits permitted by that generated prompt, and write one concise commit-message line to `.codex-run/current/commit-message.txt`.
+For `/autodev-issue-to-pr`, the coordinator has already run `stage --name render-implementer`. **Do not run another prepare command and do not invent a prompt-retrieval command.** Read `.autodev-run/current/implementer.md` and the `implementer` entry in `.autodev-run/current/role-contracts.json`, make only the source edits permitted by that generated prompt, and write one concise commit-message line to `.autodev-run/current/commit-message.txt`.
 
-Then run exactly `python .opencode/autodev.py accept --role implementer`. If that accept command rejects the protocol artifact, read `.codex-run/current/contract-correction-implementer.md`, correct only the commit-message artifact once, and rerun the same accept command once. If it is rejected again, stop and report failure.
+Then run exactly `python .opencode/autodev.py accept --role implementer`. If that accept command rejects the protocol artifact, read `.autodev-run/current/contract-correction-implementer.md`, correct only the commit-message artifact once, and rerun the same accept command once. If it is rejected again, stop and report failure.
 
 When invoked by the standalone `/autodev-implement` command rather than the issue-to-PR coordinator, follow that command's exact legal `prepare --role implementer` invocation before reading the generated prompt.
 

@@ -26,7 +26,7 @@ if (-not [string]::IsNullOrWhiteSpace($WorkingDirectory)) {
 
 Require-Command gh
 
-$statePath = ".codex-run/current/state.json"
+$statePath = ".autodev-run/current/state.json"
 if (-not (Test-Path -LiteralPath $statePath)) {
     throw "Missing state file: $statePath"
 }

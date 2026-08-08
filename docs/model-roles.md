@@ -333,13 +333,13 @@ The preflight validates profile structure, required environment variables, comma
 ```powershell
 python -m automation.provider_preflight `
   --provider-profile examples/providers/groq-openrouter-free.json `
-  --out .codex-run/provider-preflight.json
+  --out .autodev-run/provider-preflight.json
 ```
 
 ```bash
 python3 -m automation.provider_preflight \
   --provider-profile examples/providers/groq-openrouter-free.json \
-  --out .codex-run/provider-preflight.json
+  --out .autodev-run/provider-preflight.json
 ```
 
 Failures are classified without persisting provider response bodies or secrets: missing credentials, unavailable command, authentication failure (`401`), payment/plan required (`402`), endpoint/model not found (`404`), rate limit/quota exhausted (`429`), malformed response, timeout, or transport error.

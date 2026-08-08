@@ -117,7 +117,7 @@ class OpenCodeIntegrationTests(unittest.TestCase):
         self.assertIn("ciRepairAttempt", body)
         self.assertIn("stage --name failed", body)
         self.assertIn("stage --name blocked", body)
-        self.assertIn("accept --role verifier --input .codex-run/current/verification-result.json", body)
+        self.assertIn("accept --role verifier --input .autodev-run/current/verification-result.json", body)
         self.assertIn("do not run prepare", body.casefold())
 
     def test_checked_in_bridge_snippets_use_only_real_argparse_commands(self):
@@ -166,7 +166,7 @@ class OpenCodeIntegrationTests(unittest.TestCase):
     def test_missing_current_issue_delegates_to_portable_prepare(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
-            current = repo / ".codex-run" / "current"
+            current = repo / ".autodev-run" / "current"
             current.mkdir(parents=True)
             (current / "state.json").write_text(json.dumps({"IssueNumber": 65}), encoding="utf-8")
 
@@ -395,7 +395,7 @@ class OpenCodeIntegrationTests(unittest.TestCase):
             self.assertNotIn("opencode_adapter", path.read_text(encoding="utf-8"))
 
     def _write_state(self, repo: Path, **overrides):
-        current = repo / ".codex-run" / "current"
+        current = repo / ".autodev-run" / "current"
         current.mkdir(parents=True, exist_ok=True)
         state = {
             "IssueNumber": 65,

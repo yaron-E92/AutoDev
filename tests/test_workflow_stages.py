@@ -50,7 +50,7 @@ class WorkflowStageTests(unittest.TestCase):
                         which=lambda name: None if name == "gh" else f"/tools/{name}",
                     )
 
-            self.assertFalse((repo / ".codex-run").exists())
+            self.assertFalse((repo / ".autodev-run").exists())
 
     def test_prepare_writes_cross_platform_state_without_model_calls(self):
         issue = {
@@ -130,7 +130,7 @@ class WorkflowStageTests(unittest.TestCase):
             self.assertIn("tree.sha", str(raised.exception))
             self.assertIn("base-sha", str(raised.exception))
             gh.assert_not_called()
-            self.assertFalse((repo / ".codex-run" / "current" / "state.json").exists())
+            self.assertFalse((repo / ".autodev-run" / "current" / "state.json").exists())
 
     def test_prepare_rejects_stale_or_dirty_local_base(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -146,12 +146,12 @@ class WorkflowStageTests(unittest.TestCase):
             def dirty_runner(command, **kwargs):
                 if command[1:3] == ["rev-parse", "HEAD"]:
                     return SimpleNamespace(returncode=0, stdout="base-sha\n", stderr="")
-                return SimpleNamespace(returncode=0, stdout=" M src/Changed.cs\n?? .codex-run/current/state.json\n", stderr="")
+                return SimpleNamespace(returncode=0, stdout=" M src/Changed.cs\n?? .autodev-run/current/state.json\n", stderr="")
 
             with self.assertRaises(workflow_stages.WorkflowStageError) as dirty:
                 workflow_stages.validate_prepared_worktree(repo, "base-sha", runner=dirty_runner)
             self.assertIn("src/Changed.cs", str(dirty.exception))
-            self.assertNotIn(".codex-run", str(dirty.exception))
+            self.assertNotIn(".autodev-run", str(dirty.exception))
 
     def test_prepare_reuses_matching_current_issue_without_github_mutation(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -680,7 +680,7 @@ class WorkflowStageTests(unittest.TestCase):
                 patch("automation.workflow_stages._query_pr_checks", return_value=[]),
             ):
                 with self.assertRaises(workflow_stages.WorkflowStageError) as empty:
-                    workflow_stages.wait_for_required_checks(repo, workflow_stages.read_state(repo / ".codex-run" / "current"))
+                    workflow_stages.wait_for_required_checks(repo, workflow_stages.read_state(repo / ".autodev-run" / "current"))
             self.assertEqual(empty.exception.classification, workflow_stages.FAILURE_TRANSIENT)
 
             pending = [{"name": "build", "bucket": "pending", "state": "IN_PROGRESS"}]
@@ -690,7 +690,7 @@ class WorkflowStageTests(unittest.TestCase):
                 patch("automation.workflow_stages._query_pr_checks", return_value=pending),
             ):
                 with self.assertRaises(workflow_stages.WorkflowStageError):
-                    workflow_stages.wait_for_required_checks(repo, workflow_stages.read_state(repo / ".codex-run" / "current"))
+                    workflow_stages.wait_for_required_checks(repo, workflow_stages.read_state(repo / ".autodev-run" / "current"))
 
     def test_ci_rejects_old_pr_head_and_accepts_terminal_current_head(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -804,8 +804,8 @@ class WorkflowStageTests(unittest.TestCase):
             (repo / "src" / "file.txt").write_text("content\n", encoding="utf-8")
             (repo / "obj").mkdir()
             (repo / "obj" / "generated.txt").write_text("ignored\n", encoding="utf-8")
-            (repo / ".codex-run").mkdir()
-            (repo / ".codex-run" / "state.txt").write_text("ignored\n", encoding="utf-8")
+            (repo / ".autodev-run").mkdir()
+            (repo / ".autodev-run" / "state.txt").write_text("ignored\n", encoding="utf-8")
             (repo / ".opencode").mkdir()
             (repo / ".opencode" / "autodev.json").write_text("{}\n", encoding="utf-8")
 
@@ -813,7 +813,7 @@ class WorkflowStageTests(unittest.TestCase):
 
             self.assertIn("src/file.txt", snapshot)
             self.assertNotIn("obj/generated.txt", snapshot)
-            self.assertNotIn(".codex-run/state.txt", snapshot)
+            self.assertNotIn(".autodev-run/state.txt", snapshot)
             self.assertNotIn(".opencode/autodev.json", snapshot)
             self.assertTrue(all("\\" not in path for path in snapshot))
 
@@ -844,7 +844,7 @@ class WorkflowStageTests(unittest.TestCase):
         }
 
     def _write_state(self, repo: Path, **overrides):
-        current = repo / ".codex-run" / "current"
+        current = repo / ".autodev-run" / "current"
         current.mkdir(parents=True, exist_ok=True)
         state = {
             "IssueNumber": 65,

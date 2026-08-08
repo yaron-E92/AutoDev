@@ -129,7 +129,7 @@ Windows:
 ```powershell
 python -m automation.provider_preflight `
   --provider-profile "$env:USERPROFILE\autodev-groq-openrouter.json" `
-  --out .codex-run\provider-preflight.json
+  --out .autodev-run\provider-preflight.json
 ```
 
 Linux:
@@ -137,7 +137,7 @@ Linux:
 ```bash
 python3 -m automation.provider_preflight \
   --provider-profile ~/autodev-groq-openrouter.json \
-  --out .codex-run/provider-preflight.json
+  --out .autodev-run/provider-preflight.json
 ```
 
 ### Through the existing Windows entrypoint
@@ -447,7 +447,7 @@ Use a provider profile for new configurations. Legacy flags are primarily for ba
 The trusted script workflow writes its current state beneath:
 
 ```text
-.codex-run/current/
+.autodev-run/current/
 ```
 
 Important files include:
@@ -715,3 +715,5 @@ The manifest is state for one run directory. AutoDev does not add a database or 
 ## Scope boundaries
 
 Provider-neutral role routing, semantic verification, optional Headroom compression, and resumable Python run manifests are implemented independently and compose through their existing metadata/artifact boundaries. The evaluation harness from issue #38 remains separate from the runtime workflow.
+
+> Compatibility note: runs created by older AutoDev versions under `.codex-run` are not migrated automatically. Rename that directory to `.autodev-run` manually before resuming an old run.

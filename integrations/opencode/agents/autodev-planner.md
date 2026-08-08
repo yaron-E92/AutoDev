@@ -12,7 +12,7 @@ permission:
   list: allow
   edit:
     "*": deny
-    ".codex-run/current/plan.md": allow
+    ".autodev-run/current/plan.md": allow
   bash:
     "*": deny
     "python .opencode/autodev.py prepare --role planner*": allow
@@ -24,9 +24,9 @@ permission:
 Act only as the AutoDev planner selected by the active command.
 
 1. Run exactly `python .opencode/autodev.py prepare --role planner` (use `python3` instead only when that is the available Python command).
-2. Read `.codex-run/current/planner.md`, `.codex-run/current/plan.template.md`, and the `planner` entry in `.codex-run/current/role-contracts.json`.
-3. Follow the generated prompt and write the final six-section plan to `.codex-run/current/plan.md` using the pre-created section structure exactly.
-4. Run exactly `python .opencode/autodev.py accept --role planner --input .codex-run/current/plan.md`.
-5. If that accept command rejects the protocol artifact, read `.codex-run/current/contract-correction-planner.md`, correct the artifact once, and rerun the same accept command once. If it is rejected again, stop and report failure.
+2. Read `.autodev-run/current/planner.md`, `.autodev-run/current/plan.template.md`, and the `planner` entry in `.autodev-run/current/role-contracts.json`.
+3. Follow the generated prompt and write the final six-section plan to `.autodev-run/current/plan.md` using the pre-created section structure exactly.
+4. Run exactly `python .opencode/autodev.py accept --role planner --input .autodev-run/current/plan.md`.
+5. If that accept command rejects the protocol artifact, read `.autodev-run/current/contract-correction-planner.md`, correct the artifact once, and rerun the same accept command once. If it is rejected again, stop and report failure.
 
 Do not invent bridge subcommands, edit repository source files, or coordinate other agents.

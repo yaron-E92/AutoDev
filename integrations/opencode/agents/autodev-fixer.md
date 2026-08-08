@@ -17,7 +17,7 @@ permission:
     "*.env.example": allow
     ".git/**": deny
     ".opencode/**": deny
-    ".codex-run/**": deny
+    ".autodev-run/**": deny
   bash:
     "*": ask
     "git commit*": deny
@@ -48,6 +48,6 @@ Run only the exact preparation command supplied by the coordinator, using one of
 - `python .opencode/autodev.py prepare --role fixer --arguments semantic`
 - `python .opencode/autodev.py prepare --role fixer --arguments ci`
 
-Use `python3` instead only when that is the available Python command. Then read `.codex-run/current/fixer.md` and the `fixer` entry in `.codex-run/current/role-contracts.json`, apply only that targeted repair, and run exactly `python .opencode/autodev.py accept --role fixer`.
+Use `python3` instead only when that is the available Python command. Then read `.autodev-run/current/fixer.md` and the `fixer` entry in `.autodev-run/current/role-contracts.json`, apply only that targeted repair, and run exactly `python .opencode/autodev.py accept --role fixer`.
 
 Routine `dotnet restore`, `dotnet build`, `dotnet test`, `git status`, `git diff`, and directory creation are allowed. Leave branch, commit, push, issue-state, CI, and pull-request ownership to AutoDev. Do not invent bridge subcommands or coordinate other agents.

@@ -24,7 +24,7 @@ Modes:
 Options:
   --env FILE                  Project environment file. Required unless ENV_FILE is set.
   --provider-profile FILE     Version-2 role provider profile.
-  --provider-preflight-out F  Preflight JSON path. Default: .codex-run/provider-preflight.json.
+  --provider-preflight-out F  Preflight JSON path. Default: .autodev-run/provider-preflight.json.
   --disable-semantic-verification
                               Preserve the legacy PASS/FAIL verifier workflow.
   --max-semantic-repair-attempts N
@@ -63,7 +63,7 @@ description="${ISSUE_DESCRIPTION:-}"
 description_file="${ISSUE_DESCRIPTION_FILE:-}"
 message=""
 provider_profile="${PROVIDER_PROFILE:-}"
-provider_preflight_out="${PROVIDER_PREFLIGHT_OUT:-.codex-run/provider-preflight.json}"
+provider_preflight_out="${PROVIDER_PREFLIGHT_OUT:-.autodev-run/provider-preflight.json}"
 disable_semantic_verification="${DISABLE_SEMANTIC_VERIFICATION:-0}"
 max_semantic_repair_attempts="${MAX_SEMANTIC_REPAIR_ATTEMPTS:-1}"
 agent_command="${AGENT_COMMAND:-codex exec}"
@@ -73,7 +73,7 @@ planner_model="${PLANNER_MODEL:-}"
 agent_provider="${AGENT_PROVIDER:-}"
 agent_model="${AGENT_MODEL:-}"
 max_repair_attempts="${MAX_REPAIR_ATTEMPTS:-3}"
-current_dir=".codex-run/current"
+current_dir=".autodev-run/current"
 telemetry_file="$current_dir/model-invocations.json"
 semantic_enabled=false
 

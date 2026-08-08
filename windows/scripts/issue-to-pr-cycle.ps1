@@ -29,7 +29,7 @@ param(
     [string]$PromptDir = $(if ($env:PROMPT_DIR) { $env:PROMPT_DIR } else { "$env:USERPROFILE\codex-tools\prompts" }),
     [string]$ProfilesPath = $(if ($env:PROFILES_PATH) { $env:PROFILES_PATH } else { "$env:USERPROFILE\codex-tools\codex-profiles.json" }),
     [string]$ProviderProfile = $env:PROVIDER_PROFILE,
-    [string]$ProviderPreflightOut = $(if ($env:PROVIDER_PREFLIGHT_OUT) { $env:PROVIDER_PREFLIGHT_OUT } else { ".codex-run\provider-preflight.json" }),
+    [string]$ProviderPreflightOut = $(if ($env:PROVIDER_PREFLIGHT_OUT) { $env:PROVIDER_PREFLIGHT_OUT } else { ".autodev-run\provider-preflight.json" }),
     [switch]$DisableSemanticVerification,
     [int]$MaxSemanticRepairAttempts = $(if ($env:MAX_SEMANTIC_REPAIR_ATTEMPTS) { [int]$env:MAX_SEMANTIC_REPAIR_ATTEMPTS } else { 1 }),
 
@@ -65,7 +65,7 @@ $scriptRoot = $PSScriptRoot
 $toolRoot = Split-Path -Parent (Split-Path -Parent $scriptRoot)
 $UsePromptRunnerModule = [string]::IsNullOrWhiteSpace($PromptRunner)
 if ([string]::IsNullOrWhiteSpace($PromptRunner)) { $PromptRunner = Join-Path $toolRoot "automation\prompt_runner.py" }
-$currentDir = Join-Path ".codex-run" "current"
+$currentDir = Join-Path ".autodev-run" "current"
 $telemetryFile = Join-Path $currentDir "model-invocations.json"
 $PlannerProviderMode = -not [string]::IsNullOrWhiteSpace($ProviderProfile) -or
     -not [string]::IsNullOrWhiteSpace($PlannerProvider) -or

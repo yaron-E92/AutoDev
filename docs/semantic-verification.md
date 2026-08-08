@@ -172,7 +172,7 @@ model-invocations.json
 Trusted Windows/Linux workflow artifacts are written beneath:
 
 ```text
-.codex-run/current/verification/
+.autodev-run/current/verification/
 ```
 
 The final semantic result is included in the Python runner's PR body.

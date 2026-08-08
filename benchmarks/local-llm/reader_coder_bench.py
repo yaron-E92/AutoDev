@@ -43,7 +43,7 @@ EXCLUDED_DIRS = {
     "bin",
     "obj",
     "node_modules",
-    ".codex-run",
+    ".autodev-run",
     ".idea",
     ".cache",
     "TestResults",

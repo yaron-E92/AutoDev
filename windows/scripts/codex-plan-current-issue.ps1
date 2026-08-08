@@ -64,7 +64,7 @@ if ([string]::IsNullOrWhiteSpace($PlannerAgentCommand)) {
     $PlannerAgentCommand = if ([string]::IsNullOrWhiteSpace($env:PLANNER_AGENT_COMMAND)) { "codex exec" } else { $env:PLANNER_AGENT_COMMAND }
 }
 
-$currentDir = Join-Path ".codex-run" "current"
+$currentDir = Join-Path ".autodev-run" "current"
 $plannerPath = Join-Path $currentDir "planner.md"
 $planPath = Join-Path $currentDir "plan.md"
 
