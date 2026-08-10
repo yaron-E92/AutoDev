@@ -214,11 +214,19 @@ def resolve_opencode_model_mappings(
     repo: Path,
     *,
     runner=subprocess.run,
+    which=None,
 ) -> dict[str, dict[str, str]]:
     repo = repo.expanduser().resolve()
+    if which is None:
+        which = shutil.which if runner is subprocess.run else lambda command: command
+    opencode_cli = which("opencode")
+    if not opencode_cli:
+        raise OpenCodeAdapterError(
+            "OpenCode CLI was not found on PATH; model mapping introspection requires an installed `opencode` CLI"
+        )
     try:
         completed = runner(
-            ["opencode", "debug", "config"],
+            [opencode_cli, "debug", "config"],
             cwd=repo,
             text=True,
             encoding="utf-8",
@@ -228,12 +236,15 @@ def resolve_opencode_model_mappings(
         )
     except OSError as exc:
         raise OpenCodeAdapterError(
-            "OpenCode model mapping introspection requires the `opencode` CLI"
+            f"OpenCode CLI resolved to {opencode_cli!r} but could not be launched: {exc}"
         ) from exc
     returncode = int(getattr(completed, "returncode", 1))
     if returncode != 0:
+        stderr = str(getattr(completed, "stderr", "") or "").strip()
+        detail = f": {stderr}" if stderr else ""
         raise OpenCodeAdapterError(
-            f"opencode debug config failed with exit code {returncode}; fix OpenCode configuration before running AutoDev"
+            f"opencode debug config failed with exit code {returncode}{detail}; "
+            "fix OpenCode configuration before running AutoDev"
         )
     raw = str(getattr(completed, "stdout", "") or "").strip()
     try:
