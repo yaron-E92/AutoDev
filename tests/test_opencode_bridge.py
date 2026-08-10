@@ -68,7 +68,7 @@ class OpenCodeBridgeTests(unittest.TestCase):
             patch.dict(os.environ, {}, clear=True),
             patch.object(BRIDGE.os, "name", "posix"),
         ):
-            env = BRIDGE._bridge_environment("python3", REPO_ROOT)
+            env = BRIDGE._bridge_environment("python3", REPO_ROOT, REPO_ROOT)
 
         self.assertIn("automation.workflow_verify_current", env["LOCAL_CHECK"])
         self.assertNotIn("pwsh", env["LOCAL_CHECK"])
@@ -79,7 +79,7 @@ class OpenCodeBridgeTests(unittest.TestCase):
             patch.dict(os.environ, {"LOCAL_CHECK": "custom-check"}, clear=True),
             patch.object(BRIDGE.os, "name", "posix"),
         ):
-            env = BRIDGE._bridge_environment("python3", REPO_ROOT)
+            env = BRIDGE._bridge_environment("python3", REPO_ROOT, REPO_ROOT)
 
         self.assertEqual(env["LOCAL_CHECK"], "custom-check")
 
