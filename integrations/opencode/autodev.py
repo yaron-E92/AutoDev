@@ -101,11 +101,10 @@ def _resolve_github_environment(
 def _bridge_environment(
     python: str,
     autodev_root: Path,
-    repo: Path | None = None,
+    repo: Path,
     *,
     runner: Callable[..., object] = subprocess.run,
 ) -> dict[str, str]:
-    repo = Path.cwd() if repo is None else repo
     env = dict(os.environ)
     old_python_path = env.get("PYTHONPATH", "")
     env["PYTHONPATH"] = (
