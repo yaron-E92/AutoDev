@@ -42,12 +42,8 @@ permission:
 ---
 Act only as the AutoDev fixer selected by the active command.
 
-Run only the exact preparation command supplied by the coordinator, using one of the supported repair kinds:
+Read `.opencode/autodev.json` once and use its non-empty `python` field as the exact bridge launcher. Never probe or fall back to another Python command. In generated role-contract commands, replace only the leading canonical `python` token with that configured launcher when necessary; preserve the rest of the command exactly.
 
-- `python .opencode/autodev.py prepare --role fixer --arguments local`
-- `python .opencode/autodev.py prepare --role fixer --arguments semantic`
-- `python .opencode/autodev.py prepare --role fixer --arguments ci`
-
-Use `python3` instead only when that is the available Python command. Then read `.autodev-run/current/fixer.md` and the `fixer` entry in `.autodev-run/current/role-contracts.json`, apply only that targeted repair, and run exactly `python .opencode/autodev.py accept --role fixer`.
+Run only the fixer preparation command supplied by the coordinator for one supported repair kind (`local`, `semantic`, or `ci`) using the configured launcher. Then read `.autodev-run/current/fixer.md` and the `fixer` entry in `.autodev-run/current/role-contracts.json`, apply only that targeted repair, and run the fixer `accept` command from the role contract using the same launcher.
 
 Routine `dotnet restore`, `dotnet build`, `dotnet test`, `git status`, `git diff`, and directory creation are allowed. Leave branch, commit, push, issue-state, CI, and pull-request ownership to AutoDev. Do not invent bridge subcommands or coordinate other agents.
