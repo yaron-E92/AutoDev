@@ -35,6 +35,17 @@ class OpenCodeResumeGuardrailTests(unittest.TestCase):
         self.assertIn("`PR_READY`, `BLOCKED`, or `FAILED`", text)
         self.assertIn("Never merge the pull request", text)
 
+    def test_reader_consumes_python_prepared_bundle_without_repository_discovery_tools(self):
+        text = (OPEN_CODE_ROOT / "agents" / "autodev-reader.md").read_text(encoding="utf-8")
+        self.assertIn('permission:\n  "*": deny', text)
+        self.assertIn("glob: deny", text)
+        self.assertIn("grep: deny", text)
+        self.assertIn("list: deny", text)
+        self.assertIn('read:\n    "*": deny', text)
+        self.assertIn('".autodev-run/current/reader.md": allow', text)
+        self.assertIn("Python bridge owns repository discovery", text)
+        self.assertIn("Never construct an absolute repository path", text)
+
 
 if __name__ == "__main__":
     unittest.main()
