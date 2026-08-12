@@ -26,8 +26,9 @@ class OpenCodeResumeGuardrailTests(unittest.TestCase):
         text = (OPEN_CODE_ROOT / "commands" / "autodev-resume.md").read_text(encoding="utf-8")
         self.assertIn("After every delegated role Task", text)
         self.assertIn("do not trust the Task UI checkmark", text)
-        self.assertIn("Run the exact resume bridge again", text)
-        self.assertIn("missing/unaccepted durable progress", text)
+        self.assertIn("role-check --role <role>", text)
+        self.assertIn("JSON state `ACCEPTED`", text)
+        self.assertIn("`MISSING`, `STALE`", text)
 
     def test_resume_command_requires_explicit_terminal_state(self):
         text = (OPEN_CODE_ROOT / "commands" / "autodev-resume.md").read_text(encoding="utf-8")
