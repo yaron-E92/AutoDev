@@ -8,7 +8,7 @@ import subprocess
 from pathlib import Path
 from typing import Callable
 
-from automation import opencode_adapter, opencode_resume, workflow_stages
+from automation import opencode_adapter, opencode_cli, opencode_resume, opencode_runtime, workflow_stages
 
 
 ROLE_PROMPT = (
@@ -21,26 +21,20 @@ MAX_TRANSITIONS = 100
 
 
 class OpenCodeCoordinatorError(RuntimeError):
-    def __init__(
-        self,
-        message: str,
-        *,
-        classification: str = workflow_stages.FAILURE_DETERMINISTIC,
-    ) -> None:
+    def __init__(self, message: str, *, classification: str = workflow_stages.FAILURE_DETERMINISTIC) -> None:
         super().__init__(message)
         self.classification = classification
 
 
 def _issue_number(repo: Path, arguments: str = "") -> int:
-    current = repo / workflow_stages.CURRENT_DIR
     try:
-        state = workflow_stages.read_state(current)
+        state = workflow_stages.read_state(repo / workflow_stages.CURRENT_DIR)
     except (OSError, ValueError, workflow_stages.WorkflowStageError):
         state = {}
     return int(state.get("IssueNumber", 0) or workflow_stages.issue_number_from_arguments(arguments) or 0)
 
 
-def _role_acceptance(repo: Path, role: str) -> dict[str, object]:
+def role_acceptance(repo: Path, role: str) -> dict[str, object]:
     current = repo / workflow_stages.CURRENT_DIR
     try:
         state = workflow_stages.read_state(current)
@@ -74,7 +68,7 @@ def _role_acceptance(repo: Path, role: str) -> dict[str, object]:
     return {"state": "ACCEPTED", "role": role, "artifact": artifact, "sha256": expected}
 
 
-def _run_role(
+def run_role(
     repo: Path,
     role: str,
     *,
@@ -82,13 +76,16 @@ def _run_role(
     runner: Callable[..., object] = subprocess.run,
     which=None,
 ) -> dict[str, object]:
-    opencode_cli = opencode_adapter.resolve_opencode_cli(which=which)
+    try:
+        executable = opencode_cli.resolve_opencode_cli(which=which)
+    except opencode_cli.OpenCodeCliError as exc:
+        raise OpenCodeCoordinatorError(str(exc)) from exc
+
     prompt = ROLE_PROMPT.format(role=role)
     if repair_kind:
         prompt += f" Repair kind: {repair_kind}."
-
     command = [
-        opencode_cli,
+        executable,
         "run",
         "--agent",
         f"autodev-{role}",
@@ -110,7 +107,8 @@ def _run_role(
         )
     except OSError as exc:
         raise OpenCodeCoordinatorError(
-            f"could not launch OpenCode role {role} via {opencode_cli!r}: {exc}"
+            f"could not launch OpenCode role {role} via {executable!r}: {exc}",
+            classification=workflow_stages.FAILURE_TRANSIENT,
         ) from exc
 
     returncode = int(getattr(completed, "returncode", 1))
@@ -118,22 +116,22 @@ def _run_role(
         stderr = str(getattr(completed, "stderr", "") or "").strip()
         stdout = str(getattr(completed, "stdout", "") or "").strip()
         detail = (stderr or stdout)[-2000:]
-        suffix = f": {detail}" if detail else ""
         raise OpenCodeCoordinatorError(
-            f"OpenCode role {role} exited with code {returncode}{suffix}",
-            classification="provider-or-role-failure",
+            f"OpenCode role {role} exited with code {returncode}" + (f": {detail}" if detail else ""),
+            classification=workflow_stages.FAILURE_TRANSIENT,
         )
 
-    acceptance = _role_acceptance(repo, role)
+    acceptance = role_acceptance(repo, role)
     if acceptance.get("state") != "ACCEPTED":
         raise OpenCodeCoordinatorError(
-            f"OpenCode role {role} was not durably accepted: {acceptance.get('state')} — {acceptance.get('reason', '')}"
+            f"OpenCode role {role} was not durably accepted: "
+            f"{acceptance.get('state')} — {acceptance.get('reason', '')}"
         )
     print(json.dumps({"event": "role-accepted", **acceptance}, sort_keys=True))
     return acceptance
 
 
-def _stage(
+def run_stage(
     repo: Path,
     name: str,
     *,
@@ -156,20 +154,10 @@ def _stage(
     return payload
 
 
-def _terminal(repo: Path, payload: dict[str, object], *, arguments: str = "") -> dict[str, object]:
+def terminal_payload(repo: Path, payload: dict[str, object], *, arguments: str = "") -> dict[str, object]:
     state = str(payload.get("state", "FAILED"))
-    if state == "BLOCKED":
-        reason = str(payload.get("reason", "AutoDev workflow blocked"))
-        current = repo / workflow_stages.CURRENT_DIR
-        try:
-            workflow_stages.mark_blocked(current, workflow_stages.read_state(current), reason)
-        except (OSError, ValueError, workflow_stages.WorkflowStageError):
-            pass
-        result = dict(payload)
-        result["state"] = "BLOCKED"
-        return result
-    if state == "PR_READY":
-        return payload
+    if state in {"BLOCKED", "PR_READY"}:
+        return dict(payload)
 
     issue = int(payload.get("issue_number", 0) or _issue_number(repo, arguments))
     result = workflow_stages.stage_payload(
@@ -194,11 +182,7 @@ def _resume_payload(
     *,
     invalidated_roles: set[str] | None = None,
 ) -> dict[str, object]:
-    return opencode_resume.resume(
-        repo,
-        mappings,
-        invalidated_roles=invalidated_roles or set(),
-    )
+    return opencode_resume.resume(repo, mappings, invalidated_roles=invalidated_roles or set())
 
 
 def coordinate(
@@ -211,13 +195,14 @@ def coordinate(
     which=None,
 ) -> dict[str, object]:
     repo = repo.expanduser().resolve()
+    opencode_runtime.install_workflow_guards()
     mappings = opencode_adapter.resolve_opencode_model_mappings(repo, runner=runner, which=which)
 
     if resume:
         try:
             cursor = _resume_payload(repo, mappings, invalidated_roles=invalidated_roles)
         except (opencode_resume.OpenCodeResumeError, opencode_adapter.OpenCodeAdapterError) as exc:
-            return _terminal(
+            return terminal_payload(
                 repo,
                 {
                     "state": "FAILED",
@@ -228,12 +213,12 @@ def coordinate(
                 arguments=arguments,
             )
     else:
-        preflight = _stage(repo, "preflight", arguments=arguments)
+        preflight = run_stage(repo, "preflight", arguments=arguments)
         if preflight.get("state") != "CONTINUE":
-            return _terminal(repo, preflight, arguments=arguments)
-        prepared = _stage(repo, "prepare", arguments=arguments)
+            return terminal_payload(repo, preflight, arguments=arguments)
+        prepared = run_stage(repo, "prepare", arguments=arguments)
         if prepared.get("state") != "CONTINUE":
-            return _terminal(repo, prepared, arguments=arguments)
+            return terminal_payload(repo, prepared, arguments=arguments)
         cursor = _resume_payload(repo, mappings)
 
     for _ in range(MAX_TRANSITIONS):
@@ -250,34 +235,45 @@ def coordinate(
 
         action = str(cursor.get("next_action", ""))
         if action in ROLE_ACTIONS:
-            _run_role(repo, action, runner=runner, which=which)
+            run_role(repo, action, runner=runner, which=which)
         elif action == "implementer":
-            rendered = _stage(repo, "render-implementer")
+            rendered = run_stage(repo, "render-implementer")
             if rendered.get("state") != "CONTINUE":
-                return _terminal(repo, rendered, arguments=arguments)
-            _run_role(repo, "implementer", runner=runner, which=which)
+                return terminal_payload(repo, rendered, arguments=arguments)
+            run_role(repo, "implementer", runner=runner, which=which)
         elif action == "local-check":
-            outcome = _stage(repo, "local-check", attempt=int(cursor.get("local_repair_attempt", 0) or 0))
+            outcome = run_stage(
+                repo,
+                "local-check",
+                attempt=int(cursor.get("local_repair_attempt", 0) or 0),
+            )
             if outcome.get("state") in {"BLOCKED", "FAILED"}:
-                return _terminal(repo, outcome, arguments=arguments)
+                return terminal_payload(repo, outcome, arguments=arguments)
         elif action == "verifier":
-            _run_role(repo, "verifier", runner=runner, which=which)
-            outcome = _stage(repo, "semantic", attempt=int(cursor.get("semantic_repair_attempt", 0) or 0))
+            run_role(repo, "verifier", runner=runner, which=which)
+            outcome = run_stage(
+                repo,
+                "semantic",
+                attempt=int(cursor.get("semantic_repair_attempt", 0) or 0),
+            )
             if outcome.get("state") in {"BLOCKED", "FAILED"}:
-                return _terminal(repo, outcome, arguments=arguments)
+                return terminal_payload(repo, outcome, arguments=arguments)
         elif action == "pr-and-ci":
-            outcome = _stage(repo, "pr-and-ci", attempt=int(cursor.get("ci_repair_attempt", 0) or 0))
+            outcome = run_stage(
+                repo,
+                "pr-and-ci",
+                attempt=int(cursor.get("ci_repair_attempt", 0) or 0),
+            )
             if outcome.get("state") in {"BLOCKED", "FAILED"}:
-                return _terminal(repo, outcome, arguments=arguments)
+                return terminal_payload(repo, outcome, arguments=arguments)
         elif action == "ready":
-            outcome = _stage(repo, "ready")
-            return _terminal(repo, outcome, arguments=arguments)
+            return terminal_payload(repo, run_stage(repo, "ready"), arguments=arguments)
         elif action == "prepare":
-            outcome = _stage(repo, "prepare", arguments=str(cursor.get("issue_number", "")))
+            outcome = run_stage(repo, "prepare", arguments=str(cursor.get("issue_number", "")))
             if outcome.get("state") != "CONTINUE":
-                return _terminal(repo, outcome, arguments=arguments)
+                return terminal_payload(repo, outcome, arguments=arguments)
         elif action in REPAIR_KINDS:
-            _run_role(
+            run_role(
                 repo,
                 "fixer",
                 repair_kind=REPAIR_KINDS[action],
@@ -285,7 +281,7 @@ def coordinate(
                 which=which,
             )
         else:
-            return _terminal(
+            return terminal_payload(
                 repo,
                 {
                     "state": "FAILED",
@@ -299,7 +295,7 @@ def coordinate(
         try:
             cursor = _resume_payload(repo, mappings)
         except (opencode_resume.OpenCodeResumeError, opencode_adapter.OpenCodeAdapterError) as exc:
-            return _terminal(
+            return terminal_payload(
                 repo,
                 {
                     "state": "FAILED",
@@ -310,7 +306,7 @@ def coordinate(
                 arguments=arguments,
             )
 
-    return _terminal(
+    return terminal_payload(
         repo,
         {
             "state": "FAILED",
@@ -322,7 +318,7 @@ def coordinate(
     )
 
 
-def _invalidations(arguments: str) -> set[str]:
+def invalidations(arguments: str) -> set[str]:
     tokens = shlex.split(arguments or "")
     values: set[str] = set()
     for index, token in enumerate(tokens):
@@ -345,7 +341,7 @@ def run(argv: list[str] | None = None) -> int:
             Path(args.repo),
             arguments=args.arguments,
             resume=args.resume,
-            invalidated_roles=_invalidations(args.arguments) if args.resume else set(),
+            invalidated_roles=invalidations(args.arguments) if args.resume else set(),
         )
     except (
         OpenCodeCoordinatorError,
@@ -355,7 +351,7 @@ def run(argv: list[str] | None = None) -> int:
         OSError,
         ValueError,
     ) as exc:
-        payload = _terminal(
+        payload = terminal_payload(
             Path(args.repo).expanduser().resolve(),
             {
                 "state": "FAILED",
@@ -369,3 +365,11 @@ def run(argv: list[str] | None = None) -> int:
         )
     print(json.dumps(payload, sort_keys=True))
     return 0 if payload.get("state") in {"PR_READY", "BLOCKED"} else 1
+
+
+def main() -> int:
+    return run()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
