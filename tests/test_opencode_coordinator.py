@@ -1,4 +1,5 @@
 import json
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -49,7 +50,7 @@ class OpenCodePythonCoordinatorTests(unittest.TestCase):
                 opencode_adapter, "accept_role", return_value=[]
             ) as accept, patch.object(
                 opencode_coordinator, "role_acceptance", return_value=accepted
-            ):
+            ), patch("builtins.print") as output:
                 result = opencode_coordinator.run_role(
                     repo,
                     "reader",
@@ -64,7 +65,7 @@ class OpenCodePythonCoordinatorTests(unittest.TestCase):
                 repo / workflow_stages.CURRENT_DIR / "reader-brief.md",
             )
             self.assertEqual(result["state"], "ACCEPTED")
-            command = calls[0][0]
+            command, kwargs = calls[0]
             self.assertEqual(command[:4], ["/usr/bin/opencode", "run", "--agent", "autodev-reader"])
             self.assertIn("--dir", command)
             self.assertIn(str(repo), command)
@@ -72,6 +73,38 @@ class OpenCodePythonCoordinatorTests(unittest.TestCase):
             self.assertIn("json", command)
             self.assertNotIn("--model", command)
             self.assertIn("Do not run AutoDev prepare or accept commands", command[-1])
+            self.assertIs(kwargs["stdin"], subprocess.DEVNULL)
+            self.assertEqual(kwargs["timeout"], opencode_coordinator.ROLE_TIMEOUT_SECONDS["reader"])
+            events = [json.loads(item.args[0])["event"] for item in output.call_args_list]
+            self.assertEqual(events, ["role-started", "role-finished", "role-accepted"])
+
+    def test_role_timeout_is_transient_and_does_not_accept(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = self._repo(temp_dir)
+
+            def runner(command, **kwargs):
+                raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+            with patch.object(opencode_adapter, "prepare_role"), patch.object(
+                opencode_adapter, "accept_role"
+            ) as accept, patch.object(
+                opencode_coordinator, "role_timeout_seconds", return_value=7
+            ), patch("builtins.print") as output:
+                with self.assertRaises(opencode_coordinator.OpenCodeCoordinatorError) as raised:
+                    opencode_coordinator.run_role(
+                        repo,
+                        "fixer",
+                        repair_kind="local",
+                        runner=runner,
+                        which=lambda _: "/usr/bin/opencode",
+                    )
+
+            accept.assert_not_called()
+            self.assertEqual(raised.exception.classification, workflow_stages.FAILURE_TRANSIENT)
+            self.assertIn("fixer", str(raised.exception))
+            self.assertIn("7 seconds", str(raised.exception))
+            events = [json.loads(item.args[0])["event"] for item in output.call_args_list]
+            self.assertEqual(events, ["role-started", "role-timeout"])
 
     def test_role_exit_zero_without_durable_acceptance_fails_closed(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -195,6 +228,15 @@ class OpenCodePythonCoordinatorTests(unittest.TestCase):
             text = (OPEN_CODE_ROOT / "agents" / f"autodev-{role}.md").read_text(encoding="utf-8")
             self.assertIn("Python-coordinator mode", text)
             self.assertIn("do not run any AutoDev `prepare` or `accept` command", text)
+
+    def test_python_coordinated_agents_have_no_interactive_permissions(self):
+        for role in ("reader", "synthesizer", "planner", "implementer", "fixer", "verifier"):
+            text = (OPEN_CODE_ROOT / "agents" / f"autodev-{role}.md").read_text(encoding="utf-8")
+            frontmatter = text.split("---", 2)[1]
+            self.assertNotIn(": ask", frontmatter)
+            self.assertIn("question: deny", frontmatter)
+            self.assertIn("doom_loop: deny", frontmatter)
+            self.assertIn("external_directory: deny", frontmatter)
 
     def test_portable_bridge_routes_coordinate_to_python_coordinator(self):
         text = (OPEN_CODE_ROOT / "autodev.py").read_text(encoding="utf-8")

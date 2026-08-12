@@ -14,7 +14,7 @@ permission:
     "*": deny
     ".autodev-run/current/verification-result.json": allow
   bash:
-    "*": ask
+    "*": deny
     "git commit*": deny
     "git push*": deny
     "git switch*": deny
@@ -32,6 +32,8 @@ permission:
     "python3 .opencode/autodev.py prepare --role verifier*": allow
     "python .opencode/autodev.py accept --role verifier*": allow
     "python3 .opencode/autodev.py accept --role verifier*": allow
+  question: deny
+  doom_loop: deny
   external_directory: deny
   task: deny
 ---

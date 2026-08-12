@@ -21,6 +21,8 @@ permission:
     "python3 .opencode/autodev.py prepare --role reader*": allow
     "python .opencode/autodev.py accept --role reader*": allow
     "python3 .opencode/autodev.py accept --role reader*": allow
+  question: deny
+  doom_loop: deny
   external_directory: deny
   task: deny
 ---
