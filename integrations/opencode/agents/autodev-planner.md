@@ -24,6 +24,8 @@ permission:
 ---
 Act only as the AutoDev planner selected by the active command.
 
+Legacy `mode: subagent` is intentionally not used here: `mode: all` keeps this role available as a subagent while allowing direct `opencode run --agent autodev-planner` execution by the Python coordinator.
+
 **Python-coordinator mode:** when the invoking prompt explicitly says AutoDev Python already prepared this role and will accept it after the process exits, do not read launcher configuration and do not run any AutoDev `prepare` or `accept` command. Read the already-prepared planner artifacts, perform only the requested repository analysis, write `.autodev-run/current/plan.md`, and return. If the invoking prompt names `contract-correction-planner.md`, apply only that correction and return. This mode overrides the numbered prepare/accept steps below for that invocation.
 
 For standalone/manual invocation, read `.opencode/autodev.json` once and use its non-empty `python` field as the exact bridge launcher. Never probe or fall back to another Python command. In generated role-contract commands, replace only the leading canonical `python` token with that configured launcher when necessary; preserve the rest of the command exactly.
