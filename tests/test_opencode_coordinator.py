@@ -3,9 +3,15 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import call, patch
+from unittest.mock import ANY, call, patch
 
-from automation import opencode_adapter, opencode_coordinator, opencode_cli, workflow_stages
+from automation import (
+    opencode_adapter,
+    opencode_coordinator,
+    opencode_cli,
+    opencode_install,
+    workflow_stages,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -179,7 +185,7 @@ class OpenCodePythonCoordinatorTests(unittest.TestCase):
             Path(temp_dir).resolve(),
             "fixer",
             repair_kind="local",
-            runner=unittest.mock.ANY,
+            runner=ANY,
             which=None,
         )
         stage.assert_called_once_with(Path(temp_dir).resolve(), "local-check", attempt=1)
@@ -194,6 +200,25 @@ class OpenCodePythonCoordinatorTests(unittest.TestCase):
         text = (OPEN_CODE_ROOT / "autodev.py").read_text(encoding="utf-8")
         self.assertIn('COORDINATE_COMMAND = "coordinate"', text)
         self.assertIn('module = "automation.opencode_coordinator"', text)
+
+    def test_python_coordinator_installer_renders_launcher_into_canonical_commands(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target = Path(temp_dir)
+            launcher = "/opt/Python With Space/python3"
+            opencode_install.install_assets(
+                target,
+                REPO_ROOT,
+                python_command=launcher,
+            )
+
+            issue_command = (target / ".opencode" / "commands" / "autodev-issue-to-pr.md").read_text(encoding="utf-8")
+            resume_command = (target / ".opencode" / "commands" / "autodev-resume.md").read_text(encoding="utf-8")
+            for text in (issue_command, resume_command):
+                self.assertIn("agent: build", text)
+                self.assertNotIn(opencode_install.PYTHON_SHELL_PLACEHOLDER, text)
+                self.assertIn("'/opt/Python With Space/python3' .opencode/autodev.py coordinate", text)
+                self.assertNotIn("agent: autodev-coordinator", text)
+            self.assertIn('--resume --arguments "$ARGUMENTS"', resume_command)
 
 
 class OpenCodeCliResolverTests(unittest.TestCase):
