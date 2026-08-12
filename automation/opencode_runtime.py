@@ -151,6 +151,46 @@ def _terminal_failed(args) -> int:
     return 0
 
 
+def _artifact_evidence(current: Path, relative: str) -> dict[str, object] | None:
+    if not relative.startswith(".autodev-run/current/"):
+        return None
+    path = current / Path(relative).name
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return {"artifact": relative, "exists": False, "bytes": 0}
+    return {"artifact": relative, "exists": True, "bytes": len(data)}
+
+
+def _role_diagnostics(repo: Path, role: str) -> dict[str, object]:
+    current = repo / workflow_stages.CURRENT_DIR
+    contract = opencode_adapter.role_contracts().get(role, {})
+    model = ""
+    source = ""
+    try:
+        mapping = opencode_adapter.resolve_opencode_model_mappings(repo).get(role, {})
+        model = str(mapping.get("model", ""))
+        source = str(mapping.get("source", ""))
+    except (OSError, ValueError, opencode_adapter.OpenCodeAdapterError):
+        pass
+
+    inputs: list[dict[str, object]] = []
+    for key in ("input_artifact", "template_artifact"):
+        relative = str(contract.get(key, ""))
+        evidence = _artifact_evidence(current, relative)
+        if evidence is not None:
+            inputs.append(evidence)
+
+    provider = model.split("/", 1)[0] if "/" in model else ""
+    return {
+        "provider": provider,
+        "model": model,
+        "model_source": source,
+        "input_artifacts": inputs,
+        "expected_output": str(contract.get("output_artifact", "")),
+    }
+
+
 def _role_check(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="autodev role-check")
     parser.add_argument("--role", choices=opencode_adapter.ROLE_NAMES, required=True)
@@ -159,6 +199,7 @@ def _role_check(argv: list[str]) -> int:
 
     repo = Path(args.repo).expanduser().resolve()
     current = repo / workflow_stages.CURRENT_DIR
+    diagnostics = _role_diagnostics(repo, args.role)
     state_value = workflow_stages.read_json(current / "state.json")
     state = state_value if isinstance(state_value, dict) else {}
     accepted = state.get("AcceptedRoleArtifacts", {})
@@ -169,7 +210,8 @@ def _role_check(argv: list[str]) -> int:
                 {
                     "state": "MISSING",
                     "role": args.role,
-                    "reason": "role has no durable accepted artifact/state",
+                    "reason": "role has no durable accepted artifact/state; inspect the child Task/provider failure",
+                    "diagnostics": diagnostics,
                 },
                 sort_keys=True,
             )
@@ -192,6 +234,7 @@ def _role_check(argv: list[str]) -> int:
                         "role": args.role,
                         "artifact": artifact,
                         "reason": "accepted role artifact is missing or no longer matches its durable hash",
+                        "diagnostics": diagnostics,
                     },
                     sort_keys=True,
                 )
@@ -205,6 +248,7 @@ def _role_check(argv: list[str]) -> int:
                 "role": args.role,
                 "artifact": artifact,
                 "sha256": expected,
+                "diagnostics": diagnostics,
             },
             sort_keys=True,
         )
