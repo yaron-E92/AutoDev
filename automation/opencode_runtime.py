@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import argparse
+import hashlib
 import io
 import json
 import sys
@@ -11,6 +13,7 @@ from automation import opencode_adapter, opencode_resume, workflow_stages
 
 SUPPORTED_ROOT_OPENCODE_CONFIG = {"opencode.json", "opencode.jsonc"}
 FRONTEND_FAILURE_FILE = "opencode-last-failure.json"
+ROLE_CHECK_COMMAND = "role-check"
 
 
 def install_workflow_guards() -> None:
@@ -138,9 +141,73 @@ def _terminal_failed(args) -> int:
     return 0
 
 
+def _role_check(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(prog="autodev role-check")
+    parser.add_argument("--role", choices=opencode_adapter.ROLE_NAMES, required=True)
+    parser.add_argument("--repo", default=".")
+    args = parser.parse_args(argv)
+
+    repo = Path(args.repo).expanduser().resolve()
+    current = repo / workflow_stages.CURRENT_DIR
+    state_value = workflow_stages.read_json(current / "state.json")
+    state = state_value if isinstance(state_value, dict) else {}
+    accepted = state.get("AcceptedRoleArtifacts", {})
+    entry = accepted.get(args.role) if isinstance(accepted, dict) else None
+    if not isinstance(entry, dict):
+        print(
+            json.dumps(
+                {
+                    "state": "MISSING",
+                    "role": args.role,
+                    "reason": "role has no durable accepted artifact/state",
+                },
+                sort_keys=True,
+            )
+        )
+        return 1
+
+    artifact = str(entry.get("artifact", ""))
+    expected = str(entry.get("sha256", ""))
+    if artifact.startswith(".autodev-run/current/"):
+        path = current / Path(artifact).name
+        try:
+            actual = hashlib.sha256(path.read_bytes()).hexdigest()
+        except OSError:
+            actual = ""
+        if not actual or actual != expected:
+            print(
+                json.dumps(
+                    {
+                        "state": "STALE",
+                        "role": args.role,
+                        "artifact": artifact,
+                        "reason": "accepted role artifact is missing or no longer matches its durable hash",
+                    },
+                    sort_keys=True,
+                )
+            )
+            return 1
+
+    print(
+        json.dumps(
+            {
+                "state": "ACCEPTED",
+                "role": args.role,
+                "artifact": artifact,
+                "sha256": expected,
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
 def run(argv: list[str] | None = None) -> int:
     install_workflow_guards()
     values = list(sys.argv[1:] if argv is None else argv)
+    if values and values[0] == ROLE_CHECK_COMMAND:
+        return _role_check(values[1:])
+
     args = opencode_adapter.build_parser().parse_args(values)
 
     if args.command == "stage" and args.name == "failed":
