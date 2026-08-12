@@ -1,6 +1,6 @@
 ---
 description: Isolated AutoDev cross-area synthesizer
-mode: subagent
+mode: all
 permission:
   read:
     "*": deny
