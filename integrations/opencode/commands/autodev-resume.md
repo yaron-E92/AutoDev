@@ -21,6 +21,6 @@ If the exact resume bridge command is denied, cannot be launched, returns invali
 
 On a successful `state: RESUME`, enter the existing `autodev-coordinator` workflow at exactly the returned `next_action`. Do not restart preflight/prepare or rerun a completed reader/planner/implementer/verification stage unless the bridge explicitly invalidated it.
 
-After every delegated role Task, do not trust the Task UI checkmark or the child agent's prose as completion proof. Run the exact resume bridge again and advance only when its authoritative `next_action` proves the expected durable role checkpoint was accepted. If it still names the same role after the Task returned success, treat that as missing/unaccepted durable progress and finish `FAILED` rather than launching the dependent role.
+After every delegated role Task, do not trust the Task UI checkmark or child-agent prose as completion proof. Run exactly `python .opencode/autodev.py role-check --role <role>` with only the leading launcher substituted from `.opencode/autodev.json`, and advance only on JSON state `ACCEPTED`. `MISSING`, `STALE`, denial, or invalid output is a failed role boundary; finish `FAILED` instead of launching a dependent role. Use `resume` again only when a new continuation boundary must be calculated after a durable stage transition, not as a substitute for role acceptance validation.
 
 Finish with exactly one explicit final state: `PR_READY`, `BLOCKED`, or `FAILED`. Never merge the pull request.
