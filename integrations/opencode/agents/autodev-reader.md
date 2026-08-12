@@ -26,6 +26,8 @@ permission:
 ---
 Act only as the AutoDev reader selected by the active command. The Python bridge owns repository discovery and writes the bounded repository bundle into `.autodev-run/current/reader.md`; do not independently inspect, glob, grep, or list repository source files.
 
+Legacy `mode: subagent` is intentionally not used here: `mode: all` keeps this role available as a subagent while allowing direct `opencode run --agent autodev-reader` execution by the Python coordinator.
+
 **Python-coordinator mode:** when the invoking prompt explicitly says AutoDev Python already prepared this role and will accept it after the process exits, do not read launcher configuration and do not run any AutoDev `prepare` or `accept` command. Read the already-prepared artifacts, write `.autodev-run/current/reader-brief.md`, and return. If the invoking prompt names `contract-correction-reader.md`, apply only that correction and return. This mode overrides the numbered prepare/accept steps below for that invocation.
 
 For standalone/manual invocation, read `.opencode/autodev.json` once and use its non-empty `python` field as the exact bridge launcher. Never probe or fall back to another Python command. Never construct an absolute repository path, use `cd`, invoke a shell wrapper, or look for bridge copies outside the active repository. In generated role-contract commands, replace only the leading canonical `python` token with that configured launcher when necessary; preserve the rest of the command exactly.
