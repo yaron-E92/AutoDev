@@ -11,13 +11,17 @@ from automation import opencode_adapter, opencode_runtime, workflow_stages
 
 class OpenCodeRuntimeTests(unittest.TestCase):
     def test_supported_root_opencode_config_is_ignored_only_for_opencode_runtime(self):
-        opencode_runtime.install_workflow_guards()
+        original = workflow_stages.ignored_workspace_path
+        try:
+            opencode_runtime.install_workflow_guards()
 
-        self.assertTrue(workflow_stages.ignored_workspace_path("opencode.json"))
-        self.assertTrue(workflow_stages.ignored_workspace_path("opencode.jsonc"))
-        self.assertFalse(workflow_stages.ignored_workspace_path("src/opencode.jsonc"))
-        self.assertFalse(workflow_stages.ignored_workspace_path("opencode.jsonc.backup"))
-        self.assertFalse(workflow_stages.ignored_workspace_path("src/product.cs"))
+            self.assertTrue(workflow_stages.ignored_workspace_path("opencode.json"))
+            self.assertTrue(workflow_stages.ignored_workspace_path("opencode.jsonc"))
+            self.assertFalse(workflow_stages.ignored_workspace_path("src/opencode.jsonc"))
+            self.assertFalse(workflow_stages.ignored_workspace_path("opencode.jsonc.backup"))
+            self.assertFalse(workflow_stages.ignored_workspace_path("src/product.cs"))
+        finally:
+            workflow_stages.ignored_workspace_path = original
 
     def test_terminal_failed_preserves_originating_failure_context(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -39,6 +43,8 @@ class OpenCodeRuntimeTests(unittest.TestCase):
                 json.dumps(
                     {
                         "issue_number": 29,
+                        "branch": "autodev/issue-29",
+                        "completed_stage": "Prepared",
                         "failed_stage": "prepare",
                         "reason": "prepared worktree is not clean: opencode.jsonc",
                         "failure_classification": "non-retryable-deterministic",
@@ -70,6 +76,8 @@ class OpenCodeRuntimeTests(unittest.TestCase):
             payload = json.loads(output.getvalue())
             self.assertEqual(code, 0)
             self.assertEqual(payload["issue_number"], 29)
+            self.assertEqual(payload["branch"], "autodev/issue-29")
+            self.assertEqual(payload["completed_stage"], "Prepared")
             self.assertEqual(payload["stage"], "failed")
             self.assertEqual(payload["failed_stage"], "prepare")
             self.assertEqual(payload["reason"], "prepared worktree is not clean: opencode.jsonc")
@@ -82,6 +90,8 @@ class OpenCodeRuntimeTests(unittest.TestCase):
             payload = {
                 "state": "FAILED",
                 "issue_number": 29,
+                "branch": "autodev/issue-29",
+                "completed_stage": "Prepared",
                 "failed_stage": "preflight",
                 "reason": "required setup missing",
                 "failure_classification": "non-retryable-deterministic",
@@ -112,9 +122,92 @@ class OpenCodeRuntimeTests(unittest.TestCase):
             )
             self.assertEqual(code, 1)
             self.assertEqual(persisted["issue_number"], 29)
+            self.assertEqual(persisted["branch"], "autodev/issue-29")
+            self.assertEqual(persisted["completed_stage"], "Prepared")
             self.assertEqual(persisted["failed_stage"], "preflight")
             self.assertEqual(persisted["reason"], "required setup missing")
             self.assertEqual(persisted["failure_fingerprint"], "fingerprint")
+
+    def test_successful_stage_clears_stale_persisted_failure(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            failure = repo / workflow_stages.CURRENT_DIR / opencode_runtime.FRONTEND_FAILURE_FILE
+            failure.parent.mkdir(parents=True)
+            failure.write_text("{}\n", encoding="utf-8")
+            out = json.dumps({"state": "CONTINUE"}) + "\n"
+
+            with patch(
+                "automation.opencode_runtime._run_adapter",
+                return_value=(0, out, ""),
+            ):
+                code = opencode_runtime.run(
+                    [
+                        "stage",
+                        "--name",
+                        "preflight",
+                        "--repo",
+                        str(repo),
+                        "--arguments",
+                        "29",
+                    ]
+                )
+
+            self.assertEqual(code, 0)
+            self.assertFalse(failure.exists())
+
+    def test_role_check_requires_durable_acceptance_and_artifact_hash(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            current = repo / workflow_stages.CURRENT_DIR
+            current.mkdir(parents=True)
+            artifact = current / "reader-brief.md"
+            artifact.write_text("reader evidence\n", encoding="utf-8")
+            digest = __import__("hashlib").sha256(artifact.read_bytes()).hexdigest()
+            (current / "state.json").write_text(
+                json.dumps(
+                    {
+                        "AcceptedRoleArtifacts": {
+                            "reader": {
+                                "artifact": ".autodev-run/current/reader-brief.md",
+                                "sha256": digest,
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                code = opencode_runtime._role_check(["--role", "reader", "--repo", str(repo)])
+            payload = json.loads(output.getvalue())
+
+            self.assertEqual(code, 0)
+            self.assertEqual(payload["state"], "ACCEPTED")
+            artifact.write_text("changed\n", encoding="utf-8")
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                code = opencode_runtime._role_check(["--role", "reader", "--repo", str(repo)])
+            payload = json.loads(output.getvalue())
+            self.assertEqual(code, 1)
+            self.assertEqual(payload["state"], "STALE")
+
+    def test_role_check_rejects_unaccepted_task_even_if_child_claimed_success(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            current = repo / workflow_stages.CURRENT_DIR
+            current.mkdir(parents=True)
+            (current / "state.json").write_text("{}\n", encoding="utf-8")
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                code = opencode_runtime._role_check(["--role", "synthesizer", "--repo", str(repo)])
+            payload = json.loads(output.getvalue())
+
+            self.assertEqual(code, 1)
+            self.assertEqual(payload["state"], "MISSING")
+            self.assertEqual(payload["role"], "synthesizer")
 
     def test_portable_wrapper_invokes_hardened_runtime(self):
         wrapper = (
