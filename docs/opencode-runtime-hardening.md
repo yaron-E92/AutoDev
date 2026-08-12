@@ -24,7 +24,13 @@ The active repository's own `.opencode` directory is installer-owned workflow st
 
 ## Durable role acceptance
 
-An OpenCode Task returning, printing success, or receiving a green UI checkmark is not workflow proof. After every delegated AutoDev role, the coordinator runs the installed `role-check --role <role>` bridge operation.
+An OpenCode Task returning, printing success, or receiving a green UI checkmark is not workflow proof. After every delegated AutoDev role, the coordinator runs the installed repository-relative operation:
+
+```text
+python .opencode/autodev.py role-check --role <role>
+```
+
+Only the leading launcher is substituted from `.opencode/autodev.json`.
 
 The role check reads `state.json`'s accepted-role record and, for file-backed outputs, re-hashes the accepted artifact. It returns one of:
 
