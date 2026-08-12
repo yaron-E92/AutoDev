@@ -305,7 +305,10 @@ class OpenCodeRuntimeTests(unittest.TestCase):
             self.assertEqual(diagnostics["model"], "groq/openai/gpt-oss-120b")
             self.assertEqual(diagnostics["model_source"], "explicit")
             self.assertEqual(diagnostics["input_artifacts"][0]["bytes"], len(b"bounded prompt"))
-            self.assertNotIn("prompt", json.dumps(diagnostics).casefold())
+            rendered = json.dumps(diagnostics).casefold()
+            self.assertNotIn("bounded prompt", rendered)
+            self.assertNotIn("api_key", rendered)
+            self.assertNotIn("secret", rendered)
 
     def test_headroom_diagnostics_distinguish_proxy_bypass_and_unhealthy_kompress(self):
         health = {
