@@ -21,7 +21,7 @@ try {
     else {
         "$autoDevRoot$([IO.Path]::PathSeparator)$oldPythonPath"
     }
-    & $Python -m automation.opencode_adapter install `
+    & $Python -m automation.opencode_install `
         --target-repo $target `
         --autodev-root $autoDevRoot `
         --python $Python
