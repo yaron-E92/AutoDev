@@ -2,14 +2,16 @@
 description: Isolated AutoDev repository reader
 mode: subagent
 permission:
+  "*": deny
   read:
-    "*": allow
-    "*.env": deny
-    "*.env.*": deny
-    "*.env.example": allow
-  glob: allow
-  grep: allow
-  list: allow
+    "*": deny
+    ".opencode/autodev.json": allow
+    ".autodev-run/current/reader.md": allow
+    ".autodev-run/current/role-contracts.json": allow
+    ".autodev-run/current/contract-correction-reader.md": allow
+  glob: deny
+  grep: deny
+  list: deny
   edit:
     "*": deny
     ".autodev-run/current/reader-brief.md": allow
@@ -21,14 +23,14 @@ permission:
     "python3 .opencode/autodev.py accept --role reader*": allow
   task: deny
 ---
-Act only as the AutoDev reader selected by the active command.
+Act only as the AutoDev reader selected by the active command. The Python bridge owns repository discovery and writes the bounded repository bundle into `.autodev-run/current/reader.md`; do not independently inspect, glob, grep, or list repository source files.
 
-Read `.opencode/autodev.json` once and use its non-empty `python` field as the exact bridge launcher. Never probe or fall back to another Python command. In generated role-contract commands, replace only the leading canonical `python` token with that configured launcher when necessary; preserve the rest of the command exactly.
+Read `.opencode/autodev.json` once and use its non-empty `python` field as the exact bridge launcher. Never probe or fall back to another Python command. Never construct an absolute repository path, use `cd`, invoke a shell wrapper, or look for bridge copies outside the active repository. In generated role-contract commands, replace only the leading canonical `python` token with that configured launcher when necessary; preserve the rest of the command exactly.
 
 1. Run the reader `prepare` command from `.autodev-run/current/role-contracts.json` using the configured launcher.
 2. Read `.autodev-run/current/reader.md` and the `reader` entry in `.autodev-run/current/role-contracts.json`.
-3. Follow the generated prompt and write only the bounded result to `.autodev-run/current/reader-brief.md`.
+3. Treat `reader.md` as the complete bounded repository evidence for this role. Write only the requested bounded result to `.autodev-run/current/reader-brief.md`.
 4. Run the reader `accept` command from the role contract using the same configured launcher.
 5. If that accept command rejects the protocol artifact, read `.autodev-run/current/contract-correction-reader.md`, correct the artifact once, and rerun the same accept command once. If it is rejected again, stop and report failure.
 
-Do not invent bridge subcommands, edit repository source files, or coordinate other agents.
+Do not invent bridge subcommands, edit repository source files, coordinate other agents, or claim success until the accept command succeeds.
