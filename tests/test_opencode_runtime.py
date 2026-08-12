@@ -217,6 +217,37 @@ class OpenCodeRuntimeTests(unittest.TestCase):
             self.assertEqual(code, 1)
             self.assertEqual(payload["state"], "STALE")
 
+    def test_role_check_accepts_fileless_fixer_accept_record(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            current = repo / workflow_stages.CURRENT_DIR
+            current.mkdir(parents=True)
+            (current / "state.json").write_text(
+                json.dumps(
+                    {
+                        "AcceptedRoleArtifacts": {
+                            "fixer": {
+                                "artifact": "target repository edits only",
+                                "sha256": "",
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            output = io.StringIO()
+            with (
+                patch("automation.opencode_runtime._role_diagnostics", return_value={}),
+                redirect_stdout(output),
+            ):
+                code = opencode_runtime._role_check(["--role", "fixer", "--repo", str(repo)])
+            payload = json.loads(output.getvalue())
+
+            self.assertEqual(code, 0)
+            self.assertEqual(payload["state"], "ACCEPTED")
+            self.assertEqual(payload["role"], "fixer")
+
     def test_role_check_rejects_unaccepted_task_even_if_child_claimed_success(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
