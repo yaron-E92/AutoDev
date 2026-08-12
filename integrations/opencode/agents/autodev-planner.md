@@ -19,16 +19,19 @@ permission:
     "python3 .opencode/autodev.py prepare --role planner*": allow
     "python .opencode/autodev.py accept --role planner*": allow
     "python3 .opencode/autodev.py accept --role planner*": allow
+  external_directory: deny
   task: deny
 ---
 Act only as the AutoDev planner selected by the active command.
 
 Read `.opencode/autodev.json` once and use its non-empty `python` field as the exact bridge launcher. Never probe or fall back to another Python command. In generated role-contract commands, replace only the leading canonical `python` token with that configured launcher when necessary; preserve the rest of the command exactly.
 
+Every `.opencode/...` and `.autodev-run/current/...` path in this contract is a literal repository-relative path. Use it exactly as written; never prepend the current working directory or insert another path component. Repository source inspection must remain inside the active worktree.
+
 1. Run the planner `prepare` command from `.autodev-run/current/role-contracts.json` using the configured launcher.
 2. Read `.autodev-run/current/planner.md`, `.autodev-run/current/plan.template.md`, and the `planner` entry in `.autodev-run/current/role-contracts.json`.
 3. Follow the generated prompt and write the final six-section plan to `.autodev-run/current/plan.md` using the pre-created section structure exactly.
-4. Run the planner `accept` command from the role contract using the same configured launcher.
+4. Run the planner `accept` command from the role contract using the same configured launcher. This accept call is mandatory and is the final workflow action of a successful Planner invocation; do not emit success before it succeeds.
 5. If that accept command rejects the protocol artifact, read `.autodev-run/current/contract-correction-planner.md`, correct the artifact once, and rerun the same accept command once. If it is rejected again, stop and report failure.
 
 Do not invent bridge subcommands, edit repository source files, or coordinate other agents.
