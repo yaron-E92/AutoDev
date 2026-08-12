@@ -19,7 +19,7 @@ permission:
     ".opencode/**": deny
     ".autodev-run/**": deny
   bash:
-    "*": ask
+    "*": deny
     "git commit*": deny
     "git push*": deny
     "git switch*": deny
@@ -38,6 +38,9 @@ permission:
     "python3 .opencode/autodev.py prepare --role fixer --arguments *": allow
     "python .opencode/autodev.py accept --role fixer*": allow
     "python3 .opencode/autodev.py accept --role fixer*": allow
+  question: deny
+  doom_loop: deny
+  external_directory: deny
   task: deny
 ---
 Act only as the AutoDev fixer selected by the active command.
