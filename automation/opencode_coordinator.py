@@ -12,8 +12,17 @@ from automation import opencode_adapter, opencode_cli, opencode_resume, opencode
 
 
 ROLE_PROMPT = (
-    "Follow your installed autodev-{role} contract exactly for the current run. "
-    "Return only success/failure and the accepted artifact path."
+    "AutoDev Python has already prepared the current {role} role. "
+    "Follow the installed autodev-{role} contract for the model-heavy work only: "
+    "read the prepared .autodev-run/current artifacts, perform the requested reasoning or edits, "
+    "and write only the contract output artifact. Do not run AutoDev prepare or accept commands; "
+    "Python will validate and accept the result after this process exits. "
+    "Return only success/failure and the output artifact path."
+)
+CORRECTION_PROMPT = (
+    "AutoDev rejected the current {role} output once. Read "
+    ".autodev-run/current/contract-correction-{role}.md, correct only the designated output artifact, "
+    "and stop. Do not run AutoDev prepare or accept commands; Python will perform the final validation."
 )
 REPAIR_KINDS = {"fixer-local": "local", "fixer-semantic": "semantic", "fixer-ci": "ci"}
 ROLE_ACTIONS = {"reader", "synthesizer", "planner"}
@@ -47,7 +56,7 @@ def role_acceptance(repo: Path, role: str) -> dict[str, object]:
         return {
             "state": "MISSING",
             "role": role,
-            "reason": "role process returned without durable accepted artifact/state",
+            "reason": "role has no durable accepted artifact/state",
         }
 
     artifact = str(entry.get("artifact", ""))
@@ -68,22 +77,34 @@ def role_acceptance(repo: Path, role: str) -> dict[str, object]:
     return {"state": "ACCEPTED", "role": role, "artifact": artifact, "sha256": expected}
 
 
-def run_role(
+def _role_output_path(repo: Path, role: str) -> Path | None:
+    relative = str(opencode_adapter.role_contracts().get(role, {}).get("output_artifact", ""))
+    if relative.startswith(".autodev-run/current/"):
+        return repo / workflow_stages.CURRENT_DIR / Path(relative).name
+    return None
+
+
+def _prepare_role(repo: Path, role: str, *, repair_kind: str = "") -> None:
+    if role == "implementer":
+        return
+    issue = _issue_number(repo)
+    arguments = f"{issue} {repair_kind}".strip() if repair_kind else str(issue)
+    opencode_adapter.prepare_role(role, repo, arguments)
+
+
+def _run_agent_process(
     repo: Path,
     role: str,
+    prompt: str,
     *,
-    repair_kind: str = "",
-    runner: Callable[..., object] = subprocess.run,
+    runner: Callable[..., object],
     which=None,
-) -> dict[str, object]:
+) -> None:
     try:
         executable = opencode_cli.resolve_opencode_cli(which=which)
     except opencode_cli.OpenCodeCliError as exc:
         raise OpenCodeCoordinatorError(str(exc)) from exc
 
-    prompt = ROLE_PROMPT.format(role=role)
-    if repair_kind:
-        prompt += f" Repair kind: {repair_kind}."
     command = [
         executable,
         "run",
@@ -121,10 +142,51 @@ def run_role(
             classification=workflow_stages.FAILURE_TRANSIENT,
         )
 
+
+def run_role(
+    repo: Path,
+    role: str,
+    *,
+    repair_kind: str = "",
+    already_prepared: bool = False,
+    runner: Callable[..., object] = subprocess.run,
+    which=None,
+) -> dict[str, object]:
+    if not already_prepared:
+        _prepare_role(repo, role, repair_kind=repair_kind)
+
+    prompt = ROLE_PROMPT.format(role=role)
+    if repair_kind:
+        prompt += f" The prepared repair kind is {repair_kind}."
+    _run_agent_process(repo, role, prompt, runner=runner, which=which)
+
+    output = _role_output_path(repo, role)
+    try:
+        opencode_adapter.accept_role(role, repo, output)
+    except opencode_adapter.OpenCodeAdapterError as first_error:
+        correction = repo / workflow_stages.CURRENT_DIR / f"contract-correction-{role}.md"
+        if not correction.is_file():
+            raise OpenCodeCoordinatorError(
+                f"OpenCode role {role} output was rejected: {first_error}"
+            ) from first_error
+        _run_agent_process(
+            repo,
+            role,
+            CORRECTION_PROMPT.format(role=role),
+            runner=runner,
+            which=which,
+        )
+        try:
+            opencode_adapter.accept_role(role, repo, output)
+        except opencode_adapter.OpenCodeAdapterError as second_error:
+            raise OpenCodeCoordinatorError(
+                f"OpenCode role {role} protocol correction failed: {second_error}"
+            ) from second_error
+
     acceptance = role_acceptance(repo, role)
     if acceptance.get("state") != "ACCEPTED":
         raise OpenCodeCoordinatorError(
-            f"OpenCode role {role} was not durably accepted: "
+            f"OpenCode role {role} was not durably accepted after Python validation: "
             f"{acceptance.get('state')} — {acceptance.get('reason', '')}"
         )
     print(json.dumps({"event": "role-accepted", **acceptance}, sort_keys=True))
@@ -156,20 +218,53 @@ def run_stage(
 
 def terminal_payload(repo: Path, payload: dict[str, object], *, arguments: str = "") -> dict[str, object]:
     state = str(payload.get("state", "FAILED"))
-    if state in {"BLOCKED", "PR_READY"}:
+    if state == "PR_READY":
         return dict(payload)
 
+    current = repo / workflow_stages.CURRENT_DIR
+    reason = str(payload.get("reason", "AutoDev workflow stopped"))
     issue = int(payload.get("issue_number", 0) or _issue_number(repo, arguments))
+    if state == "BLOCKED":
+        try:
+            workflow_stages.mark_blocked(current, workflow_stages.read_state(current), reason)
+        except (OSError, ValueError, workflow_stages.WorkflowStageError):
+            pass
+        if opencode_resume.has_manifest(repo):
+            opencode_resume.checkpoint_failure(
+                repo,
+                str(payload.get("failed_stage", "blocked")),
+                OpenCodeCoordinatorError(
+                    reason,
+                    classification=str(
+                        payload.get("failure_classification", "")
+                        or workflow_stages.FAILURE_DETERMINISTIC
+                    ),
+                ),
+            )
+        result = dict(payload)
+        result["state"] = "BLOCKED"
+        return result
+
+    failure = OpenCodeCoordinatorError(
+        reason,
+        classification=str(
+            payload.get("failure_classification", "") or workflow_stages.FAILURE_DETERMINISTIC
+        ),
+    )
+    if opencode_resume.has_manifest(repo):
+        opencode_resume.checkpoint_failure(
+            repo,
+            str(payload.get("failed_stage", "python-coordinator")),
+            failure,
+        )
     result = workflow_stages.stage_payload(
         repo,
         "FAILED",
         str(payload.get("failed_stage", "python-coordinator")),
-        reason=str(payload.get("reason", "AutoDev Python coordinator failed")),
+        reason=reason,
         requested_issue=issue,
         next_action="inspect the reported failure, correct it, then run /autodev-resume",
-        failure_classification=str(
-            payload.get("failure_classification", "") or workflow_stages.FAILURE_DETERMINISTIC
-        ),
+        failure_classification=failure.classification,
         failure_fingerprint=str(payload.get("failure_fingerprint", "")),
     )
     result["stage"] = "python-coordinator"
@@ -240,7 +335,7 @@ def coordinate(
             rendered = run_stage(repo, "render-implementer")
             if rendered.get("state") != "CONTINUE":
                 return terminal_payload(repo, rendered, arguments=arguments)
-            run_role(repo, "implementer", runner=runner, which=which)
+            run_role(repo, "implementer", already_prepared=True, runner=runner, which=which)
         elif action == "local-check":
             outcome = run_stage(
                 repo,
