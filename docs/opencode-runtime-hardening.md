@@ -61,3 +61,9 @@ Python owns durable workflow state and boundaries.
 OpenCode Tasks own model-heavy role work.
 The coordinator may order those operations, but it may not invent state.
 ```
+
+## Upstream failures
+
+AutoDev does not attempt to fix failures inside OpenCode, Ollama, Groq, Headroom, or a model implementation. In particular, a model may still terminate without a tool call and OpenCode/provider session compaction may still fail before the role can produce an artifact.
+
+The AutoDev-side guarantee is fail-closed: those failures cannot become accepted workflow progress. The missing/stale role boundary and bounded provider/model/input diagnostics explain where the run stopped without silently substituting another model or exposing role transcripts.
