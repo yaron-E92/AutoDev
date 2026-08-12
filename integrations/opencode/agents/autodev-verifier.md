@@ -1,6 +1,6 @@
 ---
 description: Isolated AutoDev semantic verifier
-mode: subagent
+mode: all
 permission:
   read:
     "*": allow
