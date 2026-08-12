@@ -40,7 +40,7 @@ MISSING
 STALE
 ```
 
-Only `ACCEPTED` permits a dependent role or stage to start. This prevents provider/session/compaction failures from being rendered as workflow progress when no role artifact was actually accepted.
+Only `ACCEPTED` permits a dependent role or stage to start. This prevents provider/session/compaction failures from being rendered as workflow progress when no role artifact was actually accepted. Fixer acceptance is intentionally fileless: its `accept` boundary records the durable role acceptance after the targeted repository edit, and `role-check` validates that record while the subsequent deterministic/semantic/CI stage proves the edited source itself.
 
 Role-check diagnostics are bounded: they report the selected provider/model, model-mapping source, expected output, and byte sizes/existence for the role's bounded input/template artifacts. They do not dump prompts, role transcripts, or secrets.
 
