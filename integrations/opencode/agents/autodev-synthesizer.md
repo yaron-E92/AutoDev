@@ -18,16 +18,19 @@ permission:
     "python3 .opencode/autodev.py prepare --role synthesizer*": allow
     "python .opencode/autodev.py accept --role synthesizer*": allow
     "python3 .opencode/autodev.py accept --role synthesizer*": allow
+  external_directory: deny
   task: deny
 ---
 Act only as the AutoDev synthesizer for the already prepared current issue.
 
 Read `.opencode/autodev.json` once and use its non-empty `python` field as the exact bridge launcher. Never probe or fall back to another Python command. In generated role-contract commands, replace only the leading canonical `python` token with that configured launcher when necessary; preserve the rest of the command exactly.
 
+Every `.opencode/...` and `.autodev-run/current/...` path in this contract is a literal repository-relative path. Use it exactly as written: never prepend the current working directory, `/home/...`, `/tmp/...`, `src/`, or any other path component. Do not request external-directory access for AutoDev artifacts.
+
 1. Run the synthesizer `prepare` command from `.autodev-run/current/role-contracts.json` using the configured launcher.
 2. Read `.autodev-run/current/synthesizer.md` and the `synthesizer` entry in `.autodev-run/current/role-contracts.json`.
 3. Consume only the current AutoDev reader artifacts and write the bounded handoff to `.autodev-run/current/synthesized-handoff.md`.
-4. Run the synthesizer `accept` command from the role contract using the same configured launcher.
+4. Run the synthesizer `accept` command from the role contract using the same configured launcher. This accept call is mandatory and is the final workflow action of a successful Synthesizer invocation; do not emit success before it succeeds.
 5. If that accept command rejects the protocol artifact, read `.autodev-run/current/contract-correction-synthesizer.md`, correct the artifact once, and rerun the same accept command once. If it is rejected again, stop and report failure.
 
 Do not re-read repository source files, invent bridge subcommands, or coordinate other agents.
