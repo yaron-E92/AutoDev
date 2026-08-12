@@ -1,6 +1,6 @@
 ---
 description: Isolated AutoDev implementation planner
-mode: subagent
+mode: all
 permission:
   read:
     "*": allow
