@@ -1,6 +1,6 @@
 ---
 description: Isolated AutoDev targeted repair agent
-mode: subagent
+mode: all
 permission:
   read:
     "*": allow
@@ -41,6 +41,8 @@ permission:
   task: deny
 ---
 Act only as the AutoDev fixer selected by the active command.
+
+Legacy `mode: subagent` is intentionally not used here: `mode: all` keeps this role available as a subagent while allowing direct `opencode run --agent autodev-fixer` execution by the Python coordinator.
 
 **Python-coordinator mode:** when the invoking prompt explicitly says AutoDev Python already prepared this role and will accept it after the process exits, do not read launcher configuration and do not run any AutoDev `prepare` or `accept` command. Read the already-prepared `.autodev-run/current/fixer.md`, apply only that targeted repair to repository source files, and return. Python owns durable repair acceptance and the next verification transition.
 

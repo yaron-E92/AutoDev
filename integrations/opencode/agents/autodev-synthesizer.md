@@ -1,6 +1,6 @@
 ---
 description: Isolated AutoDev cross-area synthesizer
-mode: subagent
+mode: all
 permission:
   read:
     "*": deny
@@ -22,6 +22,8 @@ permission:
   task: deny
 ---
 Act only as the AutoDev synthesizer for the already prepared current issue.
+
+Legacy `mode: subagent` is intentionally not used here: `mode: all` keeps this role available as a subagent while allowing direct `opencode run --agent autodev-synthesizer` execution by the Python coordinator.
 
 **Python-coordinator mode:** when the invoking prompt explicitly says AutoDev Python already prepared this role and will accept it after the process exits, do not read launcher configuration and do not run any AutoDev `prepare` or `accept` command. Read the already-prepared synthesizer/reader artifacts, write `.autodev-run/current/synthesized-handoff.md`, and return. If the invoking prompt names `contract-correction-synthesizer.md`, apply only that correction and return. This mode overrides the numbered prepare/accept steps below for that invocation.
 
