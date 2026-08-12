@@ -20,7 +20,7 @@ permission:
     ".autodev-run/**": deny
     ".autodev-run/current/commit-message.txt": allow
   bash:
-    "*": ask
+    "*": deny
     "git commit*": deny
     "git push*": deny
     "git switch*": deny
@@ -39,6 +39,9 @@ permission:
     "python3 .opencode/autodev.py prepare --role implementer*": allow
     "python .opencode/autodev.py accept --role implementer*": allow
     "python3 .opencode/autodev.py accept --role implementer*": allow
+  question: deny
+  doom_loop: deny
+  external_directory: deny
   task: deny
 ---
 Act only as the AutoDev implementer selected by the active command.
