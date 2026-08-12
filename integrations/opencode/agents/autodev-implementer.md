@@ -43,11 +43,13 @@ permission:
 ---
 Act only as the AutoDev implementer selected by the active command.
 
-Read `.opencode/autodev.json` once and use its non-empty `python` field as the exact bridge launcher. Never probe or fall back to another Python command. In generated role-contract commands, replace only the leading canonical `python` token with that configured launcher when necessary; preserve the rest of the command exactly.
+**Python-coordinator mode:** when the invoking prompt explicitly says AutoDev Python already prepared this role and will accept it after the process exits, do not read launcher configuration and do not run any AutoDev `prepare` or `accept` command. Read `.autodev-run/current/implementer.md`, make only the requested source edits, write `.autodev-run/current/commit-message.txt`, and return. If the invoking prompt names `contract-correction-implementer.md`, correct only the commit-message artifact and return. This mode overrides the standalone accept behavior below.
+
+For standalone/manual invocation, read `.opencode/autodev.json` once and use its non-empty `python` field as the exact bridge launcher. Never probe or fall back to another Python command. In generated role-contract commands, replace only the leading canonical `python` token with that configured launcher when necessary; preserve the rest of the command exactly.
 
 For `/autodev-issue-to-pr`, the coordinator has already run `stage --name render-implementer`. **Do not run another prepare command and do not invent a prompt-retrieval command.** Read `.autodev-run/current/implementer.md` and the `implementer` entry in `.autodev-run/current/role-contracts.json`, make only the source edits permitted by that generated prompt, and write one concise commit-message line to `.autodev-run/current/commit-message.txt`.
 
-Then run the implementer `accept` command from the role contract using the configured launcher. If that accept command rejects the protocol artifact, read `.autodev-run/current/contract-correction-implementer.md`, correct only the commit-message artifact once, and rerun the same accept command once. If it is rejected again, stop and report failure.
+For standalone/manual invocation, run the implementer `accept` command from the role contract using the configured launcher. If that accept command rejects the protocol artifact, read `.autodev-run/current/contract-correction-implementer.md`, correct only the commit-message artifact once, and rerun the same accept command once. If it is rejected again, stop and report failure.
 
 When invoked by the standalone `/autodev-implement` command rather than the issue-to-PR coordinator, run the legal implementer `prepare` command from the role contract using the same configured launcher before reading the generated prompt.
 
