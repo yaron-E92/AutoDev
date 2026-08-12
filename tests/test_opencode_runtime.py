@@ -178,16 +178,26 @@ class OpenCodeRuntimeTests(unittest.TestCase):
             )
 
             output = io.StringIO()
-            with redirect_stdout(output):
+            with (
+                patch(
+                    "automation.opencode_runtime._role_diagnostics",
+                    return_value={"provider": "ollama", "model": "ollama/model"},
+                ),
+                redirect_stdout(output),
+            ):
                 code = opencode_runtime._role_check(["--role", "reader", "--repo", str(repo)])
             payload = json.loads(output.getvalue())
 
             self.assertEqual(code, 0)
             self.assertEqual(payload["state"], "ACCEPTED")
+            self.assertEqual(payload["diagnostics"]["model"], "ollama/model")
             artifact.write_text("changed\n", encoding="utf-8")
 
             output = io.StringIO()
-            with redirect_stdout(output):
+            with (
+                patch("automation.opencode_runtime._role_diagnostics", return_value={}),
+                redirect_stdout(output),
+            ):
                 code = opencode_runtime._role_check(["--role", "reader", "--repo", str(repo)])
             payload = json.loads(output.getvalue())
             self.assertEqual(code, 1)
@@ -201,13 +211,50 @@ class OpenCodeRuntimeTests(unittest.TestCase):
             (current / "state.json").write_text("{}\n", encoding="utf-8")
 
             output = io.StringIO()
-            with redirect_stdout(output):
+            with (
+                patch(
+                    "automation.opencode_runtime._role_diagnostics",
+                    return_value={
+                        "provider": "groq",
+                        "model": "groq/openai/gpt-oss-120b",
+                        "input_artifacts": [{"artifact": "synthesizer.md", "bytes": 123}],
+                    },
+                ),
+                redirect_stdout(output),
+            ):
                 code = opencode_runtime._role_check(["--role", "synthesizer", "--repo", str(repo)])
             payload = json.loads(output.getvalue())
 
             self.assertEqual(code, 1)
             self.assertEqual(payload["state"], "MISSING")
             self.assertEqual(payload["role"], "synthesizer")
+            self.assertEqual(payload["diagnostics"]["provider"], "groq")
+            self.assertEqual(payload["diagnostics"]["model"], "groq/openai/gpt-oss-120b")
+
+    def test_role_diagnostics_are_bounded_to_model_identity_and_artifact_sizes(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            current = repo / workflow_stages.CURRENT_DIR
+            current.mkdir(parents=True)
+            (current / "synthesizer.md").write_text("bounded prompt", encoding="utf-8")
+            mappings = {
+                "synthesizer": {
+                    "model": "groq/openai/gpt-oss-120b",
+                    "source": "explicit",
+                }
+            }
+
+            with patch(
+                "automation.opencode_runtime.opencode_adapter.resolve_opencode_model_mappings",
+                return_value=mappings,
+            ):
+                diagnostics = opencode_runtime._role_diagnostics(repo, "synthesizer")
+
+            self.assertEqual(diagnostics["provider"], "groq")
+            self.assertEqual(diagnostics["model"], "groq/openai/gpt-oss-120b")
+            self.assertEqual(diagnostics["model_source"], "explicit")
+            self.assertEqual(diagnostics["input_artifacts"][0]["bytes"], len(b"bounded prompt"))
+            self.assertNotIn("prompt", json.dumps(diagnostics).casefold())
 
     def test_portable_wrapper_invokes_hardened_runtime(self):
         wrapper = (
