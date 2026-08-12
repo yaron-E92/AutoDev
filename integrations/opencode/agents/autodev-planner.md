@@ -19,6 +19,8 @@ permission:
     "python3 .opencode/autodev.py prepare --role planner*": allow
     "python .opencode/autodev.py accept --role planner*": allow
     "python3 .opencode/autodev.py accept --role planner*": allow
+  question: deny
+  doom_loop: deny
   external_directory: deny
   task: deny
 ---
