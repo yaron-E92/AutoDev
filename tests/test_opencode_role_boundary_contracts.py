@@ -62,7 +62,8 @@ class OpenCodeRoleBoundaryContractTests(unittest.TestCase):
             text = self._agent_text(name)
             self.assertIn("literal repository-relative path", text, name)
             self.assertIn("external_directory: deny", text, name)
-            self.assertIn("do not emit success before it succeeds", text, name)
+            self.assertIn("Python-coordinator mode", text, name)
+            self.assertIn("do not run any AutoDev `prepare` or `accept` command", text, name)
 
         synthesizer = self._agent_text("autodev-synthesizer.md")
         self.assertIn("`.autodev-run/current/synthesizer.md`", synthesizer)
@@ -70,7 +71,7 @@ class OpenCodeRoleBoundaryContractTests(unittest.TestCase):
         self.assertIn("`src/`", synthesizer)
         self.assertIn("Do not request external-directory access for AutoDev artifacts", synthesizer)
 
-    def test_coordinator_commands_make_role_check_the_immediate_post_task_boundary(self):
+    def test_legacy_llm_coordinator_commands_still_fail_closed_for_manual_compatibility(self):
         for name in ("autodev-issue-to-pr.md", "autodev-resume.md"):
             text = self._command_text(name)
             self.assertIn("The very next tool invocation must be exactly", text, name)
