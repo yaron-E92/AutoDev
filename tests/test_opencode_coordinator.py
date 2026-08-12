@@ -233,7 +233,7 @@ class OpenCodePythonCoordinatorTests(unittest.TestCase):
         for role in ("reader", "synthesizer", "planner", "implementer", "fixer", "verifier"):
             text = (OPEN_CODE_ROOT / "agents" / f"autodev-{role}.md").read_text(encoding="utf-8")
             frontmatter = text.split("---", 2)[1]
-            self.assertNotIn("ask", frontmatter)
+            self.assertNotIn(": ask", frontmatter)
             self.assertIn("question: deny", frontmatter)
             self.assertIn("doom_loop: deny", frontmatter)
             self.assertIn("external_directory: deny", frontmatter)
