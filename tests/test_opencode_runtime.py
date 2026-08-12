@@ -9,6 +9,20 @@ from unittest.mock import patch
 from automation import opencode_adapter, opencode_runtime, workflow_stages
 
 
+class FakeResponse:
+    def __init__(self, payload):
+        self.payload = payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def read(self, limit=-1):
+        return json.dumps(self.payload).encode("utf-8")
+
+
 class OpenCodeRuntimeTests(unittest.TestCase):
     def test_supported_root_opencode_config_is_ignored_only_for_opencode_runtime(self):
         original = workflow_stages.ignored_workspace_path
@@ -244,9 +258,15 @@ class OpenCodeRuntimeTests(unittest.TestCase):
                 }
             }
 
-            with patch(
-                "automation.opencode_runtime.opencode_adapter.resolve_opencode_model_mappings",
-                return_value=mappings,
+            with (
+                patch(
+                    "automation.opencode_runtime.opencode_adapter.resolve_opencode_model_mappings",
+                    return_value=mappings,
+                ),
+                patch(
+                    "automation.opencode_runtime._headroom_diagnostics",
+                    return_value={"expected": False},
+                ),
             ):
                 diagnostics = opencode_runtime._role_diagnostics(repo, "synthesizer")
 
@@ -255,6 +275,46 @@ class OpenCodeRuntimeTests(unittest.TestCase):
             self.assertEqual(diagnostics["model_source"], "explicit")
             self.assertEqual(diagnostics["input_artifacts"][0]["bytes"], len(b"bounded prompt"))
             self.assertNotIn("prompt", json.dumps(diagnostics).casefold())
+
+    def test_headroom_diagnostics_distinguish_proxy_bypass_and_unhealthy_kompress(self):
+        health = {
+            "status": "healthy",
+            "ready": True,
+            "checks": {
+                "kompress": {"status": "unhealthy", "ready": False},
+            },
+        }
+        with (
+            patch.dict(
+                "automation.opencode_runtime.os.environ",
+                {
+                    "OPENCODE_CONFIG_CONTENT": '{"provider":{"headroom":{}}}',
+                    "HEADROOM_PORT": "8787",
+                },
+                clear=True,
+            ),
+            patch(
+                "automation.opencode_runtime.urllib.request.urlopen",
+                return_value=FakeResponse(health),
+            ),
+        ):
+            diagnostics = opencode_runtime._headroom_diagnostics("ollama")
+
+        self.assertTrue(diagnostics["expected"])
+        self.assertEqual(diagnostics["routing"], "bypassed")
+        self.assertTrue(diagnostics["proxy_reachable"])
+        self.assertEqual(diagnostics["proxy_status"], "healthy")
+        self.assertTrue(diagnostics["proxy_ready"])
+        self.assertEqual(diagnostics["kompress_status"], "unhealthy")
+        self.assertFalse(diagnostics["kompress_ready"])
+
+    def test_headroom_diagnostics_are_optional_when_wrapper_is_not_expected(self):
+        with patch.dict("automation.opencode_runtime.os.environ", {}, clear=True):
+            diagnostics = opencode_runtime._headroom_diagnostics("ollama")
+
+        self.assertFalse(diagnostics["expected"])
+        self.assertEqual(diagnostics["routing"], "not-requested")
+        self.assertEqual(diagnostics["proxy_status"], "not-checked")
 
     def test_portable_wrapper_invokes_hardened_runtime(self):
         wrapper = (
