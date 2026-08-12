@@ -4,7 +4,10 @@ import argparse
 import hashlib
 import io
 import json
+import os
 import sys
+import urllib.error
+import urllib.request
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
@@ -162,6 +165,66 @@ def _artifact_evidence(current: Path, relative: str) -> dict[str, object] | None
     return {"artifact": relative, "exists": True, "bytes": len(data)}
 
 
+def _headroom_expected() -> bool:
+    injected = os.environ.get("OPENCODE_CONFIG_CONTENT", "")
+    return bool(
+        os.environ.get("HEADROOM_PORT", "").strip()
+        or os.environ.get("HEADROOM_WORKSPACE_DIR", "").strip()
+        or '"headroom"' in injected.casefold()
+    )
+
+
+def _headroom_diagnostics(provider: str) -> dict[str, object]:
+    expected = _headroom_expected()
+    result: dict[str, object] = {
+        "expected": expected,
+        "routing": "not-requested" if not expected else ("proxy" if provider == "headroom" else "bypassed"),
+        "proxy_reachable": False,
+        "proxy_status": "not-checked" if not expected else "unreachable",
+        "proxy_ready": False,
+        "kompress_status": "unknown",
+        "kompress_ready": None,
+    }
+    if not expected:
+        return result
+
+    raw_port = os.environ.get("HEADROOM_PORT", "").strip() or "8787"
+    try:
+        port = int(raw_port)
+    except ValueError:
+        result["proxy_status"] = "invalid-port"
+        return result
+
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=0.5) as response:
+            raw = response.read(64_000)
+    except (OSError, urllib.error.URLError, ValueError):
+        return result
+
+    result["proxy_reachable"] = True
+    try:
+        health = json.loads(raw.decode("utf-8", errors="replace"))
+    except json.JSONDecodeError:
+        result["proxy_status"] = "invalid-health-json"
+        return result
+    if not isinstance(health, dict):
+        result["proxy_status"] = "invalid-health-json"
+        return result
+
+    result["proxy_status"] = str(health.get("status", "unknown"))
+    result["proxy_ready"] = bool(health.get("ready", False))
+    candidates = [health.get("kompress")]
+    checks = health.get("checks", {})
+    if isinstance(checks, dict):
+        candidates.append(checks.get("kompress"))
+    for value in candidates:
+        if isinstance(value, dict):
+            result["kompress_status"] = str(value.get("status", "unknown"))
+            result["kompress_ready"] = bool(value.get("ready", False))
+            break
+    return result
+
+
 def _role_diagnostics(repo: Path, role: str) -> dict[str, object]:
     current = repo / workflow_stages.CURRENT_DIR
     contract = opencode_adapter.role_contracts().get(role, {})
@@ -188,6 +251,7 @@ def _role_diagnostics(repo: Path, role: str) -> dict[str, object]:
         "model_source": source,
         "input_artifacts": inputs,
         "expected_output": str(contract.get("output_artifact", "")),
+        "headroom": _headroom_diagnostics(provider),
     }
 
 
