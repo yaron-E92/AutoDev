@@ -1,6 +1,6 @@
 ---
 description: Isolated AutoDev source implementer
-mode: subagent
+mode: all
 permission:
   read:
     "*": allow
