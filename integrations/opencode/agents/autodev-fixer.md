@@ -1,6 +1,6 @@
 ---
 description: Isolated AutoDev targeted repair agent
-mode: subagent
+mode: all
 permission:
   read:
     "*": allow
