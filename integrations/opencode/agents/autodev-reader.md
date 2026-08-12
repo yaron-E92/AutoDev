@@ -1,6 +1,6 @@
 ---
 description: Isolated AutoDev repository reader
-mode: subagent
+mode: all
 permission:
   "*": deny
   read:
