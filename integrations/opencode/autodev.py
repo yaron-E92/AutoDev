@@ -11,6 +11,7 @@ from typing import Callable
 
 
 CONFIG_VERSION = 1
+COORDINATE_COMMAND = "coordinate"
 
 
 def _current_issue_number() -> int:
@@ -159,13 +160,14 @@ def main() -> int:
         return 1
 
     repo = Path.cwd()
+    arguments = _arguments_with_current_issue(sys.argv[1:])
+    module = "automation.opencode_runtime"
+    if arguments and arguments[0] == COORDINATE_COMMAND:
+        module = "automation.opencode_coordinator"
+        arguments = arguments[1:]
+
     completed = subprocess.run(
-        [
-            python,
-            "-m",
-            "automation.opencode_runtime",
-            *_arguments_with_current_issue(sys.argv[1:]),
-        ],
+        [python, "-m", module, *arguments],
         cwd=repo,
         env=_bridge_environment(python, autodev_root, repo),
         check=False,
