@@ -3,8 +3,10 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import shlex
 import subprocess
+import time
 from pathlib import Path
 from typing import Callable
 
@@ -26,6 +28,15 @@ CORRECTION_PROMPT = (
 )
 REPAIR_KINDS = {"fixer-local": "local", "fixer-semantic": "semantic", "fixer-ci": "ci"}
 ROLE_ACTIONS = {"reader", "synthesizer", "planner"}
+ROLE_TIMEOUT_SECONDS = {
+    "reader": 600,
+    "synthesizer": 900,
+    "planner": 900,
+    "implementer": 1800,
+    "fixer": 900,
+    "verifier": 900,
+}
+ROLE_TIMEOUT_ENV = "AUTODEV_OPENCODE_ROLE_TIMEOUT_SECONDS"
 MAX_TRANSITIONS = 100
 
 
@@ -33,6 +44,24 @@ class OpenCodeCoordinatorError(RuntimeError):
     def __init__(self, message: str, *, classification: str = workflow_stages.FAILURE_DETERMINISTIC) -> None:
         super().__init__(message)
         self.classification = classification
+
+
+def role_timeout_seconds(role: str) -> int:
+    specific_name = f"AUTODEV_OPENCODE_{role.upper()}_TIMEOUT_SECONDS"
+    raw = os.environ.get(specific_name) or os.environ.get(ROLE_TIMEOUT_ENV)
+    if raw:
+        try:
+            value = int(raw)
+        except ValueError as exc:
+            raise OpenCodeCoordinatorError(
+                f"{specific_name if os.environ.get(specific_name) else ROLE_TIMEOUT_ENV} must be a positive integer"
+            ) from exc
+        if value <= 0:
+            raise OpenCodeCoordinatorError(
+                f"{specific_name if os.environ.get(specific_name) else ROLE_TIMEOUT_ENV} must be a positive integer"
+            )
+        return value
+    return ROLE_TIMEOUT_SECONDS.get(role, 900)
 
 
 def _issue_number(repo: Path, arguments: str = "") -> int:
@@ -99,12 +128,15 @@ def _run_agent_process(
     *,
     runner: Callable[..., object],
     which=None,
+    repair_kind: str = "",
+    phase: str = "work",
 ) -> None:
     try:
         executable = opencode_cli.resolve_opencode_cli(which=which)
     except opencode_cli.OpenCodeCliError as exc:
         raise OpenCodeCoordinatorError(str(exc)) from exc
 
+    timeout_seconds = role_timeout_seconds(role)
     command = [
         executable,
         "run",
@@ -116,6 +148,16 @@ def _run_agent_process(
         "json",
         prompt,
     ]
+    event = {
+        "event": "role-started",
+        "role": role,
+        "phase": phase,
+        "timeout_seconds": timeout_seconds,
+    }
+    if repair_kind:
+        event["repair_kind"] = repair_kind
+    print(json.dumps(event, sort_keys=True), flush=True)
+    started = time.monotonic()
     try:
         completed = runner(
             command,
@@ -123,9 +165,31 @@ def _run_agent_process(
             text=True,
             encoding="utf-8",
             errors="replace",
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             check=False,
+            timeout=timeout_seconds,
         )
+    except subprocess.TimeoutExpired as exc:
+        elapsed_ms = int((time.monotonic() - started) * 1000)
+        print(
+            json.dumps(
+                {
+                    "event": "role-timeout",
+                    "role": role,
+                    "phase": phase,
+                    "repair_kind": repair_kind,
+                    "timeout_seconds": timeout_seconds,
+                    "elapsed_ms": elapsed_ms,
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+        raise OpenCodeCoordinatorError(
+            f"OpenCode role {role} exceeded configured timeout of {timeout_seconds} seconds",
+            classification=workflow_stages.FAILURE_TRANSIENT,
+        ) from exc
     except OSError as exc:
         raise OpenCodeCoordinatorError(
             f"could not launch OpenCode role {role} via {executable!r}: {exc}",
@@ -141,6 +205,17 @@ def _run_agent_process(
             f"OpenCode role {role} exited with code {returncode}" + (f": {detail}" if detail else ""),
             classification=workflow_stages.FAILURE_TRANSIENT,
         )
+
+    finished = {
+        "event": "role-finished",
+        "role": role,
+        "phase": phase,
+        "returncode": returncode,
+        "elapsed_ms": int((time.monotonic() - started) * 1000),
+    }
+    if repair_kind:
+        finished["repair_kind"] = repair_kind
+    print(json.dumps(finished, sort_keys=True), flush=True)
 
 
 def run_role(
@@ -158,7 +233,14 @@ def run_role(
     prompt = ROLE_PROMPT.format(role=role)
     if repair_kind:
         prompt += f" The prepared repair kind is {repair_kind}."
-    _run_agent_process(repo, role, prompt, runner=runner, which=which)
+    _run_agent_process(
+        repo,
+        role,
+        prompt,
+        runner=runner,
+        which=which,
+        repair_kind=repair_kind,
+    )
 
     output = _role_output_path(repo, role)
     try:
@@ -175,6 +257,8 @@ def run_role(
             CORRECTION_PROMPT.format(role=role),
             runner=runner,
             which=which,
+            repair_kind=repair_kind,
+            phase="correction",
         )
         try:
             opencode_adapter.accept_role(role, repo, output)
@@ -189,7 +273,7 @@ def run_role(
             f"OpenCode role {role} was not durably accepted after Python validation: "
             f"{acceptance.get('state')} — {acceptance.get('reason', '')}"
         )
-    print(json.dumps({"event": "role-accepted", **acceptance}, sort_keys=True))
+    print(json.dumps({"event": "role-accepted", **acceptance}, sort_keys=True), flush=True)
     return acceptance
 
 
@@ -208,7 +292,7 @@ def run_stage(
         attempt=attempt,
         reason=reason,
     )
-    print(json.dumps({"event": "stage", **payload}, sort_keys=True))
+    print(json.dumps({"event": "stage", **payload}, sort_keys=True), flush=True)
     if code != 0 and payload.get("state") not in {"FAILED", "BLOCKED", "REPAIR"}:
         raise OpenCodeCoordinatorError(
             str(payload.get("reason", "")) or f"AutoDev stage {name} failed with exit code {code}"
@@ -458,7 +542,7 @@ def run(argv: list[str] | None = None) -> int:
             },
             arguments=args.arguments,
         )
-    print(json.dumps(payload, sort_keys=True))
+    print(json.dumps(payload, sort_keys=True), flush=True)
     return 0 if payload.get("state") in {"PR_READY", "BLOCKED"} else 1
 
 
