@@ -38,11 +38,17 @@ def _failure_path(repo: Path) -> Path:
     return repo / workflow_stages.CURRENT_DIR / FRONTEND_FAILURE_FILE
 
 
+def _clear_failure(repo: Path) -> None:
+    _failure_path(repo).unlink(missing_ok=True)
+
+
 def _persist_failure(repo: Path, payload: dict[str, object]) -> None:
     path = _failure_path(repo)
     path.parent.mkdir(parents=True, exist_ok=True)
     value = {
         "issue_number": int(payload.get("issue_number", 0) or 0),
+        "branch": str(payload.get("branch", "")),
+        "completed_stage": str(payload.get("completed_stage", "")),
         "failed_stage": str(payload.get("failed_stage", "")),
         "reason": str(payload.get("reason", "")),
         "failure_classification": str(payload.get("failure_classification", "")),
@@ -135,6 +141,10 @@ def _terminal_failed(args) -> int:
     )
     payload["stage"] = "failed"
     payload["failed_stage"] = failed_stage
+    if persisted.get("branch"):
+        payload["branch"] = str(persisted["branch"])
+    if persisted.get("completed_stage"):
+        payload["completed_stage"] = str(persisted["completed_stage"])
     if opencode_resume.has_manifest(repo):
         opencode_resume.checkpoint_stage(repo, "failed", payload, 0)
     print(json.dumps(payload, sort_keys=True))
@@ -214,10 +224,13 @@ def run(argv: list[str] | None = None) -> int:
         return _terminal_failed(args)
 
     code, out, _ = _run_adapter(values)
-    if args.command == "stage" and code != 0:
+    if args.command == "stage":
         payload = _last_json_object(out)
-        if payload.get("state") == "FAILED":
-            _persist_failure(Path(args.repo).expanduser().resolve(), payload)
+        repo = Path(args.repo).expanduser().resolve()
+        if code != 0 and payload.get("state") == "FAILED":
+            _persist_failure(repo, payload)
+        elif code == 0 and payload.get("state") not in {"FAILED", "BLOCKED", "REPAIR"}:
+            _clear_failure(repo)
     return code
 
 
