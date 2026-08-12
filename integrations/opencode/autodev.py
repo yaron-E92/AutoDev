@@ -11,6 +11,9 @@ from typing import Callable
 
 
 CONFIG_VERSION = 1
+# automation.opencode_runtime is the OpenCode-only hardening layer; it delegates
+# normal frontend behavior to automation.opencode_adapter and never to a
+# Windows-specific workflow backend.
 
 
 def _current_issue_number() -> int:
