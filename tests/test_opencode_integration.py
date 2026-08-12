@@ -527,12 +527,16 @@ class OpenCodeIntegrationTests(unittest.TestCase):
 
     def test_opencode_adapter_has_no_windows_workflow_backend(self):
         adapter = (REPO_ROOT / "automation" / "opencode_adapter.py").read_text(encoding="utf-8")
+        runtime = (REPO_ROOT / "automation" / "opencode_runtime.py").read_text(encoding="utf-8")
         portable = (REPO_ROOT / "integrations" / "opencode" / "autodev.py").read_text(encoding="utf-8")
 
         self.assertNotIn("windows/scripts", adapter)
+        self.assertNotIn("windows/scripts", runtime)
         self.assertNotIn("issue-to-pr-cycle.ps1", adapter)
+        self.assertNotIn("issue-to-pr-cycle.ps1", runtime)
         self.assertNotIn("pwsh", portable)
-        self.assertIn("automation.opencode_adapter", portable)
+        self.assertIn("automation.opencode_runtime", portable)
+        self.assertIn("opencode_adapter", runtime)
 
     def test_existing_workflow_entrypoints_do_not_depend_on_opencode_adapter(self):
         paths = (

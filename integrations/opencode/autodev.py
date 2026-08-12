@@ -163,7 +163,7 @@ def main() -> int:
         [
             python,
             "-m",
-            "automation.opencode_adapter",
+            "automation.opencode_runtime",
             *_arguments_with_current_issue(sys.argv[1:]),
         ],
         cwd=repo,

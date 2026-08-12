@@ -5,7 +5,9 @@ subtask: false
 ---
 Resume the current AutoDev OpenCode run from its `.autodev-run/current/run-manifest.json` checkpoint state.
 
-Run the installed bridge (use `python3` instead where required):
+First read `.opencode/autodev.json` and use its non-empty `python` field as the exact launcher. Do not probe `python`, `python3`, absolute interpreter paths, temporary directories, shell wrappers, `cd`, `bash -c`, or fallback commands.
+
+Run exactly one installed resume bridge command, substituting only that configured launcher for the leading `python` token:
 
 ```text
 python .opencode/autodev.py resume
@@ -13,4 +15,12 @@ python .opencode/autodev.py resume
 
 If `$ARGUMENTS` contains one or more `--invalidate-role <role>` values, append only those explicit invalidations. Do not pass model override flags; model changes come from the normal OpenCode configuration resolved by #66.
 
-Use the returned `next_action` and durable repair counters to enter the existing `autodev-coordinator` workflow at that exact boundary. Do not restart preflight/prepare or rerun a completed reader/planner/implementer/verification stage unless the manifest invalidated it. Finish with the same `PR_READY`, `BLOCKED`, or `FAILED` contract as a normal run.
+The resume bridge JSON is the sole authority for the continuation boundary. Use only its `state`, `next_action`, `next_role`, `next_stage`, and durable repair counters. Never infer a completed role, invent a Task ID, reconstruct progress from chat history, or derive a continuation boundary by reading the manifest yourself.
+
+If the exact resume bridge command is denied, cannot be launched, returns invalid/non-JSON output, or otherwise does not produce an authoritative resume payload, do not try alternate shell commands and do not continue manually. Finish `FAILED` with the concrete bridge/permission reason. A failed resume invocation is not permission to restart preflight/prepare.
+
+On a successful `state: RESUME`, enter the existing `autodev-coordinator` workflow at exactly the returned `next_action`. Do not restart preflight/prepare or rerun a completed reader/planner/implementer/verification stage unless the bridge explicitly invalidated it.
+
+After every delegated role Task, do not trust the Task UI checkmark or child-agent prose as completion proof. Run exactly the repository-relative `role-check --role <role>` bridge operation with the configured launcher, and advance only on JSON state `ACCEPTED`. `MISSING`, `STALE`, denial, or invalid output is a failed role boundary; finish `FAILED` instead of launching a dependent role. Use `resume` again only when a new continuation boundary must be calculated after a durable stage transition, not as a substitute for role acceptance validation.
+
+Finish with exactly one explicit final state: `PR_READY`, `BLOCKED`, or `FAILED`. Never merge the pull request.
