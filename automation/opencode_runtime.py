@@ -15,6 +15,7 @@ from automation import opencode_adapter, opencode_resume, workflow_stages
 
 
 SUPPORTED_ROOT_OPENCODE_CONFIG = {"opencode.json", "opencode.jsonc"}
+WORKSPACE_SNAPSHOT_FILES = {"workspace-snapshot.json", "last-commit-workspace-snapshot.json"}
 FRONTEND_FAILURE_FILE = "opencode-last-failure.json"
 ROLE_CHECK_COMMAND = "role-check"
 
@@ -22,19 +23,35 @@ ROLE_CHECK_COMMAND = "role-check"
 def install_workflow_guards() -> None:
     """Apply OpenCode-frontend-only workspace rules before invoking shared stages."""
     current = workflow_stages.ignored_workspace_path
-    if getattr(current, "_autodev_opencode_guard", False):
+    if not getattr(current, "_autodev_opencode_guard", False):
+        original = current
+
+        def ignored_workspace_path(relative: str) -> bool:
+            normalized = relative.replace("\\", "/").removeprefix("./")
+            if normalized in SUPPORTED_ROOT_OPENCODE_CONFIG:
+                return True
+            return original(relative)
+
+        ignored_workspace_path._autodev_opencode_guard = True  # type: ignore[attr-defined]
+        workflow_stages.ignored_workspace_path = ignored_workspace_path
+
+    current_read_json = workflow_stages.read_json
+    if getattr(current_read_json, "_autodev_opencode_snapshot_guard", False):
         return
+    original_read_json = current_read_json
 
-    original = current
+    def read_json(path: Path):
+        value = original_read_json(path)
+        if Path(path).name not in WORKSPACE_SNAPSHOT_FILES or not isinstance(value, dict):
+            return value
+        return {
+            str(relative): digest
+            for relative, digest in value.items()
+            if not workflow_stages.ignored_workspace_path(str(relative))
+        }
 
-    def ignored_workspace_path(relative: str) -> bool:
-        normalized = relative.replace("\\", "/").removeprefix("./")
-        if normalized in SUPPORTED_ROOT_OPENCODE_CONFIG:
-            return True
-        return original(relative)
-
-    ignored_workspace_path._autodev_opencode_guard = True  # type: ignore[attr-defined]
-    workflow_stages.ignored_workspace_path = ignored_workspace_path
+    read_json._autodev_opencode_snapshot_guard = True  # type: ignore[attr-defined]
+    workflow_stages.read_json = read_json
 
 
 def _failure_path(repo: Path) -> Path:
