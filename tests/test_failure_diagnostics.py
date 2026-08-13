@@ -27,15 +27,17 @@ class FailureDiagnosticsTests(unittest.TestCase):
         self.assertEqual(actual, workflow_stages.FAILURE_TRANSIENT)
 
     def test_timestamp_duration_and_repo_path_noise_are_normalized(self):
+        repo_a = Path("repo-a").resolve()
+        repo_b = Path("repo-b").resolve()
         first = failure_diagnostics.local_failure_fingerprint(
             "dotnet build",
-            "/repo/a/Foo.cs: error CS1001 at 2026-08-13T10:00:00Z after 1200 ms",
-            Path("/repo/a"),
+            f"{repo_a / 'Foo.cs'}: error CS1001 at 2026-08-13T10:00:00Z after 1200 ms",
+            repo_a,
         )
         second = failure_diagnostics.local_failure_fingerprint(
             "dotnet build",
-            "/repo/b/Foo.cs: error CS1001 at 2026-08-13T11:30:00Z after 9 seconds",
-            Path("/repo/b"),
+            f"{repo_b / 'Foo.cs'}: error CS1001 at 2026-08-13T11:30:00Z after 9 seconds",
+            repo_b,
         )
         self.assertEqual(first, second)
 
