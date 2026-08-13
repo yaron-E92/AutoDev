@@ -24,6 +24,12 @@ class GitHubFailureContextTests(unittest.TestCase):
         )
         self.assertEqual(value, "")
 
+    def test_workflow_permission_evidence_gets_actionable_hint(self):
+        value = github_cli_proxy.workflow_authorization_hint(
+            "workflow update forbidden: permission denied"
+        )
+        self.assertIn("workflow-file", value)
+
 
 if __name__ == "__main__":
     unittest.main()
