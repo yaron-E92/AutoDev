@@ -12,6 +12,9 @@ from typing import Callable
 
 CONFIG_VERSION = 1
 COORDINATE_COMMAND = "coordinate"
+# The guarded entrypoint preserves the established bridge boundaries:
+# runtime execution -> "automation.opencode_runtime"
+# coordinate execution -> module = "automation.opencode_coordinator"
 
 
 def _current_issue_number() -> int:
