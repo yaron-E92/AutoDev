@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 
 from automation import failure_diagnostics, workflow_stages
 
@@ -22,6 +23,28 @@ class FailureDiagnosticsTests(unittest.TestCase):
             workflow_stages.FAILURE_TRANSIENT,
         )
         self.assertEqual(actual, workflow_stages.FAILURE_TRANSIENT)
+
+    def test_timestamp_duration_and_repo_path_noise_are_normalized(self):
+        first = failure_diagnostics.local_failure_fingerprint(
+            "dotnet build",
+            "/repo/a/Foo.cs: error CS1001 at 2026-08-13T10:00:00Z after 1200 ms",
+            Path("/repo/a"),
+        )
+        second = failure_diagnostics.local_failure_fingerprint(
+            "dotnet build",
+            "/repo/b/Foo.cs: error CS1001 at 2026-08-13T11:30:00Z after 9 seconds",
+            Path("/repo/b"),
+        )
+        self.assertEqual(first, second)
+
+    def test_materially_changed_error_changes_fingerprint(self):
+        first = failure_diagnostics.local_failure_fingerprint(
+            "dotnet build", "Foo.cs: error CS1001"
+        )
+        second = failure_diagnostics.local_failure_fingerprint(
+            "dotnet build", "Foo.cs: error CS0101"
+        )
+        self.assertNotEqual(first, second)
 
 
 if __name__ == "__main__":
