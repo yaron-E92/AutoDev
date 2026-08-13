@@ -1,0 +1,24 @@
+from __future__ import annotations
+
+import sys
+
+from automation import ci_outcomes, opencode_coordinator, opencode_runtime
+
+
+COORDINATE_COMMAND = "coordinate"
+
+
+def run(argv: list[str] | None = None) -> int:
+    ci_outcomes.install()
+    values = list(sys.argv[1:] if argv is None else argv)
+    if values and values[0] == COORDINATE_COMMAND:
+        return opencode_coordinator.run(values[1:])
+    return opencode_runtime.run(values)
+
+
+def main() -> int:
+    return run()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
