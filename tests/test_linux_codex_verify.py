@@ -10,6 +10,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 VERIFY_SCRIPT = REPO_ROOT / "linux" / "scripts" / "codex-verify.sh"
 
 
+@unittest.skipIf(os.name == "nt", "Linux verifier regression tests require a POSIX host")
 class LinuxCodexVerifyTests(unittest.TestCase):
     def test_maui_profile_builds_android_app_and_defers_windows_test_project(self):
         with tempfile.TemporaryDirectory() as temp_dir:
