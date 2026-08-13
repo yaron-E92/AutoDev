@@ -12,6 +12,7 @@ from typing import Callable
 
 CONFIG_VERSION = 1
 COORDINATE_COMMAND = "coordinate"
+DEFAULT_MAX_SEMANTIC_REPAIR_ATTEMPTS = "2"
 # The guarded entrypoint preserves the established bridge boundaries:
 # runtime execution -> "automation.opencode_runtime"
 # coordinate execution -> module = "automation.opencode_coordinator"
@@ -117,6 +118,7 @@ def _bridge_environment(
         else str(autodev_root) + os.pathsep + old_python_path
     )
     env["AUTODEV_PYTHON"] = python
+    env.setdefault("MAX_SEMANTIC_REPAIR_ATTEMPTS", DEFAULT_MAX_SEMANTIC_REPAIR_ATTEMPTS)
     _resolve_github_environment(env, repo, runner=runner)
     if (
         os.name != "nt"
