@@ -4,7 +4,7 @@ import sys
 
 from automation import (
     ci_outcomes,
-    opencode_failure_entrypoint,
+    opencode_github_entrypoint,
     opencode_runtime,
     pr_head_sync,
 )
@@ -18,7 +18,7 @@ def run(argv: list[str] | None = None) -> int:
     pr_head_sync.install()
     values = list(sys.argv[1:] if argv is None else argv)
     if values and values[0] == COORDINATE_COMMAND:
-        return opencode_failure_entrypoint.run(values[1:])
+        return opencode_github_entrypoint.run(values[1:])
     return opencode_runtime.run(values)
 
 
