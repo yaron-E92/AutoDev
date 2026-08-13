@@ -5,8 +5,10 @@ import hashlib
 import io
 import json
 import os
+import subprocess
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -20,8 +22,253 @@ FRONTEND_FAILURE_FILE = "opencode-last-failure.json"
 ROLE_CHECK_COMMAND = "role-check"
 
 
+def _shipped_commit_ready(state: dict[str, object]) -> bool:
+    last_commit = str(state.get("LastCommitSha", "")).strip()
+    created_commit = str(state.get("CreatedCommitSha", "")).strip()
+    return bool(
+        last_commit
+        and created_commit == last_commit
+        and str(state.get("CreatedTreeSha", "")).strip()
+        and str(state.get("CreatedParentSha", "")).strip()
+        and str(state.get("ShippedSourceIdentity", "")).strip()
+        and bool(state.get("ShippedTreeVerified"))
+    )
+
+
+def _post_shipment_source_identity(
+    repo: Path,
+    current: Path,
+    state: dict[str, object],
+) -> dict[str, object] | None:
+    if not _shipped_commit_ready(state):
+        return None
+
+    created_parent = str(state.get("CreatedParentSha", "")).strip()
+    shipped_identity = str(state.get("ShippedSourceIdentity", "")).strip()
+    verified_parent = str(state.get("VerifiedParentSha", "")).strip()
+    verified_identity = str(state.get("VerifiedSourceIdentity", "")).strip()
+    if not verified_parent or created_parent != verified_parent:
+        raise workflow_stages.WorkflowStageError(
+            "post-shipment proof does not match the parent used for local verification"
+        )
+    if not verified_identity or shipped_identity != verified_identity:
+        raise workflow_stages.WorkflowStageError(
+            "post-shipment proof does not match the source identity that passed local verification"
+        )
+
+    snapshot_path = current / "last-commit-workspace-snapshot.json"
+    expected_hash = str(state.get("LastCommitSnapshotHash", "")).strip()
+    if not expected_hash or not snapshot_path.is_file():
+        raise workflow_stages.WorkflowStageError(
+            "post-shipment workspace snapshot proof is missing"
+        )
+    actual_hash = hashlib.sha256(snapshot_path.read_bytes()).hexdigest()
+    if actual_hash != expected_hash:
+        raise workflow_stages.WorkflowStageError(
+            "post-shipment workspace snapshot proof changed unexpectedly"
+        )
+
+    baseline = workflow_stages.read_json(snapshot_path)
+    if not isinstance(baseline, dict):
+        raise workflow_stages.WorkflowStageError(
+            "post-shipment workspace snapshot is missing or invalid"
+        )
+    if workflow_stages.workspace_snapshot(repo) != baseline:
+        return None
+
+    changes = state.get("VerifiedChanges", [])
+    return {
+        "parent_sha": created_parent,
+        "identity": shipped_identity,
+        "changes": changes if isinstance(changes, list) else [],
+    }
+
+
+def _existing_pr_for_shipped_branch(
+    repo: Path,
+    state: dict[str, object],
+    *,
+    runner,
+) -> dict[str, object] | None:
+    repo_full = str(state.get("RepoFullName", "")).strip()
+    branch = str(state.get("BranchName", "")).strip()
+    base = str(state.get("Base", "main")).strip() or "main"
+    if not repo_full or not branch or "/" not in repo_full:
+        raise workflow_stages.WorkflowStageError(
+            "cannot recover PR because repository/branch identity is missing"
+        )
+
+    owner = repo_full.split("/", 1)[0]
+    query = urllib.parse.urlencode(
+        {
+            "state": "open",
+            "head": f"{owner}:{branch}",
+            "base": base,
+            "per_page": "100",
+        }
+    )
+    completed = workflow_stages.gh(
+        repo,
+        ["api", f"repos/{repo_full}/pulls?{query}"],
+        runner=runner,
+        check=False,
+    )
+    if int(getattr(completed, "returncode", 1)) != 0:
+        raise workflow_stages.WorkflowStageError(
+            workflow_stages._command_reason(completed),
+            classification=workflow_stages._command_failure_classification(completed),
+        )
+    text = workflow_stages._decoded_text(getattr(completed, "stdout", "")).strip()
+    try:
+        value = json.loads(text or "[]")
+    except json.JSONDecodeError as exc:
+        raise workflow_stages.WorkflowStageError(
+            f"gh returned invalid PR recovery JSON: {workflow_stages.concise(text, 700)}"
+        ) from exc
+    if not isinstance(value, list):
+        raise workflow_stages.WorkflowStageError(
+            f"gh returned an unexpected PR recovery value: {workflow_stages.concise(text, 700)}"
+        )
+
+    matches: list[dict[str, object]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        head = item.get("head", {})
+        head_repo = head.get("repo", {}) if isinstance(head, dict) else {}
+        if not isinstance(head, dict) or not isinstance(head_repo, dict):
+            continue
+        if str(head.get("ref", "")) != branch:
+            continue
+        if str(head_repo.get("full_name", "")) != repo_full:
+            continue
+        matches.append(item)
+
+    if len(matches) > 1:
+        raise workflow_stages.WorkflowStageError(
+            f"multiple open pull requests found for exact AutoDev branch {branch}"
+        )
+    return matches[0] if matches else None
+
+
+def _persist_recovered_pr(
+    current: Path,
+    state: dict[str, object],
+    pr: dict[str, object],
+) -> None:
+    number = int(pr.get("number", 0) or 0)
+    pr_url = str(pr.get("html_url", "")).strip()
+    head = pr.get("head", {})
+    head_sha = str(head.get("sha", "")).strip() if isinstance(head, dict) else ""
+    if number <= 0 or not pr_url or not head_sha:
+        raise workflow_stages.WorkflowStageError(
+            "existing PR recovery did not return number, URL, and head SHA"
+        )
+
+    if state.get("VerificationProofVersion"):
+        expected = str(state.get("LastCommitSha", "")).strip()
+        if not expected or head_sha != expected:
+            raise workflow_stages.WorkflowStageError(
+                f"recovered PR head {head_sha or '<missing>'} does not match exact AutoDev commit {expected or '<missing>'}"
+            )
+
+    state["PrUrl"] = pr_url
+    state["PrNumber"] = number
+    state["PrHeadSha"] = head_sha
+    workflow_stages.write_state(current, state)
+    workflow_stages._record_shipment_diagnostics(current, pr_head_sha=head_sha)
+
+
+def _recover_existing_pr(
+    repo: Path,
+    current: Path,
+    state: dict[str, object],
+    *,
+    runner,
+) -> bool:
+    pr = _existing_pr_for_shipped_branch(repo, state, runner=runner)
+    if pr is None:
+        return False
+    _persist_recovered_pr(current, state, pr)
+    return True
+
+
+def _install_shipment_guards() -> None:
+    current_source_identity = workflow_stages.source_identity
+    if not getattr(current_source_identity, "_autodev_opencode_shipment_guard", False):
+        original_source_identity = current_source_identity
+
+        def source_identity(repo: Path, current: Path, state: dict[str, object]):
+            shipped = _post_shipment_source_identity(repo, current, state)
+            return shipped if shipped is not None else original_source_identity(repo, current, state)
+
+        source_identity._autodev_opencode_shipment_guard = True  # type: ignore[attr-defined]
+        workflow_stages.source_identity = source_identity
+
+    current_ensure_pr = workflow_stages.ensure_pr
+    if not getattr(current_ensure_pr, "_autodev_opencode_shipment_guard", False):
+        original_ensure_pr = current_ensure_pr
+
+        def ensure_pr(
+            repo: Path,
+            current: Path,
+            state: dict[str, object],
+            *,
+            runner=subprocess.run,
+        ) -> None:
+            latest = workflow_stages.read_state(current)
+            if not str(latest.get("PrUrl", "")).strip():
+                if _recover_existing_pr(repo, current, latest, runner=runner):
+                    return
+            try:
+                original_ensure_pr(repo, current, latest, runner=runner)
+            except workflow_stages.WorkflowStageError as original_error:
+                latest = workflow_stages.read_state(current)
+                if not str(latest.get("PrUrl", "")).strip():
+                    try:
+                        if _recover_existing_pr(repo, current, latest, runner=runner):
+                            return
+                    except workflow_stages.WorkflowStageError:
+                        pass
+                raise original_error
+
+        ensure_pr._autodev_opencode_shipment_guard = True  # type: ignore[attr-defined]
+        workflow_stages.ensure_pr = ensure_pr
+
+    current_pr_and_ci = workflow_stages.pr_and_ci
+    if not getattr(current_pr_and_ci, "_autodev_opencode_shipment_guard", False):
+        original_pr_and_ci = current_pr_and_ci
+
+        def pr_and_ci(
+            repo: Path,
+            current: Path,
+            state: dict[str, object],
+            autodev_root: Path,
+            *,
+            runner=subprocess.run,
+        ) -> bool:
+            latest = workflow_stages.read_state(current)
+            if not str(latest.get("PrUrl", "")).strip() and _shipped_commit_ready(latest):
+                changes = workflow_stages.workspace_changes(repo, current, latest)
+                if not changes:
+                    workflow_stages.ensure_pr(repo, current, latest, runner=runner)
+                    latest = workflow_stages.read_state(current)
+            return original_pr_and_ci(
+                repo,
+                current,
+                latest,
+                autodev_root,
+                runner=runner,
+            )
+
+        pr_and_ci._autodev_opencode_shipment_guard = True  # type: ignore[attr-defined]
+        workflow_stages.pr_and_ci = pr_and_ci
+
+
 def install_workflow_guards() -> None:
     """Apply OpenCode-frontend-only workspace rules before invoking shared stages."""
+    _install_shipment_guards()
+
     current = workflow_stages.ignored_workspace_path
     if not getattr(current, "_autodev_opencode_guard", False):
         original = current
