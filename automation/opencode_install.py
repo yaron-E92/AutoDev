@@ -11,6 +11,11 @@ from automation import opencode_adapter
 PYTHON_COMMAND_TEMPLATES = (
     "autodev-issue-to-pr.md",
     "autodev-resume.md",
+    "autodev-read.md",
+    "autodev-plan.md",
+    "autodev-implement.md",
+    "autodev-fix.md",
+    "autodev-verify.md",
 )
 PYTHON_SHELL_PLACEHOLDER = "__AUTODEV_PYTHON_SHELL__"
 

@@ -5,6 +5,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+from automation import privacy
 from automation.headroom import HeadroomError, resolve_headroom_values
 from automation.model_providers import (
     ModelConfig,
@@ -175,6 +176,7 @@ def invoke_model(
     *,
     role: str,
     attempt: int = 0,
+    repo: Path | None = None,
 ) -> tuple[str, dict[str, object]]:
     if role not in MODEL_ROLES:
         raise ProviderError(f"unknown model role: {role}", classification="invalid_config")
@@ -188,6 +190,8 @@ def invoke_model(
         "started_at": started_at.isoformat(),
     }
     try:
+        decision = privacy.authorize_direct_call(provider, config, role=role, repo=repo)
+        record["privacy"] = decision.safe_metadata()
         if "generate" in type(provider).__dict__ and "invoke" not in type(provider).__dict__:
             response = ProviderResponse(
                 provider.generate(prompt, model=config.model, timeout_seconds=config.timeout_seconds),
@@ -196,7 +200,7 @@ def invoke_model(
         else:
             response = provider.invoke(prompt, model=config.model, timeout_seconds=config.timeout_seconds)
     except Exception as exc:
-        classification = exc.classification if isinstance(exc, ProviderError) else type(exc).__name__
+        classification = str(getattr(exc, "classification", "") or type(exc).__name__)
         record.update(
             {
                 "ended_at": datetime.now(timezone.utc).isoformat(),
