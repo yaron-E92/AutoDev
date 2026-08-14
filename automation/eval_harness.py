@@ -4,12 +4,14 @@ import json
 from pathlib import Path
 
 from automation import eval_harness_core as _core
+from automation import eval_worktree
 from automation import role_routing_benchmark as routing
 from automation.eval_harness_core import *  # noqa: F401,F403
 
 
 _BASE_LOAD_PROFILES = _core.load_profiles
 _BASE_LOAD_REPLAY = _core.load_replay
+_BASE_RUN_LIVE_CASE = _core.run_live_case
 _BASE_AGGREGATE = _core.aggregate
 _BASE_RENDER_MARKDOWN = _core.render_markdown
 _BASE_WRITE_RESULTS = _core.write_results
@@ -50,6 +52,44 @@ def load_replay(
     if isinstance(reproducibility, dict):
         reproducibility.setdefault("provider_summary", profile.get("provider_summary", {}))
     return result
+
+
+def _isolated_case(case: dict[str, object], worktree: Path, resolved_base: str) -> dict[str, object]:
+    isolated = dict(case)
+    source = dict(case.get("source", {})) if isinstance(case.get("source"), dict) else {}
+    live = dict(source.get("live", {})) if isinstance(source.get("live"), dict) else {}
+    live["repo"] = str(worktree)
+    live.pop("repo_env", None)
+    source["live"] = live
+    isolated["source"] = source
+    isolated["base_commit"] = resolved_base
+    return isolated
+
+
+def run_live_case(
+    case: dict[str, object],
+    profile: dict[str, object],
+    *,
+    output_dir: Path,
+    timeout_seconds: int,
+    sandbox_pr: bool,
+) -> dict[str, object]:
+    plan = _core.live_plan(case, profile)
+    source_repo = Path(str(plan["repo"])).expanduser().resolve()
+    base_commit = str(case.get("base_commit", "")).strip()
+    with eval_worktree.isolated_worktree(source_repo, base_commit) as (worktree, resolved_base):
+        result = _BASE_RUN_LIVE_CASE(
+            _isolated_case(case, worktree, resolved_base),
+            profile,
+            output_dir=output_dir,
+            timeout_seconds=timeout_seconds,
+            sandbox_pr=sandbox_pr,
+        )
+        reproducibility = result.setdefault("reproducibility", {})
+        if isinstance(reproducibility, dict):
+            reproducibility["isolated_worktree"] = True
+            reproducibility["benchmark_base_commit"] = resolved_base
+        return result
 
 
 def _routing_safe_result(result: dict[str, object]) -> dict[str, object]:
@@ -174,6 +214,7 @@ def write_results(
 def main(argv: list[str] | None = None) -> int:
     _core.load_profiles = load_profiles
     _core.load_replay = load_replay
+    _core.run_live_case = run_live_case
     _core.aggregate = aggregate
     _core.render_markdown = render_markdown
     _core.write_results = write_results

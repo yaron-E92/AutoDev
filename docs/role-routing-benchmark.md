@@ -110,7 +110,15 @@ Each of those roles is considered covered only after at least one `local` and on
 
 ## Representative live comparison
 
-Live execution uses the normal operational runner. Prepare an evaluation target as described in `docs/evaluation.md`, pin its base/issue, and use a clean checkout.
+Live execution uses the normal operational runner, but each `(case, profile)` run is now executed in its own disposable detached Git worktree. Every worktree starts from the exact same `base_commit`, so a local candidate cannot leave a patch behind for the next cloud candidate to see.
+
+For a live case, `base_commit` must be a full 40-character commit SHA from the target repository. Record it with:
+
+```text
+git rev-parse HEAD
+```
+
+The source path in the case must point at the target Git repository root and that repository must contain the pinned commit. The source checkout itself may have unrelated local edits; benchmark model work is applied only inside the temporary worktree and the worktree is removed after the run, including failed runs.
 
 For a first local versus free-cloud comparison:
 
@@ -125,6 +133,16 @@ python -m automation.eval_harness \
   --max-model-calls 30 \
   --timeout-seconds 7200
 ```
+
+Conceptually, that runs as:
+
+```text
+pinned base commit
+  ├─ temporary worktree A -> local-ollama
+  └─ temporary worktree B -> groq-only
+```
+
+The result records `isolated_worktree: true` and the resolved `benchmark_base_commit` in reproducibility metadata.
 
 This exercises Planner, Implementer, Verifier, and—when the implementation needs repair—Fixer through the same provider/profile and workflow paths used outside the benchmark.
 

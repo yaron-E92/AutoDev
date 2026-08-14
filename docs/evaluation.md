@@ -16,6 +16,8 @@ Results are written beneath the gitignored `.benchmark-results/` directory:
 .benchmark-results/<timestamp>/
   aggregate.json
   comparison.md
+  routing-recommendation.json
+  routing-recommendation.md
   <case>/<profile>/result.json
 ```
 
@@ -128,6 +130,8 @@ The harness does not invent an estimated dollar amount. Estimated cost remains `
 
 Results record the target SHA, AutoDev commit when captured, provider profile, safe role/provider/model mapping, sanitized endpoint identity, prompt-policy metadata, semantic settings, Headroom settings, run-manifest schema, OS/tool metadata where recorded, source mode (`replay` or `live`), and a case input hash.
 
+Live results also record `isolated_worktree: true` and `benchmark_base_commit` so the report proves which pinned commit each candidate started from.
+
 API keys, authorization headers, token values, passwords, cookies, and resolved secret values are excluded/redacted.
 
 ## Comparability
@@ -154,6 +158,8 @@ python -m automation.run_real_issue ... --mode implement
 
 through a subprocess timeout. It does not create a PR in the default live mode.
 
+Every live `(case, profile)` run executes in a separate disposable detached Git worktree created from the case's exact `base_commit`. The source checkout is used only to create/remove those worktrees. A patch from profile A is therefore never present when profile B starts, and the temporary worktree is removed after success or failure.
+
 PR-producing evaluation additionally requires:
 
 ```text
@@ -177,21 +183,33 @@ The model-call budget uses a conservative bound from configured roles and repair
 
 ## Creating a live case
 
-The checked-in corpus is replay-safe. For real evaluations, copy `benchmarks/eval/cases.json` to an uncommitted local file and replace/add a case source with a live target:
+The checked-in corpus is replay-safe. For real evaluations, copy `benchmarks/eval/cases.json` to an uncommitted local file and replace/add a case source with a live target. The case `base_commit` must be a full 40-character commit SHA:
 
 ```json
 {
-  "kind": "public",
-  "replay_file": "../../tests/fixtures/eval/python-targeted-repair.json",
-  "live": {
-    "repo_env": "AUTODEV_EVAL_TARGET",
-    "github_repo": "OWNER/REPO",
-    "issue": 123
-  }
+  "id": "my-live-case",
+  "version": 1,
+  "issue_text": "...",
+  "base_commit": "0123456789abcdef0123456789abcdef01234567",
+  "source": {
+    "kind": "public",
+    "live": {
+      "repo_env": "AUTODEV_EVAL_TARGET",
+      "github_repo": "OWNER/REPO",
+      "issue": 123
+    }
+  },
+  "expected": {}
 }
 ```
 
-Set `AUTODEV_EVAL_TARGET` to a clean local checkout pinned to the case's intended base. Keep the case issue text/expectations aligned with the referenced GitHub issue.
+Record the intended base with:
+
+```text
+git rev-parse HEAD
+```
+
+Set `AUTODEV_EVAL_TARGET` to the **Git repository root** that contains that commit. The source checkout does not need to be reset merely for benchmark isolation; AutoDev applies candidate changes only inside temporary worktrees created from the pinned commit. Keep the case issue text/expectations aligned with the referenced GitHub issue.
 
 ## Local Ollama comparison
 
@@ -208,11 +226,11 @@ python -m automation.eval_harness \
   --max-model-calls 30
 ```
 
-This still routes through `automation.run_real_issue` and the operational `examples/providers/ollama-local-all-roles.json` profile.
+Each selected profile gets its own worktree from the same pinned base. This still routes through `automation.run_real_issue` and the operational `examples/providers/ollama-local-all-roles.json` profile.
 
 ## Ollama Cloud Nemotron/MiniMax
 
-Cloud use is explicitly opt-in. Complete the existing Ollama Cloud preflight first, then run only against an evaluation target you permit AutoDev to edit:
+Cloud use is explicitly opt-in. Complete the existing Ollama Cloud preflight first, then run only against an evaluation target whose contents you permit AutoDev to send to that route:
 
 ```text
 python -m automation.eval_harness \
@@ -245,6 +263,8 @@ python -m automation.eval_harness \
   --max-cases 1 \
   --max-model-calls 30
 ```
+
+The two profiles run from separate worktrees at the same `base_commit`; neither candidate can observe the other's patch.
 
 The harness rejects an OpenRouter free comparison unless the model ends in `:free` **and** `free_only` is true. It also rejects configured paid fallback models. If the exact free model is unavailable or the provider returns a quota/rate failure, the run is reported as `unavailable/provider-failed`; the harness never rewrites the selected route to a paid model.
 
