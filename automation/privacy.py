@@ -30,6 +30,7 @@ class PrivacyPolicy:
     profile: str
     consent_mode: str
     source: str
+    provider_attestations: dict[str, dict[str, object]] = field(default_factory=dict)
 
     @property
     def enabled(self) -> bool:
@@ -62,6 +63,7 @@ class PrivacyDecision:
     policy_source: str = ""
     enforcement_state: str = "unverified"
     controls: list[str] = field(default_factory=list)
+    attestations: list[str] = field(default_factory=list)
     consent_scope: str = ""
     reason: str = ""
 
@@ -80,12 +82,13 @@ class PrivacyDecision:
             "policy_checked_at": POLICY_REVIEWED_AT,
             "enforcement_state": self.enforcement_state,
             "enforcement_controls": list(self.controls),
+            "attested_controls": list(self.attestations),
             "consent_scope": self.consent_scope,
             "reason": self.reason,
         }
 
 
-# These are reviewed policy facts, not permanent trust decisions. If stale, the gate fails closed.
+# Reviewed policy facts are intentionally time-bounded. They are not permanent trust decisions.
 _PROVIDER_POLICY = {
     "groq": (
         "denied",
@@ -110,7 +113,6 @@ _PROVIDER_POLICY = {
 
 def load_policy(repo: Path | None = None) -> PrivacyPolicy:
     repo = (repo or privacy_repo()).expanduser().resolve()
-    # Real repositories default to strict; scratch/test directories remain opt-in unless configured.
     default_profile = "strict-confidential" if (repo / ".git").exists() else "off"
     values: dict[str, object] = {}
     config = repo / PRIVACY_CONFIG
@@ -131,7 +133,23 @@ def load_policy(repo: Path | None = None) -> PrivacyPolicy:
         raise PrivacyError(f"unsupported privacy profile: {profile}")
     if consent_mode not in CONSENT_MODES:
         raise PrivacyError(f"unsupported privacy consent_mode: {consent_mode}")
-    return PrivacyPolicy(profile=profile, consent_mode=consent_mode, source=str(config) if config.is_file() else "default")
+
+    attestations: dict[str, dict[str, object]] = {}
+    raw_attestations = values.get("provider_attestations", {})
+    if raw_attestations not in ({}, None):
+        if not isinstance(raw_attestations, dict):
+            raise PrivacyError("provider_attestations must be an object")
+        for provider, item in raw_attestations.items():
+            if not isinstance(provider, str) or not provider.strip() or not isinstance(item, dict):
+                raise PrivacyError("provider_attestations entries must be provider-name objects")
+            attestations[provider.strip().casefold()] = dict(item)
+
+    return PrivacyPolicy(
+        profile=profile,
+        consent_mode=consent_mode,
+        source=str(config) if config.is_file() else "default",
+        provider_attestations=attestations,
+    )
 
 
 def privacy_repo() -> Path:
@@ -157,9 +175,17 @@ def _stronger_profile(repo_profile: str, env_profile: str) -> str:
     return env_profile if rank[env_profile] >= rank[repo_profile] else repo_profile
 
 
-def _fresh() -> bool:
-    reviewed = datetime.fromisoformat(POLICY_REVIEWED_AT).replace(tzinfo=timezone.utc)
-    return datetime.now(timezone.utc) <= reviewed + timedelta(days=POLICY_TTL_DAYS)
+def _fresh_date(value: str, *, max_age_days: int = POLICY_TTL_DAYS) -> bool:
+    try:
+        checked = datetime.fromisoformat(value).replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return False
+    now = datetime.now(timezone.utc)
+    return checked <= now <= checked + timedelta(days=max_age_days)
+
+
+def _policy_fresh() -> bool:
+    return _fresh_date(POLICY_REVIEWED_AT)
 
 
 def _split_model(model: str) -> tuple[str, str]:
@@ -174,14 +200,11 @@ def _ollama_cloud(model: str) -> bool:
 
 def _provider_id(config) -> str:
     model = str(getattr(config, "model", "") or "")
-    model_provider, _ = _split_model(model)
     base_url = str(getattr(config, "base_url", "") or "")
     host = (urlparse(base_url).hostname or "").casefold()
     command = str(getattr(config, "command", "") or "").casefold()
-    if model_provider == "ollama":
-        return "ollama-cloud" if _ollama_cloud(model) else "local"
-    if model_provider in {"openrouter", "groq", "openai"}:
-        return model_provider
+
+    # Transport endpoint is authoritative. A model ID such as openai/foo may still be routed by OpenRouter.
     if "openrouter.ai" in host:
         return "openrouter"
     if host.endswith("groq.com"):
@@ -190,6 +213,12 @@ def _provider_id(config) -> str:
         return "openai"
     if host in {"localhost", "127.0.0.1", "::1"}:
         return "ollama-cloud" if _ollama_cloud(model) else "local"
+
+    model_provider, _ = _split_model(model)
+    if model_provider == "ollama":
+        return "ollama-cloud" if _ollama_cloud(model) else "local"
+    if model_provider in {"openrouter", "groq", "openai"}:
+        return model_provider
     if command.startswith("ollama ") or " ollama " in f" {command} ":
         return "ollama-cloud" if _ollama_cloud(model) or ":cloud" in command else "local"
     if str(getattr(config, "provider", "")).casefold() == "mock":
@@ -206,9 +235,52 @@ def _scope(provider: str) -> str:
 def _classify(provider: str) -> tuple[str, str, str, str]:
     if provider == "local":
         return "denied", "zero", "", "local inference"
-    if not _fresh() or provider not in _PROVIDER_POLICY:
+    if not _policy_fresh() or provider not in _PROVIDER_POLICY:
         return "unknown", "unknown", "", "unknown or stale policy"
     return _PROVIDER_POLICY[provider]
+
+
+def _attestation(policy: PrivacyPolicy, provider: str) -> dict[str, object]:
+    value = policy.provider_attestations.get(provider.casefold(), {})
+    if not value:
+        return {}
+    if not _fresh_date(str(value.get("checked_at", ""))):
+        return {}
+    return value
+
+
+def _apply_attestation(policy: PrivacyPolicy, decision: PrivacyDecision) -> None:
+    value = _attestation(policy, decision.provider)
+    if not value:
+        return
+
+    if decision.provider == "openrouter":
+        if str(value.get("use_inputs_outputs", "")).casefold() == "disabled":
+            decision.training = "denied"
+            decision.attestations.append("openrouter.use_inputs_outputs=disabled")
+        if str(value.get("prompt_logging", "")).casefold() == "disabled":
+            decision.retention = "zero"
+            decision.retention_duration = ""
+            decision.attestations.append("openrouter.prompt_logging=disabled")
+    elif decision.provider in {"groq", "openai"}:
+        if str(value.get("zero_data_retention", "")).casefold() == "enabled":
+            decision.retention = "zero"
+            decision.retention_duration = ""
+            decision.attestations.append(f"{decision.provider}.zero_data_retention=enabled")
+    elif decision.provider == "openai-opencode":
+        if str(value.get("training_on_customer_content", "")).casefold() == "denied":
+            decision.training = "denied"
+            decision.attestations.append("openai-opencode.training_on_customer_content=denied")
+        if str(value.get("zero_data_retention", "")).casefold() == "enabled":
+            decision.retention = "zero"
+            decision.retention_duration = ""
+            decision.attestations.append("openai-opencode.zero_data_retention=enabled")
+
+    if decision.attestations:
+        suffix = "account-attested" if decision.enforcement_state == "unverified" else "+account-attested"
+        decision.enforcement_state = (
+            suffix.lstrip("+") if decision.enforcement_state == "unverified" else decision.enforcement_state + suffix
+        )
 
 
 def _satisfies(policy: PrivacyPolicy, decision: PrivacyDecision) -> bool:
@@ -263,45 +335,91 @@ def _request_option_sets(provider) -> list[dict[str, object]]:
 
 def _openrouter_verified(options: dict[str, object], policy: PrivacyPolicy) -> bool:
     provider = options.get("provider", {})
-    return isinstance(provider, dict) and (not policy.no_training or provider.get("data_collection") == "deny") and (not policy.zero_retention or provider.get("zdr") is True)
+    return (
+        isinstance(provider, dict)
+        and (not policy.no_training or provider.get("data_collection") == "deny")
+        and (not policy.zero_retention or provider.get("zdr") is True)
+    )
 
 
-def authorize_direct_call(provider, config, *, role: str, repo: Path | None = None, consent_reader: Callable[[str], str] | None = None) -> PrivacyDecision:
+def _block(repo: Path, decision: PrivacyDecision) -> PrivacyDecision:
+    decision.outcome = "BLOCK"
+    _audit(repo, decision)
+    raise PrivacyError(
+        f"privacy blocked {decision.role} route {decision.route}: {decision.reason}. "
+        "Configure/verify a compliant privacy control or explicitly consent to this exact role+route."
+    )
+
+
+def authorize_direct_call(
+    provider,
+    config,
+    *,
+    role: str,
+    repo: Path | None = None,
+    consent_reader: Callable[[str], str] | None = None,
+) -> PrivacyDecision:
     repo = (repo or privacy_repo()).expanduser().resolve()
     policy = load_policy(repo)
     provider_id = _provider_id(config)
     model = str(getattr(config, "model", "") or "")
     route = f"{provider_id}/{model}" if model else provider_id
     if not policy.enabled:
-        decision = PrivacyDecision("ALLOW", role, route, provider_id, model, _scope(provider_id), enforcement_state="not-required", reason="privacy policy disabled")
+        decision = PrivacyDecision(
+            "ALLOW", role, route, provider_id, model, _scope(provider_id),
+            enforcement_state="not-required", reason="privacy policy disabled",
+        )
         _audit(repo, decision)
         return decision
 
-    if provider_id == "openrouter" and not policy.local_only:
+    if policy.local_only and provider_id != "local":
+        return _block(
+            repo,
+            PrivacyDecision(
+                "BLOCK", role, route, provider_id, model, _scope(provider_id),
+                reason="repository privacy profile is local-only; cloud exceptions are forbidden",
+            ),
+        )
+
+    if provider_id == "openrouter":
         option_sets = _request_option_sets(provider)
+        controls: list[str] = []
         if option_sets:
-            controls: list[str] = []
             for options in option_sets:
                 controls.extend(_merge_openrouter(options, policy))
-            if all(_openrouter_verified(options, policy) for options in option_sets):
-                decision = PrivacyDecision(
-                    "ALLOW", role, route, provider_id, model, "routed-cloud",
-                    "denied" if policy.no_training else "unknown",
-                    "zero" if policy.zero_retention else "unknown",
-                    policy_source="https://openrouter.ai/docs/guides/routing/provider-selection",
-                    enforcement_state="verified-effective",
-                    controls=sorted(set(controls)),
-                    reason="required OpenRouter data-policy routing controls are present on every request path",
-                )
-                _audit(repo, decision)
-                return decision
+        request_verified = bool(option_sets) and all(
+            _openrouter_verified(options, policy) for options in option_sets
+        )
+        decision = PrivacyDecision(
+            "ALLOW", role, route, provider_id, model, "routed-cloud",
+            training="unknown",
+            retention="unknown",
+            policy_source=(
+                "https://openrouter.ai/docs/guides/routing/provider-selection; "
+                "https://openrouter.ai/docs/guides/privacy/data-collection"
+            ),
+            enforcement_state="request-verified" if request_verified else "unverified",
+            controls=sorted(set(controls)),
+            reason=(
+                "OpenRouter downstream data-policy controls verified, but OpenRouter account-level "
+                "content logging/data-sharing settings must also be verified or freshly attested"
+            ),
+        )
+        _apply_attestation(policy, decision)
+        if request_verified and _satisfies(policy, decision):
+            _audit(repo, decision)
+            return decision
+        decision.outcome = "CONSENT_REQUIRED"
+        decision.reason = _gap(policy, decision)
+        return _consent_or_block(repo, policy, decision, consent_reader)
 
     training, retention, duration, source = _classify(provider_id)
     decision = PrivacyDecision(
-        "ALLOW", role, route, provider_id, model, _scope(provider_id), training, retention, duration,
-        policy_source=source,
+        "ALLOW", role, route, provider_id, model, _scope(provider_id),
+        training, retention, duration, policy_source=source,
         enforcement_state="verified-effective" if provider_id == "local" else "enforced-by-provider-contract",
     )
+    _apply_attestation(policy, decision)
     if _satisfies(policy, decision):
         _audit(repo, decision)
         return decision
@@ -325,38 +443,69 @@ def authorize_opencode_role(
     provider_id, model_id = _split_model(model)
     if provider_id == "ollama":
         provider_id = "ollama-cloud" if _ollama_cloud(model_id) else "local"
+    # OpenCode's `openai` ID can be API-key or OAuth/product-specific; do not apply API policy blindly.
+    if provider_id == "openai":
+        provider_id = "openai-opencode"
     route = model or f"{provider_id}/{model_id}"
     env = dict(base_env or os.environ)
+
     if not policy.enabled:
-        decision = PrivacyDecision("ALLOW", role, route, provider_id or "unknown", model_id, _scope(provider_id or "unknown"), enforcement_state="not-required", reason="privacy policy disabled")
+        decision = PrivacyDecision(
+            "ALLOW", role, route, provider_id or "unknown", model_id,
+            _scope(provider_id or "unknown"), enforcement_state="not-required",
+            reason="privacy policy disabled",
+        )
         _audit(repo, decision)
         return decision, env
 
-    if provider_id == "openrouter" and not policy.local_only:
+    if policy.local_only and provider_id != "local":
+        _block(
+            repo,
+            PrivacyDecision(
+                "BLOCK", role, route, provider_id or "unknown", model_id,
+                _scope(provider_id or "unknown"),
+                reason="repository privacy profile is local-only; cloud exceptions are forbidden",
+            ),
+        )
+
+    if provider_id == "openrouter":
         controls = _openrouter_controls(policy)
         initial = _debug_config(repo, opencode_cli, runner, env)
         overlay = _openrouter_overlay(initial, model_id, controls)
         env = _merge_inline_config(env, overlay)
         resolved = _debug_config(repo, opencode_cli, runner, env)
-        if _resolved_openrouter_verified(resolved, model_id, policy):
-            decision = PrivacyDecision(
-                "ALLOW", role, route, provider_id, model_id, "routed-cloud",
-                "denied" if policy.no_training else "unknown",
-                "zero" if policy.zero_retention else "unknown",
-                policy_source="https://openrouter.ai/docs/guides/routing/provider-selection",
-                enforcement_state="verified-effective",
-                controls=[f"provider.{key}={json.dumps(value)}" for key, value in controls.items()],
-                reason="OpenCode effective config verifies required OpenRouter request controls",
-            )
+        request_verified = _resolved_openrouter_verified(resolved, model_id, policy)
+        decision = PrivacyDecision(
+            "ALLOW", role, route, provider_id, model_id, "routed-cloud",
+            training="unknown",
+            retention="unknown",
+            policy_source=(
+                "https://openrouter.ai/docs/guides/routing/provider-selection; "
+                "https://openrouter.ai/docs/guides/privacy/data-collection"
+            ),
+            enforcement_state="request-verified" if request_verified else "unverified",
+            controls=[f"provider.{key}={json.dumps(value)}" for key, value in controls.items()],
+            reason=(
+                "OpenCode effective config verifies downstream OpenRouter request controls, but "
+                "OpenRouter account-level content logging/data-sharing settings must also be verified or attested"
+            ),
+        )
+        _apply_attestation(policy, decision)
+        if request_verified and _satisfies(policy, decision):
             _audit(repo, decision)
             return decision, env
+        decision.outcome = "CONSENT_REQUIRED"
+        decision.reason = _gap(policy, decision)
+        return _consent_or_block(repo, policy, decision, consent_reader), env
 
     training, retention, duration, source = _classify(provider_id or "unknown")
     decision = PrivacyDecision(
-        "ALLOW", role, route, provider_id or "unknown", model_id, _scope(provider_id or "unknown"),
-        training, retention, duration, policy_source=source,
+        "ALLOW", role, route, provider_id or "unknown", model_id,
+        _scope(provider_id or "unknown"), training, retention, duration,
+        policy_source=source,
         enforcement_state="verified-effective" if provider_id == "local" else "enforced-by-provider-contract",
     )
+    _apply_attestation(policy, decision)
     if _satisfies(policy, decision):
         _audit(repo, decision)
         return decision, env
@@ -367,8 +516,14 @@ def authorize_opencode_role(
 
 def _debug_config(repo: Path, executable: str, runner, env: dict[str, str]) -> dict[str, object]:
     completed = runner(
-        [executable, "debug", "config"], cwd=repo, env=env, text=True, encoding="utf-8", errors="replace",
-        capture_output=True, check=False,
+        [executable, "debug", "config"],
+        cwd=repo,
+        env=env,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        capture_output=True,
+        check=False,
     )
     if int(getattr(completed, "returncode", 1)) != 0:
         raise PrivacyError("opencode debug config failed while verifying privacy controls")
@@ -381,11 +536,19 @@ def _debug_config(repo: Path, executable: str, runner, env: dict[str, str]) -> d
     return value
 
 
-def _openrouter_overlay(config: dict[str, object], model_id: str, controls: dict[str, object]) -> dict[str, object]:
-    # OpenCode v2 uses providers/body. Legacy v1 uses provider/models/options.
+def _openrouter_overlay(
+    config: dict[str, object], model_id: str, controls: dict[str, object]
+) -> dict[str, object]:
+    # OpenCode v2 uses providers/body. OpenCode v1 uses provider/models/options.
     if "providers" in config:
         return {"providers": {"openrouter": {"body": {"provider": controls}}}}
-    return {"provider": {"openrouter": {"models": {model_id: {"options": {"provider": controls}}}}}}
+    return {
+        "provider": {
+            "openrouter": {
+                "models": {model_id: {"options": {"provider": controls}}}
+            }
+        }
+    }
 
 
 def _merge_inline_config(env: dict[str, str], overlay: dict[str, object]) -> dict[str, str]:
@@ -400,7 +563,9 @@ def _merge_inline_config(env: dict[str, str], overlay: dict[str, object]) -> dic
             raise PrivacyError("existing OPENCODE_CONFIG_CONTENT must be a JSON object")
         existing = parsed
     result = dict(env)
-    result["OPENCODE_CONFIG_CONTENT"] = json.dumps(_deep_merge(existing, overlay), separators=(",", ":"))
+    result["OPENCODE_CONFIG_CONTENT"] = json.dumps(
+        _deep_merge(existing, overlay), separators=(",", ":")
+    )
     return result
 
 
@@ -414,7 +579,9 @@ def _deep_merge(base: dict[str, object], overlay: dict[str, object]) -> dict[str
     return result
 
 
-def _resolved_openrouter_verified(config: dict[str, object], model_id: str, policy: PrivacyPolicy) -> bool:
+def _resolved_openrouter_verified(
+    config: dict[str, object], model_id: str, policy: PrivacyPolicy
+) -> bool:
     effective: dict[str, object] = {}
     providers = config.get("providers")
     if isinstance(providers, dict):
@@ -437,7 +604,10 @@ def _resolved_openrouter_verified(config: dict[str, object], model_id: str, poli
         options = model.get("options", {}) if isinstance(model, dict) else {}
         if isinstance(options, dict) and isinstance(options.get("provider"), dict):
             effective = dict(options["provider"])
-    return (not policy.no_training or effective.get("data_collection") == "deny") and (not policy.zero_retention or effective.get("zdr") is True)
+    return (
+        (not policy.no_training or effective.get("data_collection") == "deny")
+        and (not policy.zero_retention or effective.get("zdr") is True)
+    )
 
 
 def _consent_env(role: str, route: str) -> bool:
@@ -448,7 +618,15 @@ def _consent_env(role: str, route: str) -> bool:
     return False
 
 
-def _consent_or_block(repo: Path, policy: PrivacyPolicy, decision: PrivacyDecision, consent_reader: Callable[[str], str] | None) -> PrivacyDecision:
+def _consent_or_block(
+    repo: Path,
+    policy: PrivacyPolicy,
+    decision: PrivacyDecision,
+    consent_reader: Callable[[str], str] | None,
+) -> PrivacyDecision:
+    if policy.local_only:
+        return _block(repo, decision)
+
     if _consent_env(decision.role, decision.route):
         decision.outcome = "ALLOW"
         decision.enforcement_state = "user-consented"
@@ -457,16 +635,24 @@ def _consent_or_block(repo: Path, policy: PrivacyPolicy, decision: PrivacyDecisi
         return decision
 
     reader = consent_reader
-    if reader is None and policy.consent_mode == "explicit" and sys.stdin is not None and sys.stdin.isatty():
+    if (
+        reader is None
+        and policy.consent_mode == "explicit"
+        and sys.stdin is not None
+        and sys.stdin.isatty()
+    ):
         reader = input
     if reader is not None and policy.consent_mode == "explicit":
-        answer = str(reader(
-            "AutoDev could not verify the required privacy policy before sending repository/run content.\n\n"
-            f"Role: {decision.role}\nRoute: {decision.route}\n"
-            f"Training: {decision.training}\nCustomer-content retention: {decision.retention}"
-            + (f" ({decision.retention_duration})" if decision.retention_duration else "")
-            + f"\nReason: {decision.reason}\n\nAllow this exact role+route for this call? [y/N] "
-        ) or "").strip().casefold()
+        answer = str(
+            reader(
+                "AutoDev could not verify the required privacy policy before sending repository/run content.\n\n"
+                f"Role: {decision.role}\nRoute: {decision.route}\n"
+                f"Training: {decision.training}\nCustomer-content retention: {decision.retention}"
+                + (f" ({decision.retention_duration})" if decision.retention_duration else "")
+                + f"\nReason: {decision.reason}\n\nAllow this exact role+route for this call? [y/N] "
+            )
+            or ""
+        ).strip().casefold()
         if answer in {"y", "yes"}:
             decision.outcome = "ALLOW"
             decision.enforcement_state = "user-consented"
@@ -474,12 +660,7 @@ def _consent_or_block(repo: Path, policy: PrivacyPolicy, decision: PrivacyDecisi
             _audit(repo, decision)
             return decision
 
-    decision.outcome = "BLOCK"
-    _audit(repo, decision)
-    raise PrivacyError(
-        f"privacy blocked {decision.role} route {decision.route}: {decision.reason}. "
-        "Configure/verify a compliant privacy control or explicitly consent to this exact role+route."
-    )
+    return _block(repo, decision)
 
 
 def _audit(repo: Path, decision: PrivacyDecision) -> None:
@@ -488,6 +669,16 @@ def _audit(repo: Path, decision: PrivacyDecision) -> None:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps({"timestamp": datetime.now(timezone.utc).isoformat(), **decision.safe_metadata()}, sort_keys=True) + "\n")
+            handle.write(
+                json.dumps(
+                    {
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        **decision.safe_metadata(),
+                    },
+                    sort_keys=True,
+                )
+                + "\n"
+            )
     except OSError:
+        # Privacy enforcement must never become weaker because audit persistence failed.
         pass
