@@ -33,6 +33,10 @@ class GitExclusionWorkflowScopeTests(unittest.TestCase):
         _git(self.repo, "add", "tracked.cs")
         _git(self.repo, "commit", "-m", "base")
         self.base_sha = _git(self.repo, "rev-parse", "HEAD")
+        # Real installed target repositories exclude AutoDev's generated run
+        # directory.  The Git-backed scope intentionally relies on that Git
+        # policy rather than silently hardcoding runtime paths in Git mode.
+        self._exclude(".autodev-run/\n")
         self.current = self.repo / workflow_stages.CURRENT_DIR
         self.current.mkdir(parents=True)
         self.snapshot = self.current / "workspace-snapshot.json"
@@ -47,7 +51,10 @@ class GitExclusionWorkflowScopeTests(unittest.TestCase):
         if not value.is_absolute():
             value = self.repo / value
         value.parent.mkdir(parents=True, exist_ok=True)
-        value.write_text(text, encoding="utf-8")
+        existing = value.read_text(encoding="utf-8") if value.is_file() else ""
+        if existing and not existing.endswith("\n"):
+            existing += "\n"
+        value.write_text(existing + text, encoding="utf-8")
 
     def test_secondbrain_regression_local_excludes_do_not_change_identity_or_changes(self):
         before = workflow_stages.source_identity(self.repo, self.current, self.state)
