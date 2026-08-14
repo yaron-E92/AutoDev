@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import subprocess
 from pathlib import Path
-from typing import Callable, Iterable
+from typing import Callable
 
 
 class WorkspaceScopeError(RuntimeError):
