@@ -4,6 +4,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import uuid
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
@@ -53,13 +54,33 @@ def isolated_worktree(repo: Path, base_commit: str) -> Iterator[tuple[Path, str]
     resolved = resolve_pinned_base(repo, base_commit)
     temp_root = Path(tempfile.mkdtemp(prefix="autodev-eval-"))
     worktree = temp_root / "worktree"
+    temp_branch = f"autodev/eval-{uuid.uuid4().hex}"
     added = False
+    current_branch = ""
     try:
-        _git(repo, "worktree", "add", "--detach", str(worktree), resolved)
+        # The operational runner intentionally refuses detached HEADs. Give each
+        # benchmark worktree its own throwaway AutoDev branch so the runner can
+        # create its normal issue branch without weakening that safety check.
+        _git(repo, "worktree", "add", "-b", temp_branch, str(worktree), resolved)
         added = True
         yield worktree, resolved
     finally:
         if added:
+            if worktree.exists():
+                current_branch = _git(
+                    worktree,
+                    "branch",
+                    "--show-current",
+                    check=False,
+                ).stdout.strip()
             _git(repo, "worktree", "remove", "--force", str(worktree), check=False)
             _git(repo, "worktree", "prune", check=False)
+
+            # run_real_issue normally creates autodev/issue-... from the
+            # temporary branch. That branch is benchmark-only in this worktree;
+            # remove it so the next profile can create the same issue branch
+            # independently from the same pinned base.
+            if current_branch and current_branch != temp_branch:
+                _git(repo, "branch", "-D", current_branch, check=False)
+            _git(repo, "branch", "-D", temp_branch, check=False)
         shutil.rmtree(temp_root, ignore_errors=True)
