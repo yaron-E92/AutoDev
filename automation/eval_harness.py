@@ -9,6 +9,7 @@ from automation.eval_harness_core import *  # noqa: F401,F403
 
 
 _BASE_LOAD_PROFILES = _core.load_profiles
+_BASE_LOAD_REPLAY = _core.load_replay
 _BASE_AGGREGATE = _core.aggregate
 _BASE_RENDER_MARKDOWN = _core.render_markdown
 _BASE_WRITE_RESULTS = _core.write_results
@@ -36,6 +37,19 @@ def _add_group(
 def load_profiles(path: Path, *, repo_root: Path = _core.REPO_ROOT) -> dict[str, dict[str, object]]:
     profiles = _BASE_LOAD_PROFILES(path, repo_root=repo_root)
     return routing.enrich_profiles(profiles, repo_root=repo_root)
+
+
+def load_replay(
+    case: dict[str, object],
+    profile: dict[str, object],
+    *,
+    cases_path: Path,
+) -> dict[str, object]:
+    result = _BASE_LOAD_REPLAY(case, profile, cases_path=cases_path)
+    reproducibility = result.setdefault("reproducibility", {})
+    if isinstance(reproducibility, dict):
+        reproducibility.setdefault("provider_summary", profile.get("provider_summary", {}))
+    return result
 
 
 def aggregate(
@@ -135,6 +149,7 @@ def write_results(
 
 def main(argv: list[str] | None = None) -> int:
     _core.load_profiles = load_profiles
+    _core.load_replay = load_replay
     _core.aggregate = aggregate
     _core.render_markdown = render_markdown
     _core.write_results = write_results
