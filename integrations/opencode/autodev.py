@@ -41,7 +41,7 @@ def _arguments_with_current_issue(arguments: list[str]) -> list[str]:
     if index + 1 >= len(arguments):
         return arguments
     value = arguments[index + 1]
-    if re.search(r"(?<!\d)#?\d+(?!\d)", value):
+    if re.search(r"(?<!\d)#?(\d+)(?!\d)", value):
         return arguments
     updated = list(arguments)
     updated[index + 1] = f"{issue_number} {value}".strip()
@@ -118,6 +118,7 @@ def _bridge_environment(
         else str(autodev_root) + os.pathsep + old_python_path
     )
     env["AUTODEV_PYTHON"] = python
+    env["AUTODEV_TARGET_REPO"] = str(repo.resolve())
     env.setdefault("MAX_SEMANTIC_REPAIR_ATTEMPTS", DEFAULT_MAX_SEMANTIC_REPAIR_ATTEMPTS)
     _resolve_github_environment(env, repo, runner=runner)
     if (
