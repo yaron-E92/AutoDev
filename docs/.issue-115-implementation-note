@@ -1,0 +1,1 @@
+Issue #115 implementation note: Git-backed source identity and shipment use Git's tracked plus nonignored-untracked file universe; see docs/workspace-scope.md.
