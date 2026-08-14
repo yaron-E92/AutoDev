@@ -47,6 +47,7 @@ class EvalWorktreeTests(unittest.TestCase):
         with eval_worktree.isolated_worktree(self.repo, self.base) as (first, resolved):
             first_path = first
             self.assertEqual(resolved, self.base)
+            self.assertTrue(_git(first, "branch", "--show-current").startswith("autodev/eval-"))
             self.assertEqual((first / "tracked.txt").read_text(encoding="utf-8"), "base\n")
             (first / "tracked.txt").write_text("candidate-a\n", encoding="utf-8")
 
@@ -57,11 +58,25 @@ class EvalWorktreeTests(unittest.TestCase):
         with eval_worktree.isolated_worktree(self.repo, self.base) as (second, resolved):
             second_path = second
             self.assertEqual(resolved, self.base)
+            self.assertTrue(_git(second, "branch", "--show-current").startswith("autodev/eval-"))
             self.assertEqual((second / "tracked.txt").read_text(encoding="utf-8"), "base\n")
             self.assertNotEqual(first_path, second_path)
 
         self.assertIsNotNone(second_path)
         self.assertFalse(second_path.exists())
+
+    def test_runner_issue_branch_can_be_recreated_for_sequential_profiles(self):
+        issue_branch = "autodev/issue-31-benchmark"
+
+        for _ in range(2):
+            with eval_worktree.isolated_worktree(self.repo, self.base) as (worktree, _):
+                current = _git(worktree, "branch", "--show-current")
+                self.assertTrue(current.startswith("autodev/eval-"))
+                _git(worktree, "switch", "-c", issue_branch)
+                self.assertEqual(_git(worktree, "branch", "--show-current"), issue_branch)
+
+            self.assertEqual(_git(self.repo, "branch", "--list", issue_branch), "")
+            self.assertEqual(_git(self.repo, "branch", "--list", "autodev/eval-*"), "")
 
     def test_dirty_source_checkout_does_not_contaminate_benchmark_worktree(self):
         (self.repo / "tracked.txt").write_text("dirty source\n", encoding="utf-8")
@@ -99,7 +114,7 @@ class EvalWorktreeTests(unittest.TestCase):
                 "provider_summary": {"roles": {}},
             },
         ]
-        observed: list[tuple[str, Path, str, str]] = []
+        observed: list[tuple[str, Path, str, str, str]] = []
 
         def fake_run(
             isolated_case: dict[str, object],
@@ -112,7 +127,16 @@ class EvalWorktreeTests(unittest.TestCase):
             assert isinstance(live, dict)
             worktree = Path(str(live["repo"]))
             before = (worktree / "tracked.txt").read_text(encoding="utf-8")
-            observed.append((str(profile["name"]), worktree, before, str(isolated_case["base_commit"])))
+            branch = _git(worktree, "branch", "--show-current")
+            observed.append(
+                (
+                    str(profile["name"]),
+                    worktree,
+                    before,
+                    str(isolated_case["base_commit"]),
+                    branch,
+                )
+            )
             (worktree / "tracked.txt").write_text(f"{profile['name']}\n", encoding="utf-8")
             return {"reproducibility": {}}
 
@@ -131,6 +155,7 @@ class EvalWorktreeTests(unittest.TestCase):
         self.assertEqual([item[2] for item in observed], ["base\n", "base\n"])
         self.assertNotEqual(observed[0][1], observed[1][1])
         self.assertTrue(all(item[3] == self.base for item in observed))
+        self.assertTrue(all(item[4].startswith("autodev/eval-") for item in observed))
         self.assertTrue(all(not item[1].exists() for item in observed))
         self.assertEqual((self.repo / "tracked.txt").read_text(encoding="utf-8"), "base\n")
         self.assertTrue(all(result["reproducibility"]["isolated_worktree"] for result in results))
@@ -179,6 +204,7 @@ class EvalWorktreeTests(unittest.TestCase):
 
         self.assertEqual(len(captured), 1)
         self.assertFalse(captured[0].exists())
+        self.assertEqual(_git(self.repo, "branch", "--list", "autodev/eval-*"), "")
 
     def test_live_base_must_be_a_full_commit_sha(self):
         with self.assertRaisesRegex(EvalError, "full 40-character commit SHA"):
