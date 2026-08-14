@@ -326,8 +326,15 @@ class HeadroomTests(unittest.TestCase):
             headroom=HeadroomConfig(enabled=True),
         )
 
-        with mock.patch("automation.model_providers.prepare_prompt", return_value=prepared):
-            text, record = invoke_model(provider, config, "prompt", role="implementer")
+        with tempfile.TemporaryDirectory() as privacy_root:
+            with mock.patch("automation.model_providers.prepare_prompt", return_value=prepared):
+                text, record = invoke_model(
+                    provider,
+                    config,
+                    "prompt",
+                    role="implementer",
+                    repo=Path(privacy_root),
+                )
 
         self.assertEqual(text, "BEGIN_UNIFIED_DIFF\npatch\nEND_UNIFIED_DIFF")
         self.assertEqual(record["compression"]["status"], "compressed")
