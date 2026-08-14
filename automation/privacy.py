@@ -136,7 +136,16 @@ def load_policy(repo: Path | None = None) -> PrivacyPolicy:
 
 def privacy_repo() -> Path:
     explicit = os.environ.get("AUTODEV_TARGET_REPO", "").strip()
-    return Path(explicit) if explicit else Path.cwd()
+    if explicit:
+        return Path(explicit)
+    values = list(sys.argv[1:])
+    for index, value in enumerate(values):
+        if value in {"--repo", "--working-directory"} and index + 1 < len(values):
+            return Path(values[index + 1])
+        for prefix in ("--repo=", "--working-directory="):
+            if value.startswith(prefix):
+                return Path(value.split("=", 1)[1])
+    return Path.cwd()
 
 
 def _stronger_profile(repo_profile: str, env_profile: str) -> str:
@@ -456,12 +465,12 @@ def _consent_or_block(repo: Path, policy: PrivacyPolicy, decision: PrivacyDecisi
             f"Role: {decision.role}\nRoute: {decision.route}\n"
             f"Training: {decision.training}\nCustomer-content retention: {decision.retention}"
             + (f" ({decision.retention_duration})" if decision.retention_duration else "")
-            + f"\nReason: {decision.reason}\n\nAllow this exact role+route for this run? [y/N] "
+            + f"\nReason: {decision.reason}\n\nAllow this exact role+route for this call? [y/N] "
         ) or "").strip().casefold()
         if answer in {"y", "yes"}:
             decision.outcome = "ALLOW"
             decision.enforcement_state = "user-consented"
-            decision.consent_scope = "this exact role+route for this run"
+            decision.consent_scope = "this call"
             _audit(repo, decision)
             return decision
 
