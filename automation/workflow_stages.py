@@ -38,14 +38,46 @@ def _workspace_path_in_scope(repo: Path, relative: str) -> bool:
         raise _core.WorkflowStageError(str(exc)) from exc
 
 
+_original_create_api_commit = _core.create_api_commit
+
+
+def _create_api_commit(
+    repo: Path,
+    state: dict[str, object],
+    changes: list[dict[str, str]],
+    current: Path,
+    *,
+    runner=_core.subprocess.run,
+) -> str:
+    scoped = set(_workspace_file_paths(repo))
+    outside = sorted(
+        str(change.get("Path", ""))
+        for change in changes
+        if str(change.get("Path", "")) not in scoped
+    )
+    if outside:
+        raise _core.WorkflowStageError(
+            "API commit refused because changed paths are outside Git's tracked/nonignored workspace scope: "
+            + ", ".join(outside[:20])
+        )
+    return _original_create_api_commit(
+        repo,
+        state,
+        changes,
+        current,
+        runner=runner,
+    )
+
+
 # Keep the long-standing automation.workflow_stages module API while routing the
 # one canonical workspace universe through Git. Functions in the implementation
-# module resolve workspace_snapshot from their own globals, so replacing it here
-# makes source identity, workspace changes, resume drift checks, and API shipment
-# all consume exactly the same scope.
+# module resolve these names from their own globals, so replacing them here makes
+# source identity, workspace changes, resume drift checks, and API shipment all
+# consume exactly the same scope.
 _core.workspace_snapshot = _workspace_snapshot
 _core.workspace_file_paths = _workspace_file_paths
 _core.workspace_path_in_scope = _workspace_path_in_scope
+_core.create_api_commit = _create_api_commit
 
 if __name__ == "__main__":
     raise SystemExit(_core.main())
