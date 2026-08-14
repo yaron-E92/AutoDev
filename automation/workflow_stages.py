@@ -50,10 +50,17 @@ def _create_api_commit(
     runner=_core.subprocess.run,
 ) -> str:
     scoped = set(_workspace_file_paths(repo))
+    baseline_path, _ = _core._baseline_snapshot(current, state)
+    baseline = _core.read_json(baseline_path)
+    baseline_paths = set(str(path) for path in baseline) if isinstance(baseline, dict) else set()
     outside = sorted(
         str(change.get("Path", ""))
         for change in changes
         if str(change.get("Path", "")) not in scoped
+        and not (
+            str(change.get("Status", "")) == "deleted"
+            and str(change.get("Path", "")) in baseline_paths
+        )
     )
     if outside:
         raise _core.WorkflowStageError(
