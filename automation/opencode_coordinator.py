@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 from typing import Callable
 
-from automation import opencode_adapter, opencode_cli, opencode_resume, opencode_runtime, workflow_stages
+from automation import opencode_adapter, opencode_cli, opencode_resume, opencode_runtime, privacy, workflow_stages
 
 
 ROLE_PROMPT = (
@@ -136,6 +136,34 @@ def _run_agent_process(
     except opencode_cli.OpenCodeCliError as exc:
         raise OpenCodeCoordinatorError(str(exc)) from exc
 
+    privacy_env = dict(os.environ)
+    try:
+        policy = privacy.load_policy(repo)
+        if policy.enabled:
+            mappings = opencode_adapter.resolve_opencode_model_mappings(repo, runner=runner, which=which)
+            model = str(mappings.get(role, {}).get("model", "")).strip()
+            if not model:
+                raise privacy.PrivacyError(
+                    f"cannot resolve the effective OpenCode model for AutoDev role {role}; privacy cannot be verified"
+                )
+            decision, privacy_env = privacy.authorize_opencode_role(
+                repo,
+                role=role,
+                model=model,
+                opencode_cli=executable,
+                runner=runner,
+                base_env=privacy_env,
+            )
+            print(
+                json.dumps(
+                    {"event": "privacy", **decision.safe_metadata()},
+                    sort_keys=True,
+                ),
+                flush=True,
+            )
+    except privacy.PrivacyError as exc:
+        raise OpenCodeCoordinatorError(str(exc), classification=exc.classification) from exc
+
     timeout_seconds = role_timeout_seconds(role)
     command = [
         executable,
@@ -162,6 +190,7 @@ def _run_agent_process(
         completed = runner(
             command,
             cwd=repo,
+            env=privacy_env,
             text=True,
             encoding="utf-8",
             errors="replace",
