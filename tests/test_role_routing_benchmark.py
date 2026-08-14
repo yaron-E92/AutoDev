@@ -65,22 +65,22 @@ class RoleRoutingBenchmarkTests(unittest.TestCase):
         openrouter_implementer = next(
             candidate
             for candidate in role_candidates["implementer"].values()
-            if candidate["fact_key"] == "openrouter/free" if "fact_key" in candidate
-        ) if False else next(
-            candidate
-            for candidate in role_candidates["implementer"].values()
-            if candidate["candidate_class"] == "free-cloud" and "REPLACE_WITH" in candidate["candidate_id"]
+            if candidate["candidate_class"] == "free-cloud"
+            and "REPLACE_WITH" in candidate["candidate_id"]
         )
         self.assertGreater(openrouter_implementer["configured_runs"], 0)
         self.assertEqual(openrouter_implementer["observed_runs"], 0)
 
         self.assertFalse(coverage["complete"])
-        self.assertIn("planner:local", coverage["missing"])
-        self.assertIn("implementer:local", coverage["missing"])
-        self.assertIn("implementer:free-cloud", coverage["missing"])
-        self.assertIn("fixer:local", coverage["missing"])
-        self.assertIn("fixer:free-cloud", coverage["missing"])
-        self.assertIn("verifier:local", coverage["missing"])
+        for missing in (
+            "planner:local",
+            "implementer:local",
+            "implementer:free-cloud",
+            "fixer:local",
+            "fixer:free-cloud",
+            "verifier:local",
+        ):
+            self.assertIn(missing, coverage["missing"])
 
         self.assertEqual(
             aggregate["routing_recommendation"]["roles"]["implementer"]["candidate_class"],
@@ -93,40 +93,18 @@ class RoleRoutingBenchmarkTests(unittest.TestCase):
 
     def test_privacy_filter_precedes_cost_class_when_recommending(self):
         candidates = {
-            "local": {
-                "candidate_id": "local/model",
-                "candidate_class": "local",
-                "model": "local-model",
-                "profiles": ["local"],
-                "observed_runs": 1,
-                "completed_workflows": 1,
-                "deterministic_passes": 1,
-                "semantic_passes": 1,
-                "provider_failures": 0,
-                "downstream_repairs": 1,
-                "workflow_tokens_known": 0,
-                "workflow_total_tokens": 0,
-                "workflow_wall_time_known": 0,
-                "workflow_wall_time_ms": 0,
-                "privacy": {"strict-confidential": {"outcome": "ALLOW"}},
-            },
-            "free": {
-                "candidate_id": "free/model",
-                "candidate_class": "free-cloud",
-                "model": "free-model",
-                "profiles": ["free"],
-                "observed_runs": 1,
-                "completed_workflows": 1,
-                "deterministic_passes": 1,
-                "semantic_passes": 1,
-                "provider_failures": 0,
-                "downstream_repairs": 0,
-                "workflow_tokens_known": 0,
-                "workflow_total_tokens": 0,
-                "workflow_wall_time_known": 0,
-                "workflow_wall_time_ms": 0,
-                "privacy": {"strict-confidential": {"outcome": "CONSENT_REQUIRED"}},
-            },
+            "local": self._candidate(
+                "local/model",
+                "local",
+                repairs=1,
+                strict="ALLOW",
+            ),
+            "free": self._candidate(
+                "free/model",
+                "free-cloud",
+                repairs=0,
+                strict="CONSENT_REQUIRED",
+            ),
         }
 
         recommendation = routing.recommend_role("planner", candidates)
@@ -136,40 +114,18 @@ class RoleRoutingBenchmarkTests(unittest.TestCase):
 
     def test_zero_repairs_are_ranked_as_zero_not_as_missing(self):
         candidates = {
-            "one-repair": {
-                "candidate_id": "one-repair",
-                "candidate_class": "local",
-                "model": "a",
-                "profiles": ["a"],
-                "observed_runs": 1,
-                "completed_workflows": 1,
-                "deterministic_passes": 1,
-                "semantic_passes": 1,
-                "provider_failures": 0,
-                "downstream_repairs": 1,
-                "workflow_tokens_known": 0,
-                "workflow_total_tokens": 0,
-                "workflow_wall_time_known": 0,
-                "workflow_wall_time_ms": 0,
-                "privacy": {"strict-confidential": {"outcome": "ALLOW"}},
-            },
-            "zero-repair": {
-                "candidate_id": "zero-repair",
-                "candidate_class": "free-cloud",
-                "model": "b",
-                "profiles": ["b"],
-                "observed_runs": 1,
-                "completed_workflows": 1,
-                "deterministic_passes": 1,
-                "semantic_passes": 1,
-                "provider_failures": 0,
-                "downstream_repairs": 0,
-                "workflow_tokens_known": 0,
-                "workflow_total_tokens": 0,
-                "workflow_wall_time_known": 0,
-                "workflow_wall_time_ms": 0,
-                "privacy": {"strict-confidential": {"outcome": "ALLOW"}},
-            },
+            "one-repair": self._candidate(
+                "one-repair",
+                "local",
+                repairs=1,
+                strict="ALLOW",
+            ),
+            "zero-repair": self._candidate(
+                "zero-repair",
+                "free-cloud",
+                repairs=0,
+                strict="ALLOW",
+            ),
         }
 
         recommendation = routing.recommend_role("implementer", candidates)
@@ -208,6 +164,32 @@ class RoleRoutingBenchmarkTests(unittest.TestCase):
         self.assertIn("routing_recommendation", recommendation)
         self.assertIn("Routing recommendation", markdown)
         self.assertIn("Acceptance-evidence gap", markdown)
+
+    @staticmethod
+    def _candidate(
+        candidate_id: str,
+        candidate_class: str,
+        *,
+        repairs: int,
+        strict: str,
+    ) -> dict[str, object]:
+        return {
+            "candidate_id": candidate_id,
+            "candidate_class": candidate_class,
+            "model": candidate_id,
+            "profiles": [candidate_id],
+            "observed_runs": 1,
+            "completed_workflows": 1,
+            "deterministic_passes": 1,
+            "semantic_passes": 1,
+            "provider_failures": 0,
+            "downstream_repairs": repairs,
+            "workflow_tokens_known": 0,
+            "workflow_total_tokens": 0,
+            "workflow_wall_time_known": 0,
+            "workflow_wall_time_ms": 0,
+            "privacy": {"strict-confidential": {"outcome": strict}},
+        }
 
 
 if __name__ == "__main__":
