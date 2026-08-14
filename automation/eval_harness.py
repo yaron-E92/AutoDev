@@ -52,6 +52,30 @@ def load_replay(
     return result
 
 
+def _routing_safe_result(result: dict[str, object]) -> dict[str, object]:
+    """Do not count a replay as evidence for an unresolved configured model placeholder."""
+    reproducibility = result.get("reproducibility", {})
+    provider = reproducibility.get("provider_summary", {}) if isinstance(reproducibility, dict) else {}
+    benchmark = provider.get("benchmark", {}) if isinstance(provider, dict) else {}
+    roles = benchmark.get("roles", {}) if isinstance(benchmark, dict) else {}
+    unresolved = {
+        str(role)
+        for role, metadata in roles.items()
+        if isinstance(metadata, dict) and "REPLACE_WITH" in str(metadata.get("candidate_id", ""))
+    } if isinstance(roles, dict) else set()
+    if not unresolved:
+        return result
+
+    clone = dict(result)
+    efficiency = dict(result.get("efficiency", {})) if isinstance(result.get("efficiency"), dict) else {}
+    calls = dict(efficiency.get("model_calls_by_role", {})) if isinstance(efficiency.get("model_calls_by_role"), dict) else {}
+    for role in unresolved:
+        calls[role] = 0
+    efficiency["model_calls_by_role"] = calls
+    clone["efficiency"] = efficiency
+    return clone
+
+
 def aggregate(
     results: list[dict[str, object]],
     cases: dict[str, dict[str, object]],
@@ -81,7 +105,7 @@ def aggregate(
             _add_group(models, model, result)
     value["provider_transports"] = transports
     value["models"] = models
-    return routing.extend_aggregate(value, results)
+    return routing.extend_aggregate(value, [_routing_safe_result(result) for result in results])
 
 
 def _render_groups(title: str, groups: object) -> list[str]:
