@@ -5,12 +5,14 @@ import sys
 from automation import (
     ci_outcomes,
     opencode_github_entrypoint,
+    opencode_role_entrypoint,
     opencode_runtime,
     pr_head_sync,
 )
 
 
 COORDINATE_COMMAND = "coordinate"
+ROLE_COMMAND = "role"
 
 
 def run(argv: list[str] | None = None) -> int:
@@ -19,6 +21,8 @@ def run(argv: list[str] | None = None) -> int:
     values = list(sys.argv[1:] if argv is None else argv)
     if values and values[0] == COORDINATE_COMMAND:
         return opencode_github_entrypoint.run(values[1:])
+    if values and values[0] == ROLE_COMMAND:
+        return opencode_role_entrypoint.run(values[1:])
     return opencode_runtime.run(values)
 
 
