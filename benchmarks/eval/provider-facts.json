@@ -1,0 +1,109 @@
+{
+  "schema_version": 1,
+  "checked_at": "2026-08-14",
+  "facts": {
+    "groq/openai-gpt-oss-20b": {
+      "candidate_class": "free-cloud",
+      "availability": "Available on Groq Free Plan and paid plans; exact organization limits may differ from published defaults.",
+      "request_limits": {
+        "context_window_tokens": 131072,
+        "max_output_tokens": 65536,
+        "free_plan_rpm": 30,
+        "free_plan_rpd": 1000,
+        "free_plan_tpm": 8000,
+        "free_plan_tpd": 200000,
+        "note": "Published Free Plan limits are a benchmark input, not a guarantee for a specific account."
+      },
+      "tool_contract": "Groq documents tool use, reasoning, JSON/object output, browser search, and code execution for openai/gpt-oss-20b. AutoDev still benchmarks role-contract compliance separately.",
+      "source": [
+        "https://console.groq.com/docs/model/openai/gpt-oss-20b",
+        "https://console.groq.com/docs/rate-limits"
+      ]
+    },
+    "groq/generic": {
+      "candidate_class": "cloud",
+      "availability": "Model and account dependent.",
+      "request_limits": {
+        "status": "model-specific",
+        "note": "Resolve the selected Groq model before comparing request-size limits."
+      },
+      "tool_contract": "Model-specific; benchmark the exact configured model.",
+      "source": [
+        "https://console.groq.com/docs/models",
+        "https://console.groq.com/docs/rate-limits"
+      ]
+    },
+    "openrouter/free": {
+      "candidate_class": "free-cloud",
+      "availability": "Specific :free variants and providers change frequently; pin the exact model used by the benchmark.",
+      "request_limits": {
+        "context_window_tokens": "model-specific; query the model endpoint",
+        "free_requests_per_day_default": 50,
+        "free_requests_per_day_with_10_credits": 1000,
+        "note": "Free-model availability, context limits, and provider capacity remain model/provider specific."
+      },
+      "tool_contract": "Capability-specific. The benchmark must pin a concrete :free model and record actual role-contract/tool behavior.",
+      "source": [
+        "https://openrouter.ai/docs/guides/routing/model-variants/free",
+        "https://openrouter.ai/docs/guides/routing/routers/free-router",
+        "https://openrouter.ai/docs/faq",
+        "https://openrouter.ai/docs/api/api-reference/models/get-models"
+      ]
+    },
+    "openrouter/generic": {
+      "candidate_class": "cloud",
+      "availability": "Model/provider dependent.",
+      "request_limits": {
+        "status": "model-specific",
+        "note": "Use OpenRouter model metadata for the exact model before comparing request-size limits."
+      },
+      "tool_contract": "Model/provider specific.",
+      "source": [
+        "https://openrouter.ai/docs/api/api-reference/models/get-models"
+      ]
+    },
+    "ollama/local": {
+      "candidate_class": "local",
+      "availability": "Local model files, runtime configuration, and host hardware dependent.",
+      "request_limits": {
+        "status": "runtime/model-specific",
+        "note": "Effective context may be constrained by the installed model/Modelfile/runtime settings; benchmark the actual local alias instead of assuming the upstream model maximum."
+      },
+      "tool_contract": "Depends on the exact local model and runtime. AutoDev measures role-contract compliance from the actual run.",
+      "source": [
+        "https://docs.ollama.com/context-length"
+      ]
+    },
+    "ollama/cloud": {
+      "candidate_class": "cloud-plan-dependent",
+      "availability": "Ollama account, plan, and cloud-model availability dependent.",
+      "request_limits": {
+        "status": "model-specific",
+        "note": "Resolve the exact cloud model and account availability before live comparison."
+      },
+      "tool_contract": "Model-specific; benchmark the configured cloud model.",
+      "source": [
+        "https://ollama.com/blog/cloud-models"
+      ]
+    },
+    "openai/codex-baseline": {
+      "candidate_class": "frontier-baseline",
+      "availability": "Selected Codex/OpenAI profile and account allowance dependent.",
+      "request_limits": {
+        "status": "selected-profile/model-specific",
+        "note": "Use observed AutoDev/Codex telemetry rather than assigning one limit to every Codex profile."
+      },
+      "tool_contract": "Operational quality baseline/fallback; benchmark the selected profile rather than hard-coding one OpenAI model.",
+      "source": []
+    },
+    "unknown": {
+      "candidate_class": "unknown",
+      "availability": "unknown",
+      "request_limits": {
+        "status": "unknown"
+      },
+      "tool_contract": "unknown",
+      "source": []
+    }
+  }
+}
