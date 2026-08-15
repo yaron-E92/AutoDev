@@ -275,8 +275,8 @@ def _execute_stage(
             result,
             budget,
             attempt=attempt,
-            verification_result=Path(".autodev-run/current/verification-result.json"),
-            repair_artifact=Path(".autodev-run/current/verification-repair.md"),
+            verification_result=".autodev-run/current/verification-result.json",
+            repair_artifact=".autodev-run/current/verification-repair.md",
             verified_source_identity=str(state.get("VerifiedSourceIdentity", "")),
         )
         payload.update(
