@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import subprocess
 import time
 from datetime import datetime, timezone
@@ -50,6 +51,7 @@ _TRANSIENT_MARKERS = (
     "the operation was canceled",
 )
 _COMMAND_MARKER = "AUTODEV_WINDOWS_COMMAND_START="
+_ACTIONS_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 class WindowsVerificationError(ValueError):
@@ -237,12 +239,47 @@ def load_config(repo: Path) -> dict[str, object] | None:
         raise WindowsVerificationError(
             f"{CONFIG_PATH.as_posix()} timeout_seconds must be a positive integer"
         )
+    setup_value = value.get("setup")
+    setup: dict[str, object] | None = None
+    if setup_value is not None:
+        if not isinstance(setup_value, dict):
+            raise WindowsVerificationError(f"{CONFIG_PATH.as_posix()} setup must be an object")
+        setup_name = str(setup_value.get("name", "Repository verification setup")).strip()
+        setup_command = str(setup_value.get("command", "")).strip()
+        if not setup_name or not setup_command:
+            raise WindowsVerificationError(
+                f"{CONFIG_PATH.as_posix()} setup requires a non-empty name and command"
+            )
+        secret_env_value = setup_value.get("secret_env", {})
+        if not isinstance(secret_env_value, dict):
+            raise WindowsVerificationError(
+                f"{CONFIG_PATH.as_posix()} setup.secret_env must be an object"
+            )
+        secret_env: dict[str, str] = {}
+        for environment_name, secret_name_value in secret_env_value.items():
+            secret_name = str(secret_name_value).strip()
+            if (
+                not isinstance(environment_name, str)
+                or not _ACTIONS_NAME_PATTERN.fullmatch(environment_name)
+                or not _ACTIONS_NAME_PATTERN.fullmatch(secret_name)
+            ):
+                raise WindowsVerificationError(
+                    f"{CONFIG_PATH.as_posix()} setup.secret_env must map valid environment variable names "
+                    "to GitHub Actions secret names"
+                )
+            secret_env[environment_name] = secret_name
+        setup = {
+            "name": setup_name,
+            "command": setup_command,
+            "secret_env": secret_env,
+        }
     return {
         "version": SCHEMA_VERSION,
         "enabled": enabled,
         "when": when,
         "workflow": workflow or DEFAULT_CALLER_WORKFLOW,
         "commands": normalized_commands,
+        "setup": setup,
         "timeout_seconds": timeout,
     }
 
@@ -305,6 +342,15 @@ def safe_config_metadata(config: dict[str, object] | None) -> dict[str, object]:
     if not config:
         return {"configured": False}
     commands = config.get("commands", [])
+    setup = config.get("setup")
+    safe_setup = None
+    if isinstance(setup, dict):
+        secret_env = setup.get("secret_env", {})
+        safe_setup = {
+            "configured": True,
+            "name": str(setup.get("name", "")),
+            "secret_environment_names": sorted(secret_env) if isinstance(secret_env, dict) else [],
+        }
     return {
         "configured": True,
         "enabled": bool(config.get("enabled", True)),
@@ -316,6 +362,7 @@ def safe_config_metadata(config: dict[str, object] | None) -> dict[str, object]:
             for item in commands
             if isinstance(item, dict) and str(item.get("name", ""))
         ],
+        "setup": safe_setup,
     }
 
 
