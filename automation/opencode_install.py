@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shlex
 from pathlib import Path
 
-from automation import opencode_adapter
+from automation import opencode_adapter, windows_verification
 
 
 PYTHON_COMMAND_TEMPLATES = (
@@ -20,6 +21,37 @@ PYTHON_COMMAND_TEMPLATES = (
 PYTHON_SHELL_PLACEHOLDER = "__AUTODEV_PYTHON_SHELL__"
 WINDOWS_CALLER_TEMPLATE = Path("integrations") / "github-actions" / "autodev-windows-verification.yml"
 WINDOWS_CALLER_TARGET = Path(".github") / "workflows" / "autodev-windows-verification.yml"
+WINDOWS_SETUP_PLACEHOLDER = "      # __AUTODEV_REPOSITORY_SETUP__"
+
+
+def _render_windows_setup(config: dict[str, object] | None) -> str:
+    setup = config.get("setup") if config else None
+    if not isinstance(setup, dict):
+        return ""
+    name = json.dumps(str(setup["name"]))
+    command_lines = str(setup["command"]).splitlines()
+    secret_env = setup.get("secret_env", {})
+    lines = [
+        f"      - name: {name}",
+        "        shell: pwsh",
+        "        working-directory: target",
+    ]
+    if isinstance(secret_env, dict) and secret_env:
+        lines.append("        env:")
+        for environment_name, secret_name in sorted(secret_env.items()):
+            lines.append(f"          {environment_name}: ${{{{ secrets.{secret_name} }}}}")
+    lines.append("        run: |")
+    if isinstance(secret_env, dict):
+        for environment_name, secret_name in sorted(secret_env.items()):
+            lines.extend(
+                [
+                    f"          if ([string]::IsNullOrWhiteSpace($env:{environment_name})) {{",
+                    f"            throw \"Required Actions secret {secret_name} is unavailable for repository setup.\"",
+                    "          }",
+                ]
+            )
+    lines.extend(f"          {line}" for line in command_lines)
+    return "\n".join(lines)
 
 
 def install_assets(
@@ -63,10 +95,19 @@ def install_assets(
         raise opencode_adapter.OpenCodeAdapterError(
             f"missing canonical Windows verification caller workflow: {workflow_template}"
         )
+    workflow_text = workflow_template.read_text(encoding="utf-8")
+    if workflow_text.count(WINDOWS_SETUP_PLACEHOLDER) != 1:
+        raise opencode_adapter.OpenCodeAdapterError(
+            f"Windows verification caller template must contain exactly one setup placeholder: {workflow_template}"
+        )
+    try:
+        windows_config = windows_verification.load_config(target_repo)
+    except windows_verification.WindowsVerificationError as exc:
+        raise opencode_adapter.OpenCodeAdapterError(str(exc)) from exc
     workflow_target = target_repo / WINDOWS_CALLER_TARGET
     workflow_target.parent.mkdir(parents=True, exist_ok=True)
     workflow_target.write_text(
-        workflow_template.read_text(encoding="utf-8"),
+        workflow_text.replace(WINDOWS_SETUP_PLACEHOLDER, _render_windows_setup(windows_config)),
         encoding="utf-8",
     )
     if workflow_target not in installed:

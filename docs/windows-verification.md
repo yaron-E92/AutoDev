@@ -10,7 +10,7 @@ Each target repository installs one AutoDev-owned workflow at:
 .github/workflows/autodev-windows-verification.yml
 ```
 
-The workflow is intentionally stable across normal AutoDev upgrades. It does **not** embed the AutoDev commit that installed it. Instead, every AutoDev run dispatches four inputs:
+The workflow does **not** embed the AutoDev commit that installed it. Instead, every AutoDev run dispatches four inputs:
 
 ```text
 expected_sha     exact target-repository commit to verify
@@ -21,7 +21,7 @@ commands_json    configured Windows verification commands
 
 The job checks out the target repository at `expected_sha`, checks out `yaron-E92/AutoDev` at `autodev_ref`, and executes `windows/scripts/windows-verification-worker.ps1` from that ephemeral AutoDev checkout. No SSH host, permanent Windows machine, or fixed `C:\AutoDev` path is required.
 
-Because `autodev_ref` is supplied at dispatch time, updating AutoDev does **not** normally require committing a new workflow revision in every target repository. Reinstall and commit the target workflow only when the workflow protocol/template itself changes.
+Because `autodev_ref` is supplied at dispatch time, updating AutoDev does **not** normally require committing a new workflow revision in every target repository. Reinstall and commit the target workflow when the workflow protocol/template or the repository's `setup` configuration changes.
 
 ## Installation
 
@@ -52,6 +52,13 @@ Repositories that need Windows verification configure `.autodev/windows-verifica
   "when": "deferred-windows",
   "timeout_seconds": 3600,
   "workflow": "autodev-windows-verification.yml",
+  "setup": {
+    "name": "Configure repository package sources",
+    "command": "pwsh -NoProfile -File .github/scripts/configure-packages.ps1",
+    "secret_env": {
+      "NUGET_TOKEN": "REPOSITORY_PACKAGE_TOKEN"
+    }
+  },
   "commands": [
     {
       "name": "windows-publish",
@@ -66,6 +73,24 @@ Repositories that need Windows verification configure `.autodev/windows-verifica
 ```
 
 `when` may be `deferred-windows` or `always`. `deferred-windows` dispatches only when local verification recorded an explicit Windows obligation. `always` runs the configured Windows commands for every shipped AutoDev patch.
+
+### Shared repository setup
+
+`setup` is optional. When configured, the installer renders one repository-specific PowerShell setup step before the AutoDev verification worker. The command runs from the checked-out target repository, so a repository can keep package-feed, SDK, or tool setup in one versioned script and call that same script from its normal CI workflow.
+
+`secret_env` maps the environment-variable contract used by that script to the actual GitHub Actions secret name in that repository. Only secret names are committed; values remain in GitHub Actions and are exposed only to the generated setup step. This allows repositories to use different secret names while presenting the same variable, such as `NUGET_TOKEN`, to a shared script. Missing mapped secrets fail with an explicit setup error before any product verification command starts.
+
+For example, normal CI can call the same script with its own static secret binding:
+
+```yaml
+- name: Configure repository package sources
+  shell: pwsh
+  env:
+    NUGET_TOKEN: ${{ secrets.REPOSITORY_PACKAGE_TOKEN }}
+  run: pwsh -NoProfile -File .github/scripts/configure-packages.ps1
+```
+
+After adding or changing `setup`, rerun the AutoDev installer and merge the regenerated caller workflow to the default branch. A reusable workflow is not used for this hook because GitHub reusable workflows replace an entire job; the setup must run inside the exact-SHA Windows verification job. A shared script or composite action is the appropriate boundary for regular CI, while AutoDev's hook currently invokes the shared script.
 
 ## Execution order
 

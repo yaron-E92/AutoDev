@@ -4,6 +4,13 @@
   "when": "deferred-windows",
   "timeout_seconds": 3600,
   "workflow": "autodev-windows-verification.yml",
+  "setup": {
+    "name": "Configure repository package sources",
+    "command": "pwsh -NoProfile -File .github/scripts/configure-packages.ps1",
+    "secret_env": {
+      "NUGET_TOKEN": "REPOSITORY_PACKAGE_TOKEN"
+    }
+  },
   "commands": [
     {
       "name": "windows-publish",

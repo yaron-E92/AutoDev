@@ -52,6 +52,8 @@ jobs:
           path: autodev-tooling
           persist-credentials: false
 
+      # __AUTODEV_REPOSITORY_SETUP__
+
       - name: Execute Windows verification
         shell: pwsh
         env:
