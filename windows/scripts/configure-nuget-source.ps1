@@ -30,7 +30,8 @@ if (
     throw "SourceUrl must be an absolute HTTPS URL."
 }
 
-$dotnet = Get-Command dotnet -CommandType Application -ErrorAction SilentlyContinue
+$dotnet = Get-Command dotnet -CommandType Application -ErrorAction SilentlyContinue |
+    Select-Object -First 1
 if ($null -eq $dotnet) {
     throw "dotnet is required to configure the authenticated NuGet source."
 }
