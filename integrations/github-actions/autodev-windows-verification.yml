@@ -1,0 +1,28 @@
+name: AutoDev Windows verification
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Exact commit pushed by AutoDev
+        required: true
+        type: string
+      source_identity:
+        description: AutoDev verified source identity
+        required: true
+        type: string
+      commands_json:
+        description: JSON array of named Windows verification commands
+        required: true
+        type: string
+
+jobs:
+  windows:
+    permissions:
+      contents: read
+    uses: yaron-E92/AutoDev/.github/workflows/autodev-windows-verification.yml@__AUTODEV_WORKFLOW_REF__
+    with:
+      expected_sha: ${{ inputs.expected_sha }}
+      source_identity: ${{ inputs.source_identity }}
+      commands_json: ${{ inputs.commands_json }}
+      autodev_ref: __AUTODEV_WORKFLOW_REF__
