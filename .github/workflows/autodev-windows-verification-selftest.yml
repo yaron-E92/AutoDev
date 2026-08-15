@@ -1,0 +1,23 @@
+name: AutoDev Windows verification self-test
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/autodev-windows-verification.yml'
+      - '.github/workflows/autodev-windows-verification-selftest.yml'
+      - 'integrations/github-actions/autodev-windows-verification.yml'
+      - 'windows/scripts/windows-verification-worker.ps1'
+      - 'automation/windows_verification.py'
+      - 'automation/windows_workflow_hooks.py'
+
+jobs:
+  windows-self-test:
+    name: GitHub-hosted Windows proof
+    permissions:
+      contents: read
+    uses: ./.github/workflows/autodev-windows-verification.yml
+    with:
+      expected_sha: ${{ github.sha }}
+      source_identity: autodev-ci-self-test
+      commands_json: '[{"name":"self-test","command":"echo AUTODEV-WINDOWS-SELFTEST && git rev-parse HEAD"}]'
+      autodev_ref: ${{ github.event.pull_request.head.sha }}
