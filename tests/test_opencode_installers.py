@@ -54,9 +54,10 @@ class OpenCodeInstallerTests(unittest.TestCase):
                     ]
                 )
             workflow = target / opencode_install.WINDOWS_CALLER_TARGET
+            workflow_exists = workflow.is_file()
 
         self.assertEqual(code, 0)
-        self.assertTrue(workflow.is_file())
+        self.assertTrue(workflow_exists)
         self.assertIn("DEPRECATED", stderr.getvalue())
         self.assertIn("automation.opencode_install", stderr.getvalue())
         self.assertIn("Installed", stdout.getvalue())
