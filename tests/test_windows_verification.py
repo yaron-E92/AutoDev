@@ -12,6 +12,7 @@ from automation import opencode_adapter, opencode_resume, run_manifest, windows_
 
 
 HEAD = "a" * 40
+AUTODEV_REF = "b" * 40
 SOURCE = "verified-source-identity"
 
 
@@ -65,6 +66,8 @@ class FakeActionsRunner:
     def __call__(self, command, **kwargs):
         command = [str(value) for value in command]
         self.calls.append(command)
+        if command == ["git", "rev-parse", "HEAD"]:
+            return SimpleNamespace(returncode=0, stdout=AUTODEV_REF + "\n", stderr="")
         if command[:2] == ["gh", "api"] and command[-1].endswith("/actions/permissions"):
             return SimpleNamespace(returncode=0, stdout='{"enabled":true}', stderr="")
         if command[:3] == ["gh", "workflow", "view"]:
@@ -102,6 +105,14 @@ class WindowsVerificationTests(unittest.TestCase):
         self.assertEqual(config["workflow"], windows_verification.DEFAULT_CALLER_WORKFLOW)
         self.assertNotIn("runner", config)
         self.assertEqual([item["name"] for item in config["commands"]], ["publish", "smoke"])
+
+    def test_installed_workflow_is_stable_and_accepts_autodev_ref_at_dispatch(self):
+        workflow = Path(__file__).resolve().parents[1] / "integrations" / "github-actions" / "autodev-windows-verification.yml"
+        text = workflow.read_text(encoding="utf-8")
+        self.assertNotIn("__AUTODEV_WORKFLOW_REF__", text)
+        self.assertIn("autodev_ref:", text)
+        self.assertIn("runs-on: windows-latest", text)
+        self.assertIn("ref: ${{ inputs.autodev_ref }}", text)
 
     def test_local_deferred_lines_are_durable_and_only_explicit_windows_requires_lane(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -171,7 +182,7 @@ class WindowsVerificationTests(unittest.TestCase):
         self.assertIn("default branch", message)
         self.assertIn("Re-run the AutoDev installer", message)
 
-    def test_windows_success_dispatches_exact_branch_sha_before_pr_and_binds_proof(self):
+    def test_windows_success_dispatches_exact_branch_sha_and_autodev_ref_before_pr_and_binds_proof(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
             current = repo / ".autodev-run" / "current"
@@ -194,12 +205,15 @@ class WindowsVerificationTests(unittest.TestCase):
         self.assertEqual(proof["transport"], "github-actions")
         self.assertEqual(proof["head_sha"], HEAD)
         self.assertEqual(proof["source_identity"], SOURCE)
+        self.assertEqual(proof["autodev_ref"], AUTODEV_REF)
         self.assertEqual(proof["run_id"], 321)
         self.assertEqual(request["branch"], "autodev/issue-100")
+        self.assertEqual(request["autodev_ref"], AUTODEV_REF)
         dispatch = next(call for call in runner.calls if call[:3] == ["gh", "workflow", "run"])
         self.assertIn("--ref", dispatch)
         self.assertIn("autodev/issue-100", dispatch)
         self.assertIn(f"expected_sha={HEAD}", dispatch)
+        self.assertIn(f"autodev_ref={AUTODEV_REF}", dispatch)
         self.assertNotIn("PrHeadSha", _state())
 
     def test_windows_code_failure_enters_fixer_only_after_command_started(self):
@@ -239,7 +253,7 @@ class WindowsVerificationTests(unittest.TestCase):
             _config(repo)
             runner = FakeActionsRunner(
                 conclusion="failure",
-                failed_logs="Unable to resolve action yaron-E92/AutoDev/.github/workflows/autodev-windows-verification.yml",
+                failed_logs="Unable to resolve AutoDev worker checkout",
             )
             state = _state()
             with mock.patch.dict(os.environ, {"AUTODEV_WINDOWS_ACTIONS_POLL_SECONDS": "0"}):
