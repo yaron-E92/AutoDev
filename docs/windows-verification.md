@@ -54,7 +54,7 @@ Repositories that need Windows verification configure `.autodev/windows-verifica
   "workflow": "autodev-windows-verification.yml",
   "setup": {
     "name": "Configure repository package sources",
-    "command": "pwsh -NoProfile -File .github/scripts/configure-packages.ps1",
+    "command": "& \"$env:GITHUB_WORKSPACE\\autodev-tooling\\windows\\scripts\\configure-nuget-source.ps1\" -SourceUrl 'https://nuget.pkg.github.com/PACKAGE_OWNER/index.json' -SourceName 'private-github' -Username 'PACKAGE_OWNER'",
     "secret_env": {
       "NUGET_TOKEN": "REPOSITORY_PACKAGE_TOKEN"
     }
@@ -74,23 +74,15 @@ Repositories that need Windows verification configure `.autodev/windows-verifica
 
 `when` may be `deferred-windows` or `always`. `deferred-windows` dispatches only when local verification recorded an explicit Windows obligation. `always` runs the configured Windows commands for every shipped AutoDev patch.
 
-### Shared repository setup
+### Repository setup
 
-`setup` is optional. When configured, the installer renders one repository-specific PowerShell setup step before the AutoDev verification worker. The command runs from the checked-out target repository, so a repository can keep package-feed, SDK, or tool setup in one versioned script and call that same script from its normal CI workflow.
+`setup` is optional. When configured, the installer renders one repository-specific PowerShell setup step after both exact checkouts and before the AutoDev verification worker. The command runs from the checked-out target repository and can invoke either repository tooling or tooling from the exact AutoDev revision under `$env:GITHUB_WORKSPACE\autodev-tooling`.
 
-`secret_env` maps the environment-variable contract used by that script to the actual GitHub Actions secret name in that repository. Only secret names are committed; values remain in GitHub Actions and are exposed only to the generated setup step. This allows repositories to use different secret names while presenting the same variable, such as `NUGET_TOKEN`, to a shared script. Missing mapped secrets fail with an explicit setup error before any product verification command starts.
+`secret_env` maps the environment-variable contract used by the command to the actual GitHub Actions secret name in that repository. Only secret names are rendered into the installed workflow; values remain in GitHub Actions and are exposed only to the generated setup step. This allows repositories to use different secret names while presenting the same variable, such as `NUGET_TOKEN`, to AutoDev tooling. Missing mapped secrets fail with an explicit setup error before any product verification command starts.
 
-For example, normal CI can call the same script with its own static secret binding:
+AutoDev includes `windows/scripts/configure-nuget-source.ps1` for private NuGet feeds. It accepts the source URL, source name, and username as non-secret parameters, requires an HTTPS source, and reads the credential only from `NUGET_TOKEN`. The example configuration invokes that helper from the already-pinned AutoDev checkout; no helper is copied into the target repository and normal CI remains independent of AutoDev.
 
-```yaml
-- name: Configure repository package sources
-  shell: pwsh
-  env:
-    NUGET_TOKEN: ${{ secrets.REPOSITORY_PACKAGE_TOKEN }}
-  run: pwsh -NoProfile -File .github/scripts/configure-packages.ps1
-```
-
-After adding or changing `setup`, rerun the AutoDev installer and merge the regenerated caller workflow to the default branch. A reusable workflow is not used for this hook because GitHub reusable workflows replace an entire job; the setup must run inside the exact-SHA Windows verification job. A shared script or composite action is the appropriate boundary for regular CI, while AutoDev's hook currently invokes the shared script.
+After adding or changing `setup`, rerun the AutoDev installer and merge the regenerated caller workflow to the default branch. A reusable workflow is not used for this hook because GitHub reusable workflows replace an entire job; the setup must run inside the exact-SHA Windows verification job.
 
 ## Execution order
 
