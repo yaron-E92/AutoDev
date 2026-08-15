@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import os
 import shlex
-import subprocess
 from pathlib import Path
 
 from automation import opencode_adapter
@@ -19,25 +18,8 @@ PYTHON_COMMAND_TEMPLATES = (
     "autodev-verify.md",
 )
 PYTHON_SHELL_PLACEHOLDER = "__AUTODEV_PYTHON_SHELL__"
-WINDOWS_WORKFLOW_REF_PLACEHOLDER = "__AUTODEV_WORKFLOW_REF__"
 WINDOWS_CALLER_TEMPLATE = Path("integrations") / "github-actions" / "autodev-windows-verification.yml"
 WINDOWS_CALLER_TARGET = Path(".github") / "workflows" / "autodev-windows-verification.yml"
-
-
-def _autodev_workflow_ref(autodev_root: Path) -> str:
-    try:
-        completed = subprocess.run(
-            ["git", "-C", str(autodev_root), "rev-parse", "HEAD"],
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            capture_output=True,
-            check=False,
-        )
-    except OSError:
-        return "main"
-    value = str(completed.stdout or "").strip()
-    return value if completed.returncode == 0 and len(value) == 40 else "main"
 
 
 def install_assets(
@@ -81,18 +63,10 @@ def install_assets(
         raise opencode_adapter.OpenCodeAdapterError(
             f"missing canonical Windows verification caller workflow: {workflow_template}"
         )
-    workflow_text = workflow_template.read_text(encoding="utf-8")
-    if workflow_text.count(WINDOWS_WORKFLOW_REF_PLACEHOLDER) != 2:
-        raise opencode_adapter.OpenCodeAdapterError(
-            "Windows verification caller workflow must contain exactly two AutoDev ref placeholders"
-        )
     workflow_target = target_repo / WINDOWS_CALLER_TARGET
     workflow_target.parent.mkdir(parents=True, exist_ok=True)
     workflow_target.write_text(
-        workflow_text.replace(
-            WINDOWS_WORKFLOW_REF_PLACEHOLDER,
-            _autodev_workflow_ref(autodev_root),
-        ),
+        workflow_template.read_text(encoding="utf-8"),
         encoding="utf-8",
     )
     if workflow_target not in installed:
@@ -102,7 +76,7 @@ def install_assets(
 
 def run(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Install AutoDev OpenCode assets with deterministic Python coordinator commands."
+        description="Install or update the complete AutoDev OpenCode integration."
     )
     parser.add_argument("--target-repo", default=".")
     parser.add_argument("--autodev-root", default=str(opencode_adapter.AUTODEV_ROOT))
@@ -117,8 +91,8 @@ def run(argv: list[str] | None = None) -> int:
     target = Path(args.target_repo).resolve()
     print(
         f"Installed {len(installed)} AutoDev assets into {target}. "
-        f"Commit {WINDOWS_CALLER_TARGET.as_posix()} to the target repository default branch "
-        "before a Windows-required AutoDev run can dispatch GitHub Actions verification."
+        f"If {WINDOWS_CALLER_TARGET.as_posix()} is new or changed, commit/merge it to the target "
+        "repository default branch before a Windows-required AutoDev run can dispatch GitHub Actions verification."
     )
     return 0
 

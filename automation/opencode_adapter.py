@@ -151,6 +151,12 @@ def install_assets(
     *,
     python_command: str = "python",
 ) -> list[Path]:
+    """Install the low-level OpenCode bridge assets.
+
+    This remains an internal primitive for automation.opencode_install. User-facing
+    installation is handled by automation.opencode_install so every required
+    integration asset is installed together.
+    """
     target_repo = target_repo.expanduser().resolve()
     autodev_root = autodev_root.expanduser().resolve()
     if not target_repo.is_dir():
@@ -1023,16 +1029,23 @@ def run(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         if args.command == "install":
-            installed = install_assets(
-                Path(args.target_repo),
-                Path(args.autodev_root),
-                python_command=args.python,
-            )
+            from automation import opencode_install
+
             print(
-                f"Installed {len(installed)} AutoDev OpenCode assets into "
-                f"{Path(args.target_repo).resolve() / '.opencode'}"
+                "DEPRECATED: `python -m automation.opencode_adapter install` is a compatibility shim; "
+                "use `python -m automation.opencode_install` instead.",
+                file=sys.stderr,
             )
-            return 0
+            return opencode_install.run(
+                [
+                    "--target-repo",
+                    args.target_repo,
+                    "--autodev-root",
+                    args.autodev_root,
+                    "--python",
+                    args.python,
+                ]
+            )
         if args.command == "models":
             mappings = resolve_opencode_model_mappings(Path(args.repo))
             print(render_model_mappings(mappings))

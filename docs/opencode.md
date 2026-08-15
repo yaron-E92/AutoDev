@@ -6,13 +6,13 @@ Normal OpenCode execution does **not** require the Windows PowerShell issue-to-P
 
 ## Portable install / sync
 
-From an AutoDev checkout, the canonical install/update command is:
+From an AutoDev checkout, the canonical complete install/update command is:
 
 ```text
-python -m automation.opencode_adapter install --target-repo <TARGET_REPOSITORY>
+python -m automation.opencode_install --target-repo <TARGET_REPOSITORY>
 ```
 
-Use `python3` instead of `python` where that is the installed command.
+Use `python3` instead of `python` where that is the installed command. The older `python -m automation.opencode_adapter install` command is deprecated; it remains only as a compatibility shim and delegates to `automation.opencode_install` so it cannot silently install a smaller asset set.
 
 Examples:
 
@@ -20,7 +20,7 @@ Examples:
 
 ```powershell
 cd C:\source\AutoDev
-python -m automation.opencode_adapter install `
+python -m automation.opencode_install `
   --target-repo C:\source\repos\TARGET_REPOSITORY
 
 cd C:\source\repos\TARGET_REPOSITORY
@@ -38,7 +38,7 @@ pwsh -File .\scripts\install-opencode.ps1 `
 
 ```bash
 cd ~/src/AutoDev
-python3 -m automation.opencode_adapter install \
+python3 -m automation.opencode_install \
   --target-repo ~/src/TARGET_REPOSITORY \
   --python python3
 
@@ -274,9 +274,12 @@ If a shared profile file contains a platform-specific verification command, supp
 
 ## Installed target-repository files
 
-The idempotent installer creates or refreshes only AutoDev-owned files:
+The idempotent canonical installer creates or refreshes only AutoDev-owned files:
 
 ```text
+.github/
+  workflows/
+    autodev-windows-verification.yml
 .opencode/
   autodev.json
   autodev.py
@@ -299,6 +302,8 @@ The idempotent installer creates or refreshes only AutoDev-owned files:
     autodev-fixer.md
     autodev-verifier.md
 ```
+
+The Windows workflow is stable across ordinary AutoDev upgrades: it receives the exact AutoDev commit as the per-run `autodev_ref` dispatch input rather than hardcoding the installer-time SHA. Re-running the installer therefore should not create a workflow diff merely because AutoDev moved to a newer commit. Commit/merge the workflow to the target default branch when it is first installed or when its protocol/template actually changes.
 
 Running the installer again updates those named files and leaves unrelated `.opencode` commands, agents, and configuration untouched. It does not create, edit, or replace project `opencode.json` / `opencode.jsonc` files, so project role-model mappings remain user-owned.
 
