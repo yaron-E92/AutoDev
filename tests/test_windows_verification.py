@@ -225,10 +225,11 @@ class WindowsVerificationTests(unittest.TestCase):
                     max_repair_attempts=3,
                     runner=runner,
                 )
+            repair_exists = (current / windows_verification.REPAIR_FILE).is_file()
 
         self.assertEqual(result["state"], "REPAIR")
         self.assertEqual(result["failure_classification"], windows_verification.FAILURE_CODE_REPAIRABLE)
-        self.assertTrue((current / windows_verification.REPAIR_FILE).is_file())
+        self.assertTrue(repair_exists)
 
     def test_actions_setup_failure_is_infrastructure_not_code_repair(self):
         with tempfile.TemporaryDirectory() as temp_dir:
