@@ -41,6 +41,11 @@ is deprecated and remains only as a compatibility shim that delegates to the can
 
 If `.github/workflows/autodev-windows-verification.yml` is new or changed, commit and merge it to the target repository's default branch. GitHub requires a `workflow_dispatch` workflow to exist on the default branch before it can be dispatched. AutoDev preflight checks that Actions is enabled and that the configured workflow is visible there.
 
+## Private Yaref92 package prerequisite
+
+The installed workflow detects references to `Yaref92.Events` in project and package files. When present, it configures the authenticated `yaron-E92` GitHub Packages source before executing Windows verification commands. The target repository must expose the Actions secret `YARE92_NUGET_TOKEN_EXP_17JUN2027`; repositories without a `Yaref92.Events` reference skip this setup.
+
+The secret value remains in GitHub Actions and is supplied only to the package-source setup step. If the dependency is present but the secret is unavailable, the workflow fails with an explicit setup error instead of reporting `NU1101` as a product-code regression.
 ## Repository configuration
 
 Repositories that need Windows verification configure `.autodev/windows-verification.json`, for example:
