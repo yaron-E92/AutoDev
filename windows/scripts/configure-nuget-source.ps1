@@ -10,7 +10,9 @@ param(
 
     [Parameter(Mandatory = $true)]
     [ValidateNotNullOrEmpty()]
-    [string]$Username
+    [string]$Username,
+
+    [string]$ConfigFile = ""
 )
 
 Set-StrictMode -Version Latest
@@ -33,16 +35,29 @@ if ($null -eq $dotnet) {
     throw "dotnet is required to configure the authenticated NuGet source."
 }
 
+$configArguments = @()
+if (-not [string]::IsNullOrWhiteSpace($ConfigFile)) {
+    $resolvedConfigFile = [IO.Path]::GetFullPath($ConfigFile)
+    if (-not (Test-Path -LiteralPath $resolvedConfigFile -PathType Leaf)) {
+        throw "ConfigFile does not exist: $resolvedConfigFile"
+    }
+    $configArguments = @("--configfile", $resolvedConfigFile)
+}
+
 # Hosted runners are normally clean, but replacing the named source makes the helper
 # deterministic on reused runners as well. A missing source is intentionally harmless.
-& $dotnet.Source nuget remove source $SourceName *> $null
+$removeArguments = @("nuget", "remove", "source", $SourceName) + $configArguments
+& $dotnet.Source @removeArguments *> $null
 
-& $dotnet.Source nuget add source $parsedSourceUrl.AbsoluteUri `
-    --name $SourceName `
-    --username $Username `
-    --password $env:NUGET_TOKEN `
-    --store-password-in-clear-text `
-    --valid-authentication-types basic
+$addArguments = @(
+    "nuget", "add", "source", $parsedSourceUrl.AbsoluteUri,
+    "--name", $SourceName,
+    "--username", $Username,
+    "--password", $env:NUGET_TOKEN,
+    "--store-password-in-clear-text",
+    "--valid-authentication-types", "basic"
+) + $configArguments
+& $dotnet.Source @addArguments
 
 if ($LASTEXITCODE -ne 0) {
     throw "Failed to configure authenticated NuGet source '$SourceName'."
