@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from automation import semantic_repair_budget as _semantic_budget
+from automation import windows_workflow_hooks as _windows_workflow_hooks
 from automation import workspace_scope
 from automation import workflow_stages_core as _core
 
@@ -330,6 +331,7 @@ _core.execute_stage = _execute_stage
 _core.mark_blocked = _mark_blocked
 _core.FAILURE_REPAIR_BUDGET_EXHAUSTED = _semantic_budget.FAILURE_REPAIR_BUDGET_EXHAUSTED
 _semantic_budget.install_run_manifest_hooks()
+_windows_workflow_hooks.install(_core)
 
 if __name__ == "__main__":
     raise SystemExit(_core.main())
