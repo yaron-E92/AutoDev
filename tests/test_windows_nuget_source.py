@@ -23,27 +23,20 @@ class WindowsNuGetSourceTests(unittest.TestCase):
         self.assertNotIn("Yaref92", text)
         self.assertNotIn("nuget.pkg.github.com", text)
 
-    @unittest.skipUnless(shutil.which("pwsh"), "PowerShell is required for the execution test")
+    @unittest.skipUnless(
+        shutil.which("pwsh") and shutil.which("dotnet"),
+        "PowerShell and dotnet are required for the execution test",
+    )
     def test_helper_replaces_source_using_mapped_token(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp = Path(temp_dir)
-            log = temp / "dotnet.log"
-            if os.name == "nt":
-                fake_dotnet = temp / "dotnet.cmd"
-                fake_dotnet.write_text(
-                    "@echo off\r\necho %*>>\"%AUTODEV_TEST_DOTNET_LOG%\"\r\nexit /b 0\r\n",
-                    encoding="utf-8",
-                )
-            else:
-                fake_dotnet = temp / "dotnet"
-                fake_dotnet.write_text(
-                    "#!/usr/bin/env sh\nprintf '%s\\n' \"$*\" >>\"$AUTODEV_TEST_DOTNET_LOG\"\n",
-                    encoding="utf-8",
-                )
-                fake_dotnet.chmod(0o755)
+            config = temp / "NuGet.Config"
+            config.write_text(
+                "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                "<configuration><packageSources><clear /></packageSources></configuration>\n",
+                encoding="utf-8",
+            )
             env = os.environ.copy()
-            env["PATH"] = str(temp) + os.pathsep + env.get("PATH", "")
-            env["AUTODEV_TEST_DOTNET_LOG"] = str(log)
             env["NUGET_TOKEN"] = "mapped-test-token"
 
             completed = subprocess.run(
@@ -58,6 +51,8 @@ class WindowsNuGetSourceTests(unittest.TestCase):
                     "private-feed",
                     "-Username",
                     "package-user",
+                    "-ConfigFile",
+                    str(config),
                 ],
                 text=True,
                 encoding="utf-8",
@@ -66,14 +61,13 @@ class WindowsNuGetSourceTests(unittest.TestCase):
                 check=False,
                 env=env,
             )
-            calls = log.read_text(encoding="utf-8")
+            self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+            rendered_config = config.read_text(encoding="utf-8")
 
-        self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
-        self.assertIn("nuget remove source private-feed", calls)
-        self.assertIn("nuget add source https://packages.example.test/index.json", calls)
-        self.assertIn("--username package-user", calls)
-        self.assertIn("--password mapped-test-token", calls)
-        self.assertIn("--valid-authentication-types basic", calls)
+        self.assertIn('key="private-feed" value="https://packages.example.test/index.json"', rendered_config)
+        self.assertIn('key="Username" value="package-user"', rendered_config)
+        self.assertIn('key="ClearTextPassword" value="mapped-test-token"', rendered_config)
+        self.assertIn('key="ValidAuthenticationTypes" value="basic"', rendered_config)
 
     @unittest.skipUnless(shutil.which("pwsh"), "PowerShell is required for the execution test")
     def test_helper_fails_before_dotnet_when_token_is_missing(self):
