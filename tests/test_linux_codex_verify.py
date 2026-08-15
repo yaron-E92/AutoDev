@@ -12,6 +12,57 @@ VERIFY_SCRIPT = REPO_ROOT / "linux" / "scripts" / "codex-verify.sh"
 
 @unittest.skipIf(os.name == "nt", "Linux verifier regression tests require a POSIX host")
 class LinuxCodexVerifyTests(unittest.TestCase):
+    def _run_auto_web_repo(self, npm_exit_code: int):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            (repo / "package.json").write_text("{}\n", encoding="utf-8")
+
+            fake_bin = repo / "fake-bin"
+            fake_bin.mkdir()
+
+            fake_npm = fake_bin / "npm"
+            fake_npm.write_text(
+                textwrap.dedent(
+                    f"""\
+                    #!/usr/bin/env bash
+                    printf 'fake npm invoked\n'
+                    exit {npm_exit_code}
+                    """
+                ),
+                encoding="utf-8",
+            )
+            fake_npm.chmod(0o755)
+
+            fake_jq = fake_bin / "jq"
+            fake_jq.write_text(
+                "#!/usr/bin/env bash\nexit 1\n",
+                encoding="utf-8",
+            )
+            fake_jq.chmod(0o755)
+
+            env = os.environ.copy()
+            env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+            return subprocess.run(
+                ["bash", str(VERIFY_SCRIPT), "--profiles", "auto"],
+                cwd=repo,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+    def test_auto_succeeds_when_applicable_checks_pass_without_python_project(self):
+        completed = self._run_auto_web_repo(npm_exit_code=0)
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("fake npm invoked", completed.stdout)
+
+    def test_auto_propagates_applicable_check_failure(self):
+        completed = self._run_auto_web_repo(npm_exit_code=23)
+
+        self.assertEqual(completed.returncode, 23)
+        self.assertIn("fake npm invoked", completed.stdout)
+
     def test_maui_profile_builds_android_app_and_defers_windows_test_project(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
