@@ -13,4 +13,22 @@ run_dotnet(){ command -v dotnet >/dev/null || { echo dotnet not found >&2; exit 
 run_maui(){ command -v dotnet >/dev/null || { echo dotnet not found >&2; exit 127; }; mapfile -t apps < <(find . -type f -name '*.csproj' -not -path '*/bin/*' -not -path '*/obj/*' | while read -r p; do grep -qiE '<UseMaui>[[:space:]]*true[[:space:]]*</UseMaui>' "$p" && ! grep -qiE '<IsTestProject>[[:space:]]*true[[:space:]]*</IsTestProject>|Microsoft\.NET\.Test\.Sdk' "$p" && echo "$p"; done); [[ ${#apps[@]} -eq 0 ]] && { echo "No MAUI application projects found"; return; }; mapfile -t windows_tests < <(find . -type f -name '*.csproj' -not -path '*/bin/*' -not -path '*/obj/*' | while read -r p; do grep -qiE '<IsTestProject>[[:space:]]*true[[:space:]]*</IsTestProject>|Microsoft\.NET\.Test\.Sdk' "$p" && grep -qiE 'net[0-9]+(\.[0-9]+)?-windows' "$p" && echo "$p"; done); for t in "${windows_tests[@]}"; do echo "DEFERRED: Windows-targeted test project $t cannot run on Linux; verify it on Windows."; done; for p in "${apps[@]}"; do tfm=$(grep -oEi 'net[0-9]+(\.[0-9]+)?-android([0-9.]+)?' "$p" | head -n1 || true); if [[ -z "$tfm" ]]; then echo "DEFERRED: MAUI project $p has no Android target runnable on Linux; verify its platform targets on a compatible host."; continue; fi; echo "MAUI Linux verification: building $p for $tfm"; dotnet build "$p" -f "$tfm"; done; }
 run_web(){ command -v npm >/dev/null || { echo npm not found >&2; exit 127; }; mapfile -t dirs < <(find . -type f -name package.json -not -path '*/node_modules/*' -printf '%h\n'|sort -u); [[ ${#dirs[@]} -eq 0 ]] && { echo "No package.json found"; return; }; for d in "${dirs[@]}"; do (cd "$d"; [[ -f package-lock.json ]] && npm ci || npm install; if jq -e '.scripts.lint' package.json >/dev/null 2>&1; then npm run lint; fi; if jq -e '.scripts.test' package.json >/dev/null 2>&1; then npm test; fi; if jq -e '.scripts.build' package.json >/dev/null 2>&1; then npm run build; fi); done; }
 run_python(){ has_python || { echo "No Python project found"; return; }; if command -v pytest >/dev/null; then pytest; else python3 -m pytest; fi; }
-for p in "${LIST[@]}"; do case "$p" in auto) has_dotnet && run_dotnet; has_web && run_web; has_maui && run_maui; has_python && run_python;; backend) run_dotnet;; web) run_web;; maui) run_maui;; python) run_python;; *) echo "Unsupported profile: $p" >&2; exit 2;; esac; done
+
+for p in "${LIST[@]}"; do
+  case "$p" in
+    auto)
+      if has_dotnet; then run_dotnet; fi
+      if has_web; then run_web; fi
+      if has_maui; then run_maui; fi
+      if has_python; then run_python; fi
+      ;;
+    backend) run_dotnet ;;
+    web) run_web ;;
+    maui) run_maui ;;
+    python) run_python ;;
+    *)
+      echo "Unsupported profile: $p" >&2
+      exit 2
+      ;;
+  esac
+done
