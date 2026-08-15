@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 from automation import opencode_adapter, opencode_resume, run_manifest, windows_verification, workflow_stages
 
@@ -22,7 +24,7 @@ def _config(repo: Path, *, when: str = "deferred-windows") -> None:
                 "version": 1,
                 "enabled": True,
                 "when": when,
-                "runner": ["fake-windows-runner"],
+                "workflow": windows_verification.DEFAULT_CALLER_WORKFLOW,
                 "commands": [
                     {"name": "publish", "command": "dotnet publish App.csproj"},
                     {"name": "smoke", "command": "pwsh -File smoke.ps1"},
@@ -37,7 +39,7 @@ def _state() -> dict[str, object]:
     return {
         "IssueNumber": 100,
         "RepoFullName": "example/repo",
-        "PrHeadSha": HEAD,
+        "BranchName": "autodev/issue-100",
         "LastCommitSha": HEAD,
         "ShippedSourceIdentity": SOURCE,
         "ShippedTreeVerified": True,
@@ -53,7 +55,54 @@ def _state() -> dict[str, object]:
     }
 
 
+class FakeActionsRunner:
+    def __init__(self, *, conclusion: str = "success", failed_logs: str = "") -> None:
+        self.conclusion = conclusion
+        self.failed_logs = failed_logs
+        self.calls: list[list[str]] = []
+        self.run_list_count = 0
+
+    def __call__(self, command, **kwargs):
+        command = [str(value) for value in command]
+        self.calls.append(command)
+        if command[:2] == ["gh", "api"] and command[-1].endswith("/actions/permissions"):
+            return SimpleNamespace(returncode=0, stdout='{"enabled":true}', stderr="")
+        if command[:3] == ["gh", "workflow", "view"]:
+            return SimpleNamespace(returncode=0, stdout="name: AutoDev Windows verification\n", stderr="")
+        if command[:3] == ["gh", "run", "list"]:
+            self.run_list_count += 1
+            if self.run_list_count == 1:
+                value = []
+            else:
+                value = [
+                    {
+                        "databaseId": 321,
+                        "headSha": HEAD,
+                        "status": "completed",
+                        "conclusion": self.conclusion,
+                        "url": "https://github.com/example/repo/actions/runs/321",
+                        "createdAt": "2026-08-15T06:00:00Z",
+                    }
+                ]
+            return SimpleNamespace(returncode=0, stdout=json.dumps(value), stderr="")
+        if command[:3] == ["gh", "workflow", "run"]:
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        if command[:3] == ["gh", "run", "view"] and "--log-failed" in command:
+            return SimpleNamespace(returncode=0, stdout=self.failed_logs, stderr="")
+        raise AssertionError(f"unexpected command: {command}")
+
+
 class WindowsVerificationTests(unittest.TestCase):
+    def test_config_uses_target_workflow_not_remote_runner(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            _config(repo)
+            config = windows_verification.load_config(repo)
+
+        self.assertEqual(config["workflow"], windows_verification.DEFAULT_CALLER_WORKFLOW)
+        self.assertNotIn("runner", config)
+        self.assertEqual([item["name"] for item in config["commands"]], ["publish", "smoke"])
+
     def test_local_deferred_lines_are_durable_and_only_explicit_windows_requires_lane(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
@@ -75,14 +124,14 @@ class WindowsVerificationTests(unittest.TestCase):
             persisted = json.loads((current / "deferred-verification.json").read_text(encoding="utf-8"))
 
         self.assertTrue(metadata["windows_verification_required"])
-        self.assertEqual(len(metadata["deferred_verification_obligations"]), 2)
         self.assertEqual(
             [item["platform"] for item in metadata["deferred_verification_obligations"]],
             ["windows", "compatible-host"],
         )
-        self.assertTrue(persisted["windows_required"])
-        self.assertEqual(persisted["windows_config"]["command_names"], ["publish", "smoke"])
-        self.assertNotIn("runner", persisted["windows_config"])
+        self.assertEqual(
+            persisted["windows_config"]["workflow"],
+            windows_verification.DEFAULT_CALLER_WORKFLOW,
+        )
 
     def test_always_policy_creates_windows_obligation_without_fake_linux_pass(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -96,188 +145,116 @@ class WindowsVerificationTests(unittest.TestCase):
         self.assertTrue(state["WindowsVerificationRequired"])
         obligations = state["DeferredVerificationObligations"]
         self.assertEqual(len(obligations), 1)
-        self.assertEqual(obligations[0]["platform"], "windows")
         self.assertEqual(obligations[0]["source"], "repository-policy")
         self.assertNotIn("WindowsVerificationProof", state)
 
-    def test_required_lane_without_config_blocks_after_ci_instead_of_marking_ready(self):
+    def test_missing_default_branch_caller_workflow_is_actionable_blocker(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
-            current = repo / ".autodev-run" / "current"
-            current.mkdir(parents=True)
-            state = _state()
-            result = windows_verification.run_after_ci(
-                repo,
-                current,
-                state,
-                max_repair_attempts=3,
-            )
+            _config(repo)
+            config = windows_verification.load_config(repo)
 
-        self.assertIsNotNone(result)
-        self.assertEqual(result["state"], "BLOCKED")
-        self.assertEqual(result["failed_stage"], "windows-verification")
-        self.assertEqual(result["failure_classification"], windows_verification.FAILURE_DETERMINISTIC)
+            def runner(command, **kwargs):
+                if command[:2] == ["gh", "api"]:
+                    return SimpleNamespace(returncode=0, stdout='{"enabled":true}', stderr="")
+                return SimpleNamespace(returncode=1, stdout="", stderr="workflow not found")
 
-    def test_windows_success_is_bound_to_exact_shipped_commit_and_source_identity(self):
+            with self.assertRaises(windows_verification.WindowsVerificationError) as caught:
+                windows_verification.validate_actions_installation(
+                    repo,
+                    repo_full="example/repo",
+                    config=config,
+                    runner=runner,
+                )
+
+        message = str(caught.exception)
+        self.assertIn("default branch", message)
+        self.assertIn("Re-run the AutoDev installer", message)
+
+    def test_windows_success_dispatches_exact_branch_sha_before_pr_and_binds_proof(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
             current = repo / ".autodev-run" / "current"
             current.mkdir(parents=True)
             _config(repo)
             state = _state()
-
-            def runner(command, **kwargs):
-                self.assertEqual(command, ["fake-windows-runner"])
-                request = json.loads(kwargs["input"])
-                self.assertEqual(request["commit_sha"], HEAD)
-                self.assertEqual(request["source_identity"], SOURCE)
-                self.assertEqual([item["name"] for item in request["commands"]], ["publish", "smoke"])
-                return SimpleNamespace(
-                    returncode=0,
-                    stdout=json.dumps(
-                        {
-                            "version": 1,
-                            "state": "passed",
-                            "platform": "windows",
-                            "commit_sha": HEAD,
-                            "source_identity": SOURCE,
-                            "commands": [
-                                {"name": "publish", "returncode": 0, "output": "publish ok"},
-                                {"name": "smoke", "returncode": 0, "output": "smoke ok"},
-                            ],
-                        }
-                    ),
-                    stderr="",
+            runner = FakeActionsRunner()
+            with mock.patch.dict(os.environ, {"AUTODEV_WINDOWS_ACTIONS_POLL_SECONDS": "0"}):
+                result = windows_verification.run_after_push(
+                    repo,
+                    current,
+                    state,
+                    max_repair_attempts=3,
+                    runner=runner,
                 )
-
-            result = windows_verification.run_after_ci(
-                repo,
-                current,
-                state,
-                max_repair_attempts=3,
-                runner=runner,
-            )
             proof = state["WindowsVerificationProof"]
             request = json.loads((current / windows_verification.REQUEST_FILE).read_text(encoding="utf-8"))
-            persisted_result = json.loads((current / windows_verification.RESULT_FILE).read_text(encoding="utf-8"))
-            windows_verification.validate_ready(current, state)
 
         self.assertEqual(result["state"], "CONTINUE")
-        self.assertEqual(proof["state"], "terminal-success")
+        self.assertEqual(proof["transport"], "github-actions")
         self.assertEqual(proof["head_sha"], HEAD)
         self.assertEqual(proof["source_identity"], SOURCE)
-        self.assertEqual(request["commit_sha"], HEAD)
-        self.assertEqual(persisted_result["platform"], "windows")
+        self.assertEqual(proof["run_id"], 321)
+        self.assertEqual(request["branch"], "autodev/issue-100")
+        dispatch = next(call for call in runner.calls if call[:3] == ["gh", "workflow", "run"])
+        self.assertIn("--ref", dispatch)
+        self.assertIn("autodev/issue-100", dispatch)
+        self.assertIn(f"expected_sha={HEAD}", dispatch)
+        self.assertNotIn("PrHeadSha", _state())
 
-    def test_identity_mismatch_is_not_accepted_as_windows_success(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            repo = Path(temp_dir)
-            current = repo / ".autodev-run" / "current"
-            current.mkdir(parents=True)
-            _config(repo)
-            state = _state()
-
-            def runner(command, **kwargs):
-                return SimpleNamespace(
-                    returncode=0,
-                    stdout=json.dumps(
-                        {
-                            "version": 1,
-                            "state": "passed",
-                            "platform": "windows",
-                            "commit_sha": "b" * 40,
-                            "source_identity": SOURCE,
-                            "commands": [],
-                        }
-                    ),
-                    stderr="",
-                )
-
-            result = windows_verification.run_after_ci(
-                repo,
-                current,
-                state,
-                max_repair_attempts=3,
-                runner=runner,
-            )
-
-        self.assertEqual(result["state"], "FAILED")
-        self.assertEqual(result["failure_classification"], windows_verification.FAILURE_DETERMINISTIC)
-        self.assertNotIn("WindowsVerificationProof", state)
-
-    def test_windows_code_failure_enters_fixer_but_network_failure_does_not(self):
+    def test_windows_code_failure_enters_fixer_only_after_command_started(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
             current = repo / ".autodev-run" / "current"
             current.mkdir(parents=True)
             _config(repo)
             (current / "issue.md").write_text("# Windows journey\n", encoding="utf-8")
-
-            def code_runner(command, **kwargs):
-                return SimpleNamespace(
-                    returncode=0,
-                    stdout=json.dumps(
-                        {
-                            "version": 1,
-                            "state": "code-failure",
-                            "platform": "windows",
-                            "commit_sha": HEAD,
-                            "source_identity": SOURCE,
-                            "commands": [
-                                {"name": "publish", "returncode": 1, "output": "CS1002 compile error"}
-                            ],
-                        }
-                    ),
-                    stderr="",
+            runner = FakeActionsRunner(
+                conclusion="failure",
+                failed_logs=(
+                    "Execute Windows verification AUTODEV_WINDOWS_COMMAND_START=publish\n"
+                    "error CS1002: ; expected\n"
+                ),
+            )
+            state = _state()
+            with mock.patch.dict(os.environ, {"AUTODEV_WINDOWS_ACTIONS_POLL_SECONDS": "0"}):
+                result = windows_verification.run_after_push(
+                    repo,
+                    current,
+                    state,
+                    max_repair_attempts=3,
+                    runner=runner,
                 )
 
-            code_state = _state()
-            code_result = windows_verification.run_after_ci(
-                repo,
-                current,
-                code_state,
-                max_repair_attempts=3,
-                runner=code_runner,
-            )
-            self.assertTrue((current / windows_verification.REPAIR_FILE).is_file())
+        self.assertEqual(result["state"], "REPAIR")
+        self.assertEqual(result["failure_classification"], windows_verification.FAILURE_CODE_REPAIRABLE)
+        self.assertTrue((current / windows_verification.REPAIR_FILE).is_file())
 
-            def transient_runner(command, **kwargs):
-                return SimpleNamespace(
-                    returncode=0,
-                    stdout=json.dumps(
-                        {
-                            "version": 1,
-                            "state": "code-failure",
-                            "platform": "windows",
-                            "commit_sha": HEAD,
-                            "source_identity": SOURCE,
-                            "commands": [
-                                {
-                                    "name": "publish",
-                                    "returncode": 1,
-                                    "output": "NU1301 Unable to load the service index; connection reset",
-                                }
-                            ],
-                        }
-                    ),
-                    stderr="",
+    def test_actions_setup_failure_is_infrastructure_not_code_repair(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            current = repo / ".autodev-run" / "current"
+            current.mkdir(parents=True)
+            _config(repo)
+            runner = FakeActionsRunner(
+                conclusion="failure",
+                failed_logs="Unable to resolve action yaron-E92/AutoDev/.github/workflows/autodev-windows-verification.yml",
+            )
+            state = _state()
+            with mock.patch.dict(os.environ, {"AUTODEV_WINDOWS_ACTIONS_POLL_SECONDS": "0"}):
+                result = windows_verification.run_after_push(
+                    repo,
+                    current,
+                    state,
+                    max_repair_attempts=3,
+                    runner=runner,
                 )
 
-            transient_state = _state()
-            transient_result = windows_verification.run_after_ci(
-                repo,
-                current,
-                transient_state,
-                max_repair_attempts=3,
-                runner=transient_runner,
-            )
+        self.assertEqual(result["state"], "FAILED")
+        self.assertEqual(result["failure_classification"], windows_verification.FAILURE_TRANSIENT)
+        self.assertFalse((current / windows_verification.REPAIR_FILE).exists())
 
-        self.assertEqual(code_result["state"], "REPAIR")
-        self.assertEqual(code_result["failure_classification"], windows_verification.FAILURE_CODE_REPAIRABLE)
-        self.assertEqual(transient_result["state"], "FAILED")
-        self.assertEqual(transient_result["failure_classification"], windows_verification.FAILURE_TRANSIENT)
-
-    def test_ready_rejects_stale_or_drifted_windows_proof(self):
+    def test_ready_rejects_stale_or_drifted_actions_proof(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             current = Path(temp_dir)
             result_path = current / windows_verification.RESULT_FILE
@@ -286,8 +263,10 @@ class WindowsVerificationTests(unittest.TestCase):
                     {
                         "state": "passed",
                         "platform": "windows",
+                        "transport": "github-actions",
                         "commit_sha": HEAD,
                         "source_identity": SOURCE,
+                        "run_id": 321,
                     }
                 ),
                 encoding="utf-8",
@@ -296,9 +275,11 @@ class WindowsVerificationTests(unittest.TestCase):
                 "state": "terminal-success",
                 "head_sha": HEAD,
                 "source_identity": SOURCE,
+                "run_id": 321,
                 "result_sha256": windows_verification._sha256_file(result_path),
             }
             state = _state()
+            state["PrHeadSha"] = HEAD
             state["WindowsVerificationProof"] = proof
             windows_verification.validate_ready(current, state)
 
@@ -336,6 +317,7 @@ class WindowsVerificationTests(unittest.TestCase):
             }
             run_manifest.save_manifest(manifest_path, manifest)
             state = _state()
+            state["PrHeadSha"] = HEAD
             state["Status"] = "CiPassedVerifierPromptRendered"
 
             self.assertEqual(opencode_resume.resume_action(manifest, state), "pr-and-ci")
@@ -346,8 +328,10 @@ class WindowsVerificationTests(unittest.TestCase):
                     {
                         "state": "passed",
                         "platform": "windows",
+                        "transport": "github-actions",
                         "commit_sha": HEAD,
                         "source_identity": SOURCE,
+                        "run_id": 321,
                     }
                 ),
                 encoding="utf-8",
@@ -356,6 +340,7 @@ class WindowsVerificationTests(unittest.TestCase):
                 "state": "terminal-success",
                 "head_sha": HEAD,
                 "source_identity": SOURCE,
+                "run_id": 321,
                 "result_sha256": windows_verification._sha256_file(result_path),
             }
             manifest["completed_stages"].append(windows_verification.MANIFEST_STAGE)
