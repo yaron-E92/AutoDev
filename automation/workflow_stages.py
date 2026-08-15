@@ -54,9 +54,9 @@ def _resume_semantic_budget(
 ) -> dict[str, object]:
     """Resume a persisted budget without mistaking inherited defaults for consent.
 
-    OpenCode normally injects MAX_SEMANTIC_REPAIR_ATTEMPTS into every run.  An
+    OpenCode normally injects MAX_SEMANTIC_REPAIR_ATTEMPTS into every run. An
     unchanged inherited value is therefore not evidence that the user raised a
-    previously exhausted adaptive budget.  Persist the value observed when the
+    previously exhausted adaptive budget. Persist the value observed when the
     budget was created and only treat a later strictly larger value as an
     explicit monotonic increase.
     """
@@ -250,14 +250,26 @@ def _execute_stage(
 
     if payload.get("state") == "BLOCKED" and result.get("verdict") == "repair":
         repair_path = current / "verification-repair.md"
-        _core.prepare_semantic_repair_prompt(
-            repo,
-            current,
-            Path(autodev_root).expanduser().resolve()
-            / "promptTemplates"
-            / "semantic-repair.md",
-            repair_path,
-        )
+        if workspace_scope.is_git_worktree(repo):
+            _core.prepare_semantic_repair_prompt(
+                repo,
+                current,
+                Path(autodev_root).expanduser().resolve()
+                / "promptTemplates"
+                / "semantic-repair.md",
+                repair_path,
+            )
+        else:
+            # Non-Git unit-test/fixture repositories intentionally retain their
+            # filesystem fallback. Preserve the actionable final repair brief
+            # without pretending Git-backed semantic evidence was available.
+            repair_brief = str(result.get("repair_brief", "")).strip()
+            _core.write_text(
+                repair_path,
+                "# Semantic repair\n\n"
+                + (repair_brief or "Review the final semantic verification result.")
+                + "\n",
+            )
         state = _core.read_state(current)
         details = _semantic_budget.failure_details(
             result,
