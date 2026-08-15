@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Callable
 
 
+AUTODEV_ROOT = Path(__file__).resolve().parents[1]
 CONFIG_PATH = Path(".autodev") / "windows-verification.json"
 DEFAULT_CALLER_WORKFLOW = "autodev-windows-verification.yml"
 REQUEST_FILE = "windows-verification-request.json"
@@ -127,6 +128,27 @@ def _json_stdout(completed: object, context: str) -> object:
         return json.loads(_stdout(completed) or "null")
     except json.JSONDecodeError as exc:
         raise WindowsVerificationError(f"{context} returned invalid JSON") from exc
+
+
+def _current_autodev_ref(runner: Callable[..., object]) -> str:
+    try:
+        completed = _run(
+            runner,
+            ["git", "rev-parse", "HEAD"],
+            cwd=AUTODEV_ROOT,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise WindowsVerificationError(f"could not resolve the current AutoDev revision: {exc}") from exc
+    if _returncode(completed) != 0:
+        detail = (_stderr(completed) or _stdout(completed) or "git rev-parse failed")[-1200:]
+        raise WindowsVerificationError(f"could not resolve the current AutoDev revision: {detail}")
+    value = _stdout(completed)
+    if len(value) != 40 or any(character not in "0123456789abcdefABCDEF" for character in value):
+        raise WindowsVerificationError(
+            f"current AutoDev revision must be a full 40-character Git SHA, got {value!r}"
+        )
+    return value
 
 
 def parse_deferred_obligations(output: str) -> list[dict[str, str]]:
@@ -485,6 +507,10 @@ def run_after_push(
         raise WindowsVerificationError(
             f"Windows verification refused because PR head {existing_pr_head} differs from pushed commit {head}"
         )
+    try:
+        autodev_ref = _current_autodev_ref(runner)
+    except WindowsVerificationError as exc:
+        return _blocked_failure(repo, current, state, attempt, str(exc))
 
     workflow = str(config.get("workflow", DEFAULT_CALLER_WORKFLOW))
     request = {
@@ -495,6 +521,7 @@ def run_after_push(
         "branch": branch,
         "commit_sha": head,
         "source_identity": source,
+        "autodev_ref": autodev_ref,
         "obligations": [
             item
             for item in state.get("DeferredVerificationObligations", [])
@@ -530,6 +557,8 @@ def run_after_push(
                 f"source_identity={source}",
                 "-f",
                 f"commands_json={commands_json}",
+                "-f",
+                f"autodev_ref={autodev_ref}",
             ],
             cwd=repo,
             timeout=30,
@@ -623,6 +652,7 @@ def run_after_push(
         "workflow": workflow,
         "commit_sha": head,
         "source_identity": source,
+        "autodev_ref": autodev_ref,
         "run_id": run_id,
         "run_url": run_url,
         "conclusion": conclusion,
@@ -643,6 +673,7 @@ def run_after_push(
             "run_url": run_url,
             "head_sha": head,
             "source_identity": source,
+            "autodev_ref": autodev_ref,
             "result_sha256": _sha256_file(result_path),
             "command_names": [
                 str(item.get("name", ""))
