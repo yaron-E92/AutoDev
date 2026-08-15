@@ -28,11 +28,19 @@ class WindowsNuGetSourceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp = Path(temp_dir)
             log = temp / "dotnet.log"
-            fake_dotnet = temp / "dotnet.cmd"
-            fake_dotnet.write_text(
-                "@echo off\r\necho %*>>\"%AUTODEV_TEST_DOTNET_LOG%\"\r\nexit /b 0\r\n",
-                encoding="utf-8",
-            )
+            if os.name == "nt":
+                fake_dotnet = temp / "dotnet.cmd"
+                fake_dotnet.write_text(
+                    "@echo off\r\necho %*>>\"%AUTODEV_TEST_DOTNET_LOG%\"\r\nexit /b 0\r\n",
+                    encoding="utf-8",
+                )
+            else:
+                fake_dotnet = temp / "dotnet"
+                fake_dotnet.write_text(
+                    "#!/usr/bin/env sh\nprintf '%s\\n' \"$*\" >>\"$AUTODEV_TEST_DOTNET_LOG\"\n",
+                    encoding="utf-8",
+                )
+                fake_dotnet.chmod(0o755)
             env = os.environ.copy()
             env["PATH"] = str(temp) + os.pathsep + env.get("PATH", "")
             env["AUTODEV_TEST_DOTNET_LOG"] = str(log)
