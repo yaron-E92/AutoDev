@@ -113,12 +113,42 @@ class WindowsVerificationTests(unittest.TestCase):
         self.assertIn("autodev_ref:", text)
         self.assertIn("runs-on: windows-latest", text)
         self.assertIn("ref: ${{ inputs.autodev_ref }}", text)
-        self.assertIn("Yaref92.Events", text)
-        self.assertIn("secrets.YARE92_NUGET_TOKEN_EXP_17JUN2027", text)
-        self.assertLess(
-            text.index("Configure Yaref92 GitHub Packages when required"),
-            text.index("Execute Windows verification"),
-        )
+        self.assertIn("__AUTODEV_REPOSITORY_SETUP__", text)
+        self.assertNotIn("Yaref92.Events", text)
+
+    def test_config_normalizes_repository_setup_without_secret_values(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            _config(repo)
+            path = repo / windows_verification.CONFIG_PATH
+            value = json.loads(path.read_text(encoding="utf-8"))
+            value["setup"] = {
+                "name": "Configure packages",
+                "command": "pwsh -File .github/scripts/configure-packages.ps1",
+                "secret_env": {"NUGET_TOKEN": "PRIVATE_PACKAGE_TOKEN"},
+            }
+            path.write_text(json.dumps(value), encoding="utf-8")
+            config = windows_verification.load_config(repo)
+            metadata = windows_verification.safe_config_metadata(config)
+
+        self.assertEqual(config["setup"]["secret_env"], {"NUGET_TOKEN": "PRIVATE_PACKAGE_TOKEN"})
+        self.assertEqual(metadata["setup"]["secret_environment_names"], ["NUGET_TOKEN"])
+        self.assertNotIn("PRIVATE_PACKAGE_TOKEN", json.dumps(metadata))
+
+    def test_config_rejects_invalid_repository_setup_secret_mapping(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            _config(repo)
+            path = repo / windows_verification.CONFIG_PATH
+            value = json.loads(path.read_text(encoding="utf-8"))
+            value["setup"] = {
+                "command": "pwsh -File setup.ps1",
+                "secret_env": {"BAD-NAME": "PRIVATE_PACKAGE_TOKEN"},
+            }
+            path.write_text(json.dumps(value), encoding="utf-8")
+
+            with self.assertRaises(windows_verification.WindowsVerificationError):
+                windows_verification.load_config(repo)
 
     def test_local_deferred_lines_are_durable_and_only_explicit_windows_requires_lane(self):
         with tempfile.TemporaryDirectory() as temp_dir:
