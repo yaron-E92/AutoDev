@@ -113,6 +113,12 @@ class WindowsVerificationTests(unittest.TestCase):
         self.assertIn("autodev_ref:", text)
         self.assertIn("runs-on: windows-latest", text)
         self.assertIn("ref: ${{ inputs.autodev_ref }}", text)
+        self.assertIn("Yaref92.Events", text)
+        self.assertIn("secrets.YARE92_NUGET_TOKEN_EXP_17JUN2027", text)
+        self.assertLess(
+            text.index("Configure Yaref92 GitHub Packages when required"),
+            text.index("Execute Windows verification"),
+        )
 
     def test_local_deferred_lines_are_durable_and_only_explicit_windows_requires_lane(self):
         with tempfile.TemporaryDirectory() as temp_dir:
