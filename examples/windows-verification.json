@@ -6,7 +6,7 @@
   "workflow": "autodev-windows-verification.yml",
   "setup": {
     "name": "Configure repository package sources",
-    "command": "pwsh -NoProfile -File .github/scripts/configure-packages.ps1",
+    "command": "& \"$env:GITHUB_WORKSPACE\\autodev-tooling\\windows\\scripts\\configure-nuget-source.ps1\" -SourceUrl 'https://nuget.pkg.github.com/PACKAGE_OWNER/index.json' -SourceName 'private-github' -Username 'PACKAGE_OWNER'",
     "secret_env": {
       "NUGET_TOKEN": "REPOSITORY_PACKAGE_TOKEN"
     }
