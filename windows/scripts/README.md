@@ -49,6 +49,10 @@ The same profile independently configures `reader`, `synthesizer`, `planner`, `i
 
 The Codex Desktop application is optional. A complete run can execute headlessly through PowerShell and Python.
 
+## Windows verification package sources
+
+`configure-nuget-source.ps1` provides the package-agnostic authenticated NuGet setup used by repository-configured Windows verification. It receives source metadata as parameters and the mapped repository credential through `NUGET_TOKEN`; it contains no package owner, feed URL, or target-repository secret name. The generated Windows workflow invokes it from the exact AutoDev checkout, so target repositories do not install or commit a copy.
+
 ## Legacy compatibility
 
 Existing `-PlannerProvider`, `-PlannerModel`, `-AgentProvider`, `-AgentModel`, `-PlannerAgentCommand`, and `-AgentCommand` parameters remain accepted. PowerShell forwards them to Python rather than validating provider names itself. Supplying only a legacy model still uses Ollama compatibility in Python.

@@ -51,7 +51,12 @@ class OpenCodeInstallerTests(unittest.TestCase):
                         "commands": [{"name": "test", "command": "dotnet test App.Tests.csproj"}],
                         "setup": {
                             "name": "Configure private packages",
-                            "command": "pwsh -NoProfile -File .github/scripts/configure-packages.ps1",
+                            "command": (
+                                '& "$env:GITHUB_WORKSPACE\\autodev-tooling\\windows\\scripts\\'
+                                "configure-nuget-source.ps1\" -SourceUrl "
+                                "'https://packages.example.test/index.json' -SourceName 'private-feed' "
+                                "-Username 'package-user'"
+                            ),
                             "secret_env": {"NUGET_TOKEN": "REPOSITORY_PACKAGE_TOKEN"},
                         },
                     }
@@ -66,7 +71,8 @@ class OpenCodeInstallerTests(unittest.TestCase):
         self.assertIn("working-directory: target", workflow)
         self.assertIn("NUGET_TOKEN: ${{ secrets.REPOSITORY_PACKAGE_TOKEN }}", workflow)
         self.assertIn("Required Actions secret REPOSITORY_PACKAGE_TOKEN is unavailable", workflow)
-        self.assertIn("pwsh -NoProfile -File .github/scripts/configure-packages.ps1", workflow)
+        self.assertIn("autodev-tooling\\windows\\scripts\\configure-nuget-source.ps1", workflow)
+        self.assertIn("-SourceName 'private-feed'", workflow)
         self.assertLess(workflow.index("Configure private packages"), workflow.index("Execute Windows verification"))
 
     def test_deprecated_adapter_install_delegates_to_complete_canonical_installer(self):
