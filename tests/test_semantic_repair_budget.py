@@ -99,6 +99,7 @@ class SemanticRepairBudgetTests(unittest.TestCase):
                 )
 
             state = workflow_stages.read_state(current)
+            repair_exists = (current / "verification-repair.md").is_file()
 
         self.assertEqual(payload["state"], "BLOCKED")
         self.assertEqual(
@@ -127,7 +128,7 @@ class SemanticRepairBudgetTests(unittest.TestCase):
             state["LastSemanticFailureDetails"]["failure_fingerprint"],
             payload["failure_fingerprint"],
         )
-        self.assertTrue((current / "verification-repair.md").is_file())
+        self.assertTrue(repair_exists)
 
     def test_failure_fingerprint_is_stable_for_same_result_and_source(self):
         result = json.loads(_semantic_result())
@@ -220,6 +221,7 @@ class SemanticRepairBudgetTests(unittest.TestCase):
                 "policy": "fixed",
                 "formula_version": 1,
                 "configured_limit": 2,
+                "fixed_limit_observed": 2,
                 "effective_limit": 2,
                 "attempts_consumed": 2,
                 "inputs": {},
@@ -249,6 +251,47 @@ class SemanticRepairBudgetTests(unittest.TestCase):
         self.assertEqual(raised["effective_limit"], 5)
         self.assertEqual(raised["manual_limit_increase"], 5)
 
+    def test_unchanged_bridge_default_does_not_reopen_adaptive_budget(self):
+        state = {
+            "SemanticRepairBudget": {
+                "policy": "adaptive",
+                "formula_version": 1,
+                "base_attempts": 1,
+                "min_attempts": 1,
+                "max_attempts": 5,
+                "lines_per_attempt": 200,
+                "raw_attempts": 1,
+                "fixed_limit_observed": 2,
+                "effective_limit": 1,
+                "attempts_consumed": 1,
+                "inputs": {"weighted_changed_lines": 0},
+            }
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            with patch.dict(
+                os.environ,
+                {semantic_repair_budget.FIXED_LIMIT_ENV: "2"},
+                clear=False,
+            ):
+                unchanged = semantic_repair_budget.resolve_budget(
+                    repo, state, attempt=1, fixed_default=2
+                )
+            state["SemanticRepairBudget"] = unchanged
+            with patch.dict(
+                os.environ,
+                {semantic_repair_budget.FIXED_LIMIT_ENV: "4"},
+                clear=False,
+            ):
+                raised = semantic_repair_budget.resolve_budget(
+                    repo, state, attempt=1, fixed_default=2
+                )
+
+        self.assertEqual(unchanged["effective_limit"], 1)
+        self.assertNotIn("manual_limit_increase", unchanged)
+        self.assertEqual(raised["effective_limit"], 4)
+        self.assertEqual(raised["manual_limit_increase"], 4)
+
     def test_raising_blocked_budget_reopens_existing_run_at_semantic_fixer_boundary(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
@@ -264,6 +307,7 @@ class SemanticRepairBudgetTests(unittest.TestCase):
                     "policy": "fixed",
                     "formula_version": 1,
                     "configured_limit": 2,
+                    "fixed_limit_observed": 2,
                     "effective_limit": 2,
                     "attempts_consumed": 2,
                     "inputs": {},
