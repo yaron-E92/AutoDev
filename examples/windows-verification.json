@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "enabled": true,
+  "when": "deferred-windows",
+  "timeout_seconds": 3600,
+  "runner": [
+    "ssh",
+    "windows-builder",
+    "pwsh",
+    "-NoProfile",
+    "-File",
+    "C:\\AutoDev\\windows\\scripts\\windows-verification-worker.ps1"
+  ],
+  "commands": [
+    {
+      "name": "windows-publish",
+      "command": "dotnet publish MyApp.csproj -c Release -f net10.0-windows10.0.19041.0"
+    },
+    {
+      "name": "windows-smoke",
+      "command": "pwsh -NoProfile -File scripts/windows-smoke.ps1"
+    }
+  ]
+}
