@@ -52,6 +52,34 @@ jobs:
           path: autodev-tooling
           persist-credentials: false
 
+      - name: Configure Yaref92 GitHub Packages when required
+        shell: pwsh
+        env:
+          YAREF92_NUGET_TOKEN: ${{ secrets.YARE92_NUGET_TOKEN_EXP_17JUN2027 }}
+        run: |
+          $packageFiles = Get-ChildItem "$env:GITHUB_WORKSPACE\target" -Recurse -File `
+            -Include *.csproj,*.props,*.targets,packages.lock.json
+          $usesYaref92Events = $packageFiles |
+            Select-String -SimpleMatch "Yaref92.Events" |
+            Select-Object -First 1
+
+          if ($null -eq $usesYaref92Events) {
+            Write-Host "Yaref92.Events is not referenced; skipping authenticated GitHub Packages setup."
+            exit 0
+          }
+
+          if ([string]::IsNullOrWhiteSpace($env:YAREF92_NUGET_TOKEN)) {
+            throw "The target references Yaref92.Events, but Actions secret YARE92_NUGET_TOKEN_EXP_17JUN2027 is unavailable."
+          }
+
+          dotnet nuget add source https://nuget.pkg.github.com/yaron-E92/index.json `
+            --name yaref92-github `
+            --username Yaron-E92 `
+            --password "$env:YAREF92_NUGET_TOKEN" `
+            --store-password-in-clear-text
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to configure the authenticated Yaref92 GitHub Packages source."
+          }
       - name: Execute Windows verification
         shell: pwsh
         env:
