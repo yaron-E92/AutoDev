@@ -15,7 +15,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 class OpenCodeInstallerTests(unittest.TestCase):
     def test_canonical_installer_copies_stable_windows_workflow_without_autodev_sha(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            target = Path(temp_dir)
+            target = Path(temp_dir).resolve()
             installed = opencode_install.install_assets(
                 target,
                 REPO_ROOT,
@@ -38,7 +38,7 @@ class OpenCodeInstallerTests(unittest.TestCase):
 
     def test_deprecated_adapter_install_delegates_to_complete_canonical_installer(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            target = Path(temp_dir)
+            target = Path(temp_dir).resolve()
             stderr = io.StringIO()
             stdout = io.StringIO()
             with redirect_stderr(stderr), redirect_stdout(stdout):
