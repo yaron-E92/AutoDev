@@ -65,6 +65,8 @@ def _save_ledger(repo: Path, value: dict[str, object]) -> None:
 
 
 def _policy_fingerprint(policy: privacy.PrivacyPolicy, decision: privacy.PrivacyDecision) -> str:
+    # Keep this independent of mutable consent outcome/enforcement fields. The identity describes
+    # the evaluated policy evidence that existed immediately before consent was requested.
     source = {
         "profile": policy.profile,
         "consent_mode": policy.consent_mode,
@@ -73,7 +75,6 @@ def _policy_fingerprint(policy: privacy.PrivacyPolicy, decision: privacy.Privacy
         "training": decision.training,
         "retention": decision.retention,
         "retention_duration": decision.retention_duration,
-        "enforcement_state": decision.enforcement_state,
         "controls": sorted(decision.controls),
         "attestations": sorted(decision.attestations),
         "provider_attestations": policy.provider_attestations,
@@ -99,12 +100,10 @@ def consent_identity(
         "policy_fingerprint": policy_fingerprint,
         "reason": decision.reason,
     }
-    return (
-        hashlib.sha256(
-            json.dumps(source, sort_keys=True, separators=(",", ":")).encode("utf-8")
-        ).hexdigest(),
-        policy_fingerprint,
-    )
+    identity = hashlib.sha256(
+        json.dumps(source, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return identity, policy_fingerprint
 
 
 def _approval_record(
@@ -169,8 +168,11 @@ def _persist_approval(
             "approvals": [],
         }
     record = _approval_record(repo, policy, decision, mode=mode)
-    approvals = _approvals(ledger)
-    approvals = [item for item in approvals if str(item.get("identity", "")) != record["identity"]]
+    approvals = [
+        item
+        for item in _approvals(ledger)
+        if str(item.get("identity", "")) != str(record["identity"])
+    ]
     approvals.append(record)
     ledger["approvals"] = approvals
     _save_ledger(repo, ledger)
@@ -236,7 +238,9 @@ def _known_consent_requirements(
 
 
 def _all_covered_by_environment(decisions: list[privacy.PrivacyDecision]) -> bool:
-    return bool(decisions) and all(privacy._consent_env(item.role, item.route) for item in decisions)
+    return bool(decisions) and all(
+        privacy._consent_env(item.role, item.route) for item in decisions
+    )
 
 
 def _persist_environment_approvals(
@@ -244,16 +248,19 @@ def _persist_environment_approvals(
     policy: privacy.PrivacyPolicy,
     decisions: list[privacy.PrivacyDecision],
 ) -> None:
-    ledger = {
-        "schema_version": LEDGER_VERSION,
-        "run_id": _run_id(repo),
-        "interaction_mode": "noninteractive-exact",
-        "created_at": _now(),
-        "approvals": [
-            _approval_record(repo, policy, item, mode="environment") for item in decisions
-        ],
-    }
-    _save_ledger(repo, ledger)
+    _save_ledger(
+        repo,
+        {
+            "schema_version": LEDGER_VERSION,
+            "run_id": _run_id(repo),
+            "interaction_mode": "noninteractive-exact",
+            "created_at": _now(),
+            "approvals": [
+                _approval_record(repo, policy, item, mode="environment")
+                for item in decisions
+            ],
+        },
+    )
 
 
 def ensure_run_consent(
@@ -346,7 +353,8 @@ def ensure_run_consent(
                 "interaction_mode": "batch",
                 "created_at": _now(),
                 "approvals": [
-                    _approval_record(repo, policy, item, mode="batch") for item in required
+                    _approval_record(repo, policy, item, mode="batch")
+                    for item in required
                 ],
             },
         )
@@ -374,7 +382,9 @@ def ensure_run_consent(
             "approvals": [],
         },
     )
-    raise privacy.PrivacyError("privacy consent denied; AutoDev stopped before sending repository/run content")
+    raise privacy.PrivacyError(
+        "privacy consent denied; AutoDev stopped before sending repository/run content"
+    )
 
 
 def _install_consent_gate() -> None:
@@ -401,10 +411,14 @@ def _install_consent_gate() -> None:
             privacy._audit(repo, decision)
             return decision
 
+        environment_approved = privacy._consent_env(decision.role, decision.route)
         result = original(repo, policy, decision, consent_reader)
-        if result.outcome == "ALLOW" and result.enforcement_state == "user-consented" and _run_id(repo):
-            ledger = _load_ledger(repo)
-            mode = "per-call" if str(ledger.get("interaction_mode", "")) == "per-call" else "environment"
+        if (
+            result.outcome == "ALLOW"
+            and result.enforcement_state == "user-consented"
+            and _run_id(repo)
+        ):
+            mode = "environment" if environment_approved else "per-call"
             _persist_approval(repo, policy, result, mode=mode)
         return result
 
@@ -445,7 +459,9 @@ def _install_preflight_hook() -> None:
     ) -> None:
         try:
             executable = opencode_coordinator.opencode_cli.resolve_opencode_cli(which=which)
-            mappings = opencode_adapter.resolve_opencode_model_mappings(repo, runner=runner, which=which)
+            mappings = opencode_adapter.resolve_opencode_model_mappings(
+                repo, runner=runner, which=which
+            )
             ensure_run_consent(
                 repo,
                 mappings,
