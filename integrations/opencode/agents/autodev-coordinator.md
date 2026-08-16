@@ -52,6 +52,7 @@ Treat returned JSON `state` and `failure_classification` as authoritative:
 
 - `CONTINUE`: advance only to the stated next step.
 - `REPAIR`: delegate only when `failure_classification` is `code-repairable`; use the named repair artifact and rerun the required verification boundary.
+- `WAITING`: finish `WAITING` immediately with the bridge-provided reason, PR/head/checkpoint identity, and recommended next action. Do not mark the run blocked or failed, invoke a fixer, consume a repair attempt, create a failure fingerprint, or retry the unchanged external wait in the same command.
 - `BLOCKED`: run `python .opencode/autodev.py stage --name blocked --reason "<reason>"`, then finish `BLOCKED`.
 - `FAILED`: do not retry the same deterministic stage unchanged. Run `python .opencode/autodev.py stage --name failed --reason "<reason>"`, then finish `FAILED`. The terminal failed bridge preserves the originating issue/stage/classification/reason/fingerprint; do not replace those values with a generic coordinator failure.
 - `PR_READY`: finish `PR_READY`.
@@ -139,6 +140,7 @@ Never reset a returned repair counter to zero on resume. The `= 0` initializatio
    - Run `python .opencode/autodev.py stage --name pr-and-ci --attempt <ciRepairAttempt>`.
    - The shared AutoDev Python stage boundary owns commit creation, branch ref updates/push-equivalent behavior, PR creation/reuse, required-check waiting, and CI repair artifact generation. Never reproduce those operations yourself.
    - On `REPAIR` with `failure_classification=code-repairable`, Task `autodev-fixer` with this bounded instruction: use the installer-selected launcher from `.opencode/autodev.json`; run the fixer prepare command for `ci`, follow `.autodev-run/current/fixer.md`, apply only that CI repair, then run the fixer accept command. Run the role-check operation for fixer; only on `ACCEPTED` increment `ciRepairAttempt`, run a fresh deterministic verification cycle, run a fresh semantic verification cycle, then retry `pr-and-ci`.
+   - On `WAITING`, finish `WAITING` immediately with the bridge-provided pending-check reason, PR URL, exact head SHA, current checkpoint/poll evidence, and recommended resume action. Do not invoke a fixer, increment `ciRepairAttempt`, mark blocked/failed, or retry `pr-and-ci` unchanged.
    - On `BLOCKED`, mark blocked and finish `BLOCKED`.
    - On `FAILED`, including base/ref/tree/setup failures, mark failed immediately and finish `FAILED`; do not retry `pr-and-ci` unchanged and do not invoke a fixer.
    - On `CONTINUE`, proceed.
@@ -148,4 +150,4 @@ Never reset a returned repair counter to zero on resume. The `= 0` initializatio
    - Only finish `PR_READY` when its JSON state is `PR_READY`.
    - Never merge, approve, bypass required checks, or push directly to `main`.
 
-Final response must be compact. For `PR_READY`, include the issue number and PR URL from the final bridge JSON. For `BLOCKED` or `FAILED`, include the bridge-provided issue number, branch, completed stage, failed stage, failure classification, concise reason, artifact directory, repository-modified flag, commit-exists flag, PR-exists flag/URL, and exact recommended next action. Do not include role transcripts or hidden reasoning.
+Final response must be compact. For `PR_READY`, include the issue number and PR URL from the final bridge JSON. For `WAITING`, include the issue number, PR URL, exact PR head SHA, what external condition is still pending, current poll/checkpoint evidence, and the exact recommended resume action; do not describe it as a failed implementation. For `BLOCKED` or `FAILED`, include the bridge-provided issue number, branch, completed stage, failed stage, failure classification, concise reason, artifact directory, repository-modified flag, commit-exists flag, PR-exists flag/URL, and exact recommended next action. Do not include role transcripts or hidden reasoning.
