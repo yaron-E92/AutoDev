@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import os
@@ -65,8 +66,8 @@ def _save_ledger(repo: Path, value: dict[str, object]) -> None:
 
 
 def _policy_fingerprint(policy: privacy.PrivacyPolicy, decision: privacy.PrivacyDecision) -> str:
-    # Keep this independent of mutable consent outcome/enforcement fields. The identity describes
-    # the evaluated policy evidence that existed immediately before consent was requested.
+    # This is evaluated before consent mutates the decision to user-consented. In particular,
+    # request-verified vs unverified is execution-affecting privacy evidence and must invalidate consent.
     source = {
         "profile": policy.profile,
         "consent_mode": policy.consent_mode,
@@ -75,6 +76,7 @@ def _policy_fingerprint(policy: privacy.PrivacyPolicy, decision: privacy.Privacy
         "training": decision.training,
         "retention": decision.retention,
         "retention_duration": decision.retention_duration,
+        "enforcement_state": decision.enforcement_state,
         "controls": sorted(decision.controls),
         "attestations": sorted(decision.attestations),
         "provider_attestations": policy.provider_attestations,
@@ -127,6 +129,7 @@ def _approval_record(
         "retention_duration": decision.retention_duration,
         "policy_source": decision.policy_source,
         "policy_checked_at": privacy.POLICY_REVIEWED_AT,
+        "enforcement_state": decision.enforcement_state,
         "reason": decision.reason,
         "mode": mode,
         "scope": "this-run",
@@ -154,7 +157,7 @@ def _approved_record(
 def _persist_approval(
     repo: Path,
     policy: privacy.PrivacyPolicy,
-    decision: privacy.PrivacyDecision,
+    preconsent_decision: privacy.PrivacyDecision,
     *,
     mode: str,
 ) -> None:
@@ -167,7 +170,7 @@ def _persist_approval(
             "created_at": _now(),
             "approvals": [],
         }
-    record = _approval_record(repo, policy, decision, mode=mode)
+    record = _approval_record(repo, policy, preconsent_decision, mode=mode)
     approvals = [
         item
         for item in _approvals(ledger)
@@ -411,6 +414,7 @@ def _install_consent_gate() -> None:
             privacy._audit(repo, decision)
             return decision
 
+        preconsent_decision = copy.deepcopy(decision)
         environment_approved = privacy._consent_env(decision.role, decision.route)
         result = original(repo, policy, decision, consent_reader)
         if (
@@ -419,7 +423,7 @@ def _install_consent_gate() -> None:
             and _run_id(repo)
         ):
             mode = "environment" if environment_approved else "per-call"
-            _persist_approval(repo, policy, result, mode=mode)
+            _persist_approval(repo, policy, preconsent_decision, mode=mode)
         return result
 
     consent_or_block._autodev_run_consent = True  # type: ignore[attr-defined]
