@@ -7,6 +7,7 @@ from pathlib import Path
 
 from automation import (
     github_cli_proxy,
+    non_success_report,
     opencode_adapter,
     opencode_coordinator,
     opencode_failure_entrypoint,
@@ -98,6 +99,10 @@ def run(argv: list[str] | None = None) -> int:
         payload["repeated_failure"] = proxy.last_local_payload.get(
             "repeated_failure", False
         )
+
+    payload, report_path = non_success_report.update_report(repo, payload)
+    if report_path:
+        print(f"AutoDev report: {report_path}", flush=True)
     print(json.dumps(payload, sort_keys=True), flush=True)
     return 0 if payload.get("state") in {"PR_READY", "BLOCKED", "WAITING"} else 1
 
