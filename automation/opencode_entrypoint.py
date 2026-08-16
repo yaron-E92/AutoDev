@@ -8,6 +8,7 @@ from automation import (
     opencode_role_entrypoint,
     opencode_runtime,
     pr_head_sync,
+    privacy_consent,
     semantic_repair_budget,
     windows_verification,
 )
@@ -22,6 +23,7 @@ def run(argv: list[str] | None = None) -> int:
     pr_head_sync.install()
     semantic_repair_budget.install_opencode_resume_hooks()
     windows_verification.install_opencode_hooks()
+    privacy_consent.install()
     values = list(sys.argv[1:] if argv is None else argv)
     if values and values[0] == COORDINATE_COMMAND:
         return opencode_github_entrypoint.run(values[1:])
