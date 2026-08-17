@@ -13,6 +13,9 @@ from typing import Callable
 CONFIG_VERSION = 1
 COORDINATE_COMMAND = "coordinate"
 DEFAULT_MAX_SEMANTIC_REPAIR_ATTEMPTS = "2"
+INTERACTIVE_CONSENT_ARG = "--interactive-consent"
+INTERACTIVE_CONSENT_ENV = "AUTODEV_INTERACTIVE_CONSENT"
+INTERACTIVE_CONSENT_VALUE = "controlling-terminal"
 # The guarded entrypoint preserves the established bridge boundaries:
 # runtime execution -> "automation.opencode_runtime"
 # coordinate execution -> module = "automation.opencode_coordinator"
@@ -46,6 +49,17 @@ def _arguments_with_current_issue(arguments: list[str]) -> list[str]:
     updated = list(arguments)
     updated[index + 1] = f"{issue_number} {value}".strip()
     return updated
+
+
+def _consume_interactive_consent_argument(arguments: list[str]) -> tuple[list[str], bool]:
+    interactive = False
+    forwarded: list[str] = []
+    for value in arguments:
+        if value == INTERACTIVE_CONSENT_ARG:
+            interactive = True
+            continue
+        forwarded.append(value)
+    return forwarded, interactive
 
 
 def _github_identity_from_remote(remote_url: str) -> tuple[str, str] | None:
@@ -109,6 +123,7 @@ def _bridge_environment(
     repo: Path,
     *,
     runner: Callable[..., object] = subprocess.run,
+    interactive_consent: bool = False,
 ) -> dict[str, str]:
     env = dict(os.environ)
     old_python_path = env.get("PYTHONPATH", "")
@@ -120,6 +135,10 @@ def _bridge_environment(
     env["AUTODEV_PYTHON"] = python
     env["AUTODEV_TARGET_REPO"] = str(repo.resolve())
     env.setdefault("MAX_SEMANTIC_REPAIR_ATTEMPTS", DEFAULT_MAX_SEMANTIC_REPAIR_ATTEMPTS)
+    if interactive_consent:
+        env[INTERACTIVE_CONSENT_ENV] = INTERACTIVE_CONSENT_VALUE
+    else:
+        env.pop(INTERACTIVE_CONSENT_ENV, None)
     _resolve_github_environment(env, repo, runner=runner)
     if (
         os.name != "nt"
@@ -166,11 +185,17 @@ def main() -> int:
         return 1
 
     repo = Path.cwd()
-    arguments = _arguments_with_current_issue(sys.argv[1:])
+    raw_arguments, interactive_consent = _consume_interactive_consent_argument(sys.argv[1:])
+    arguments = _arguments_with_current_issue(raw_arguments)
     completed = subprocess.run(
         [python, "-m", "automation.opencode_entrypoint", *arguments],
         cwd=repo,
-        env=_bridge_environment(python, autodev_root, repo),
+        env=_bridge_environment(
+            python,
+            autodev_root,
+            repo,
+            interactive_consent=interactive_consent,
+        ),
         check=False,
     )
     return completed.returncode

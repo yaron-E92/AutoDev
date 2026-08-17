@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -15,11 +16,140 @@ from automation import opencode_adapter, opencode_coordinator, opencode_resume, 
 LEDGER_NAME = "privacy-consent.json"
 LEDGER_VERSION = 1
 ROLE_NAMES = ("reader", "synthesizer", "planner", "implementer", "fixer", "verifier")
+INTERACTIVE_CONSENT_ENV = "AUTODEV_INTERACTIVE_CONSENT"
+INTERACTIVE_CONSENT_VALUE = "controlling-terminal"
 _PREVIEW_DEPTH = 0
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _controlling_terminal_opt_in() -> bool:
+    return (
+        os.environ.get(INTERACTIVE_CONSENT_ENV, "").strip().casefold()
+        == INTERACTIVE_CONSENT_VALUE
+    )
+
+
+def _stream_encoding(stream) -> str:
+    return str(getattr(stream, "encoding", "") or "utf-8")
+
+
+@contextmanager
+def _controlling_terminal():
+    """Open the user's controlling terminal only for an explicitly interactive bridge run.
+
+    OpenCode command interpolation captures normal stdio. The bridge sets
+    AUTODEV_INTERACTIVE_CONSENT only for installed interactive slash commands, allowing
+    this narrow fallback without turning arbitrary piped/background runs interactive.
+    """
+    if not _controlling_terminal_opt_in():
+        yield None
+        return
+
+    handles: list[object] = []
+    try:
+        if os.name == "nt":
+            reader = open(
+                "CONIN$",
+                "r",
+                encoding=_stream_encoding(sys.stdin),
+                errors="replace",
+            )
+            writer = open(
+                "CONOUT$",
+                "w",
+                encoding=_stream_encoding(sys.stdout),
+                errors="replace",
+                buffering=1,
+            )
+            handles.extend((reader, writer))
+        else:
+            handle = open(
+                "/dev/tty",
+                "r+",
+                encoding=_stream_encoding(sys.stdin),
+                errors="replace",
+                buffering=1,
+            )
+            reader = writer = handle
+            handles.append(handle)
+        if not reader.isatty() or not writer.isatty():
+            raise OSError("controlling console is not a TTY")
+    except (OSError, ValueError):
+        for handle in reversed(handles):
+            try:
+                handle.close()  # type: ignore[attr-defined]
+            except OSError:
+                pass
+        yield None
+        return
+
+    try:
+        yield reader, writer
+    finally:
+        seen: set[int] = set()
+        for handle in reversed(handles):
+            if id(handle) in seen:
+                continue
+            seen.add(id(handle))
+            try:
+                handle.close()  # type: ignore[attr-defined]
+            except OSError:
+                pass
+
+
+def _write_run_consent_table(output, required: list[privacy.PrivacyDecision]) -> None:
+    print(
+        f"{len(required)} role route{'s' if len(required) != 1 else ''} require explicit privacy consent for this run:\n",
+        file=output,
+        flush=True,
+    )
+    print(
+        f"{'Role':<13} {'Provider':<18} {'Route/model':<34} {'Training':<10} Retention",
+        file=output,
+        flush=True,
+    )
+    for decision in required:
+        print(_display_row(decision), file=output, flush=True)
+        print(
+            "  "
+            + f"scope={decision.route_scope}; policy={decision.policy_source or 'unknown'}; "
+            + f"checked={privacy.POLICY_REVIEWED_AT}; reason={decision.reason}",
+            file=output,
+            flush=True,
+        )
+
+
+def _read_run_choice_from_controlling_terminal(
+    required: list[privacy.PrivacyDecision],
+) -> str | None:
+    with _controlling_terminal() as console:
+        if console is None:
+            return None
+        reader, writer = console
+        _write_run_consent_table(writer, required)
+        writer.write(
+            "\nChoose [A] approve every exact combination above for this run, "
+            "[R] review each call individually, or [N] deny and abort: "
+        )
+        writer.flush()
+        answer = reader.readline()
+        if answer == "":
+            return None
+        return str(answer).strip().casefold()
+
+
+def _read_call_consent_from_controlling_terminal(prompt: str) -> str:
+    with _controlling_terminal() as console:
+        if console is None:
+            return ""
+        reader, writer = console
+        writer.write(prompt)
+        writer.flush()
+        answer = reader.readline()
+        return str(answer or "").strip()
 
 
 def _ledger_path(repo: Path) -> Path:
@@ -316,36 +446,23 @@ def ensure_run_consent(
         _persist_environment_approvals(repo, policy, required)
         return
 
-    if sys.stdin is None or not sys.stdin.isatty():
-        raise privacy.PrivacyError(
-            "privacy consent is required for one or more AutoDev role routes, but the run is non-interactive; "
-            "provide exact role=route entries through AUTODEV_PRIVACY_CONSENT or run interactively"
-        )
-
-    print(
-        f"{len(required)} role route{'s' if len(required) != 1 else ''} require explicit privacy consent for this run:\n",
-        flush=True,
-    )
-    print(
-        f"{'Role':<13} {'Provider':<18} {'Route/model':<34} {'Training':<10} Retention",
-        flush=True,
-    )
-    for decision in required:
-        print(_display_row(decision), flush=True)
-        print(
-            "  "
-            + f"scope={decision.route_scope}; policy={decision.policy_source or 'unknown'}; "
-            + f"checked={privacy.POLICY_REVIEWED_AT}; reason={decision.reason}",
-            flush=True,
-        )
-
-    answer = str(
-        input(
-            "\nChoose [A] approve every exact combination above for this run, "
-            "[R] review each call individually, or [N] deny and abort: "
-        )
-        or ""
-    ).strip().casefold()
+    if sys.stdin is not None and sys.stdin.isatty():
+        _write_run_consent_table(sys.stdout, required)
+        answer = str(
+            input(
+                "\nChoose [A] approve every exact combination above for this run, "
+                "[R] review each call individually, or [N] deny and abort: "
+            )
+            or ""
+        ).strip().casefold()
+    else:
+        answer = _read_run_choice_from_controlling_terminal(required)
+        if answer is None:
+            raise privacy.PrivacyError(
+                "privacy consent is required for one or more AutoDev role routes, but no interactive "
+                "terminal is available; provide exact role=route entries through "
+                "AUTODEV_PRIVACY_CONSENT or run interactively"
+            )
 
     if answer in {"a", "approve", "all"}:
         _save_ledger(
@@ -416,6 +533,8 @@ def _install_consent_gate() -> None:
 
         preconsent_decision = copy.deepcopy(decision)
         environment_approved = privacy._consent_env(decision.role, decision.route)
+        if consent_reader is None and _controlling_terminal_opt_in():
+            consent_reader = _read_call_consent_from_controlling_terminal
         result = original(repo, policy, decision, consent_reader)
         if (
             result.outcome == "ALLOW"
