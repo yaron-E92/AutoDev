@@ -39,7 +39,11 @@ class OpenCodeInteractiveConsentTests(unittest.TestCase):
         self.assertEqual(arguments, ["coordinate", "--resume"])
 
     def test_bridge_environment_marks_only_explicit_interactive_consent(self):
-        with patch.dict(os.environ, {}, clear=True):
+        with patch.dict(
+            os.environ,
+            {BRIDGE.INTERACTIVE_CONSENT_ENV: BRIDGE.INTERACTIVE_CONSENT_VALUE},
+            clear=True,
+        ):
             interactive = BRIDGE._bridge_environment(
                 "python3",
                 REPO_ROOT,
