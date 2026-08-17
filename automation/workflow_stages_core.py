@@ -1250,6 +1250,15 @@ def render_legacy_verifier(
             "IssueText": read_text(current / "issue.md") or str(state.get("IssueText", "")),
             "Plan": read_text(current / "plan.md"),
             "Diff": diff,
+            # The shared verifier template uses the presence of these literals to
+            # select its legacy PASS/FAIL contract. Identity substitutions keep
+            # them literal under the collision-safe one-pass renderer.
+            "AcceptanceCriteria": "{{AcceptanceCriteria}}",
+            "SynthesizedHandoff": "{{SynthesizedHandoff}}",
+            "ChangedFiles": "{{ChangedFiles}}",
+            "DeterministicEvidence": "{{DeterministicEvidence}}",
+            "CrossFileRegressionEvidence": "{{CrossFileRegressionEvidence}}",
+            "UncertaintyNotes": "{{UncertaintyNotes}}",
             "LocalCheck": str(state.get("LocalCheck", "")),
             "StackContext": str(state.get("StackContext", "")),
         },
