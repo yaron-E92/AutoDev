@@ -137,6 +137,8 @@ def _bridge_environment(
     env.setdefault("MAX_SEMANTIC_REPAIR_ATTEMPTS", DEFAULT_MAX_SEMANTIC_REPAIR_ATTEMPTS)
     if interactive_consent:
         env[INTERACTIVE_CONSENT_ENV] = INTERACTIVE_CONSENT_VALUE
+    else:
+        env.pop(INTERACTIVE_CONSENT_ENV, None)
     _resolve_github_environment(env, repo, runner=runner)
     if (
         os.name != "nt"
