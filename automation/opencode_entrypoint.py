@@ -10,6 +10,7 @@ from automation import (
     pr_head_sync,
     privacy_consent,
     semantic_repair_budget,
+    windows_semantic_order,
     windows_verification,
 )
 
@@ -23,6 +24,7 @@ def run(argv: list[str] | None = None) -> int:
     pr_head_sync.install()
     semantic_repair_budget.install_opencode_resume_hooks()
     windows_verification.install_opencode_hooks()
+    windows_semantic_order.install()
     privacy_consent.install()
     values = list(sys.argv[1:] if argv is None else argv)
     if values and values[0] == COORDINATE_COMMAND:
