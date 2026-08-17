@@ -16,22 +16,22 @@ Strict rules:
 - Return `NO_CHANGES_REQUIRED` only when the current repository state already satisfies the repair brief.
 
 Original issue:
-{{IssueText}}
+{~{IssueText}~}
 
 Implementation plan:
-{{Plan}}
+{~{Plan}~}
 
 Semantic verifier result:
-{{VerificationFailure}}
+{~{VerificationFailure}~}
 
 Targeted repair brief:
-{{RepairBrief}}
+{~{RepairBrief}~}
 
 Changed files:
-{{ChangedFiles}}
+{~{ChangedFiles}~}
 
 Current diff:
-{{Diff}}
+{~{Diff}~}
 
 Output contract:
 

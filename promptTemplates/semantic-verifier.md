@@ -17,31 +17,31 @@ Strict rules:
 - Never approve or merge a pull request.
 
 Original issue:
-{{IssueText}}
+{~{IssueText}~}
 
 Detectable acceptance criteria:
-{{AcceptanceCriteria}}
+{~{AcceptanceCriteria}~}
 
 Synthesized repository handoff:
-{{SynthesizedHandoff}}
+{~{SynthesizedHandoff}~}
 
 Implementation plan:
-{{Plan}}
+{~{Plan}~}
 
 Changed files:
-{{ChangedFiles}}
+{~{ChangedFiles}~}
 
 Current diff:
-{{Diff}}
+{~{Diff}~}
 
 Deterministic verification evidence:
-{{DeterministicEvidence}}
+{~{DeterministicEvidence}~}
 
 Cross-file regression evidence:
-{{CrossFileRegressionEvidence}}
+{~{CrossFileRegressionEvidence}~}
 
 Relevant uncertainty or skipped-check notes:
-{{UncertaintyNotes}}
+{~{UncertaintyNotes}~}
 
 Output contract:
 

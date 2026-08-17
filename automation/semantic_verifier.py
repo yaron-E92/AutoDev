@@ -71,8 +71,11 @@ SEMANTIC_IGNORED_PARTS = {
     "venv",
     "__pycache__",
 }
-_UNRESOLVED_PLACEHOLDER = re.compile(r"\{\{[A-Za-z][A-Za-z0-9_]*\}\}")
-_LEGACY_ONLY_PLACEHOLDERS = {"{{LocalCheck}}", "{{StackContext}}"}
+_TEMPLATE_PLACEHOLDER = re.compile(
+    r"\{~\{(?P<new>[A-Za-z][A-Za-z0-9_]*)\}~\}"
+    r"|\{\{(?P<legacy>[A-Za-z][A-Za-z0-9_]*)\}\}"
+)
+_LEGACY_ONLY_PLACEHOLDERS = {"LocalCheck", "StackContext"}
 _DECLARATION_PATTERNS = (
     re.compile(r"\b(?:class|interface|record|struct|enum|def|function|func)\s+([A-Za-z_][A-Za-z0-9_]*)"),
     re.compile(
@@ -306,18 +309,7 @@ def build_semantic_prompt(
             or "No additional uncertainty notes were recorded."
         ),
     }
-    rendered = render_template(template, values) if template else default_semantic_template(values)
-    unresolved = sorted(
-        placeholder
-        for placeholder in set(_UNRESOLVED_PLACEHOLDER.findall(rendered))
-        if placeholder not in _LEGACY_ONLY_PLACEHOLDERS
-    )
-    if unresolved:
-        raise SemanticVerifierError(
-            "semantic verifier prompt contains unresolved placeholders: " + ", ".join(unresolved),
-            classification="unresolved_semantic_placeholders",
-        )
-    return rendered
+    return render_template(template, values) if template else default_semantic_template(values)
 
 
 def build_semantic_repair_prompt(
@@ -344,10 +336,23 @@ def build_semantic_repair_prompt(
 
 
 def render_template(template: str, values: dict[str, str]) -> str:
-    rendered = template
-    for key, value in values.items():
-        rendered = rendered.replace("{{" + key + "}}", value)
-    return rendered
+    unresolved: set[str] = set()
+    for match in _TEMPLATE_PLACEHOLDER.finditer(template):
+        key = match.group("new") or match.group("legacy")
+        if key not in values and key not in _LEGACY_ONLY_PLACEHOLDERS:
+            unresolved.add(match.group(0))
+    if unresolved:
+        raise SemanticVerifierError(
+            "semantic verifier prompt contains unresolved placeholders: "
+            + ", ".join(sorted(unresolved)),
+            classification="unresolved_semantic_placeholders",
+        )
+
+    def replacement(match: re.Match[str]) -> str:
+        key = match.group("new") or match.group("legacy")
+        return values.get(key, match.group(0))
+
+    return _TEMPLATE_PLACEHOLDER.sub(replacement, template)
 
 
 def collect_changed_files(repo: Path) -> list[str]:
