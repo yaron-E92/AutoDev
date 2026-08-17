@@ -1,0 +1,107 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    name: Required CI
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  publish:
+    name: Package, attest, and publish
+    needs: ci
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+
+    steps:
+      - name: Check out exact tag commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.11"
+
+      - name: Verify immutable release identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF_TYPE" == "tag" ]] || { echo "Release must be triggered by a tag." >&2; exit 1; }
+          [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]] || {
+            echo "Tag must be a v-prefixed semantic version: $GITHUB_REF_NAME" >&2
+            exit 1
+          }
+          tag_sha="$(git rev-list -n 1 "$GITHUB_REF_NAME")"
+          [[ "$tag_sha" == "$GITHUB_SHA" ]] || {
+            echo "Tag $GITHUB_REF_NAME resolves to $tag_sha, not workflow commit $GITHUB_SHA" >&2
+            exit 1
+          }
+
+      - name: Build deterministic release bundles
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m automation.package_release \
+            --repo . \
+            --out dist \
+            --version "$GITHUB_REF_NAME" \
+            --commit "$GITHUB_SHA"
+          (cd dist && sha256sum -c SHA256SUMS)
+
+      - name: Generate build provenance attestations
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-checksums: dist/SHA256SUMS
+
+      - name: Create release or prove identical idempotent rerun
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            mkdir -p existing-release
+            gh release download "$GITHUB_REF_NAME" \
+              --repo "$GITHUB_REPOSITORY" \
+              --dir existing-release
+            for current in dist/*; do
+              name="$(basename "$current")"
+              previous="existing-release/$name"
+              [[ -f "$previous" ]] || {
+                echo "Existing release is missing expected asset $name; refusing to replace it." >&2
+                exit 1
+              }
+              cmp --silent "$current" "$previous" || {
+                echo "Existing release asset $name differs from the deterministic artifact for $GITHUB_SHA; refusing replacement." >&2
+                exit 1
+              }
+            done
+            echo "Release $GITHUB_REF_NAME already contains byte-identical assets; idempotent rerun complete."
+            exit 0
+          fi
+
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --target "$GITHUB_SHA" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes

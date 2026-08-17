@@ -7,11 +7,71 @@ on:
   pull_request:
     branches:
       - main
+  workflow_call:
 
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  workflow-lint:
+    name: Workflow lint and immutable refs
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.11"
+
+      - name: Install actionlint
+        shell: bash
+        env:
+          ACTIONLINT_VERSION: v1.7.12
+        run: |
+          set -euo pipefail
+          export GOBIN="$RUNNER_TEMP/actionlint-bin"
+          mkdir -p "$GOBIN"
+          go install "github.com/rhysd/actionlint/cmd/actionlint@${ACTIONLINT_VERSION}"
+          "$GOBIN/actionlint" -version
+
+      - name: Lint every workflow
+        shell: bash
+        run: |
+          "$RUNNER_TEMP/actionlint-bin/actionlint" -color
+
+      - name: Reject mutable external action refs
+        run: python -m automation.validate_workflows --repo .
+
+  release-reproducibility:
+    name: Release bundle reproducibility
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.11"
+
+      - name: Build the same release twice
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m automation.package_release --repo . --out "$RUNNER_TEMP/release-a" --version v0.0.0-ci --commit "$GITHUB_SHA"
+          python -m automation.package_release --repo . --out "$RUNNER_TEMP/release-b" --version v0.0.0-ci --commit "$GITHUB_SHA"
+          diff -ru "$RUNNER_TEMP/release-a" "$RUNNER_TEMP/release-b"
+
   python:
     name: Python ${{ matrix.python-version }} / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
@@ -27,10 +87,10 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: ${{ matrix.python-version }}
 
@@ -52,7 +112,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Validate tracked Bash scripts
         shell: bash
@@ -76,7 +136,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Validate tracked PowerShell scripts
         shell: pwsh
@@ -117,7 +177,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Reject tracked generated artifacts and caches
         shell: bash

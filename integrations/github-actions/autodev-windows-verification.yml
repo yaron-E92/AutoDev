@@ -38,14 +38,14 @@ jobs:
           }
 
       - name: Check out exact target commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ inputs.expected_sha }}
           path: target
           persist-credentials: false
 
       - name: Check out exact AutoDev worker
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: yaron-E92/AutoDev
           ref: ${{ inputs.autodev_ref }}
