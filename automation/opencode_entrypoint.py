@@ -4,6 +4,7 @@ import sys
 
 from automation import (
     ci_outcomes,
+    context_optimization,
     opencode_github_entrypoint,
     opencode_role_entrypoint,
     opencode_runtime,
@@ -25,6 +26,7 @@ def run(argv: list[str] | None = None) -> int:
     semantic_repair_budget.install_opencode_resume_hooks()
     windows_verification.install_opencode_hooks()
     windows_semantic_order.install()
+    context_optimization.install()
     privacy_consent.install()
     values = list(sys.argv[1:] if argv is None else argv)
     if values and values[0] == COORDINATE_COMMAND:
