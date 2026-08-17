@@ -43,7 +43,8 @@ jobs:
 
       - name: Lint every workflow
         shell: bash
-        run: "$RUNNER_TEMP/actionlint-bin/actionlint" -color
+        run: |
+          "$RUNNER_TEMP/actionlint-bin/actionlint" -color
 
       - name: Reject mutable external action refs
         run: python -m automation.validate_workflows --repo .
