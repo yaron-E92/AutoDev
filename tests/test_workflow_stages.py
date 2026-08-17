@@ -570,6 +570,52 @@ class WorkflowStageTests(unittest.TestCase):
             self.assertEqual(proof["parent_sha"], "commit-1")
             self.assertTrue(proof["changes"])
 
+    def test_render_legacy_verifier_preserves_semantic_placeholders(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            current = repo / ".autodev-run" / "current"
+            current.mkdir(parents=True)
+            (current / "issue.md").write_text("# Issue\n", encoding="utf-8")
+            (current / "plan.md").write_text("Plan\n", encoding="utf-8")
+            state = {
+                "RepoFullName": "owner/repo",
+                "PrNumber": 7,
+                "LocalCheck": "python -m unittest",
+                "StackContext": "Python",
+            }
+
+            with patch(
+                "automation.workflow_stages_core.gh",
+                return_value=SimpleNamespace(
+                    returncode=0,
+                    stdout="diff --git a/file b/file\n",
+                    stderr="",
+                ),
+            ):
+                workflow_stages.render_legacy_verifier(
+                    repo,
+                    current,
+                    state,
+                    REPO_ROOT,
+                )
+
+            prompt = (current / "verifier.md").read_text(encoding="utf-8")
+            for name in (
+                "AcceptanceCriteria",
+                "SynthesizedHandoff",
+                "ChangedFiles",
+                "DeterministicEvidence",
+                "CrossFileRegressionEvidence",
+                "UncertaintyNotes",
+            ):
+                self.assertIn("{{" + name + "}}", prompt)
+            self.assertNotIn("{{IssueText}}", prompt)
+            self.assertNotIn("{{Plan}}", prompt)
+            self.assertNotIn("{{Diff}}", prompt)
+            self.assertIn("# Issue", prompt)
+            self.assertIn("diff --git a/file b/file", prompt)
+            self.assertIn("python -m unittest", prompt)
+
     def test_pr_and_ci_reuses_existing_pr_and_records_api_commit(self):
         ci_success = self._ci_success("commit-sha")
         with tempfile.TemporaryDirectory() as temp_dir:
