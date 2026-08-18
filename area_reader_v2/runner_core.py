@@ -26,6 +26,16 @@ DEFAULT_READER_NUM_PREDICT = 1800
 DEFAULT_SYNTH_NUM_PREDICT = 2200
 DEFAULT_CODER_NUM_PREDICT = 2200
 MAX_FILE_BYTES = 250000
+PREFERRED_SOLUTION_FILTER_MARKERS = (
+    "no-gui",
+    "nogui",
+    "headless",
+    "backend",
+    "server",
+    "api",
+    "ci",
+    "test",
+)
 
 MARKDOWN_SMOKE_SCRIPT = """mapfile -t markdown_files < <(git ls-files '*.md')
 if ((${#markdown_files[@]} == 0)); then
@@ -45,6 +55,7 @@ INCLUDED_SUFFIXES = {
     ".cs",
     ".csproj",
     ".sln",
+    ".slnf",
     ".xaml",
     ".xml",
     ".json",
@@ -109,6 +120,7 @@ PRIORITY_PATTERNS = (
     ".github/workflows/*.yml",
     ".github/workflows/*.yaml",
     "*.sln",
+    "*.slnf",
     "*.csproj",
     "package.json",
     "package-lock.json",
@@ -136,6 +148,7 @@ AREA_HINTS = {
             "*server*",
             "*api*",
             "*.sln",
+            "*.slnf",
             "*.csproj",
             "Program.cs",
             "Directory.Build.props",
@@ -463,6 +476,7 @@ def detect_repo_facts(repo, files, areas, routing):
     file_path_set = set(file_paths)
 
     solutions = sorted(path for path in file_paths if path.endswith(".sln"))
+    solution_filters = sorted(path for path in file_paths if path.endswith(".slnf"))
     dotnet_projects = sorted(path for path in file_paths if path.endswith(".csproj"))
     workflows = sorted(
         path
@@ -552,6 +566,7 @@ def detect_repo_facts(repo, files, areas, routing):
         "file_count": len(files),
         "area_file_counts": area_file_counts,
         "solutions": solutions,
+        "solution_filters": solution_filters,
         "dotnet_projects": dotnet_projects,
         "csproj_facts": csproj_facts,
         "maui_projects": maui_projects,
@@ -597,6 +612,25 @@ def script_command_for_package(package_info, script_name):
     return [manager, "run", script_name]
 
 
+def preferred_solution_filter(solution_filters):
+    for solution_filter in solution_filters:
+        normalized = solution_filter.casefold()
+        if any(marker in normalized for marker in PREFERRED_SOLUTION_FILTER_MARKERS):
+            return solution_filter
+    return None
+
+
+def dotnet_solution_targets(facts):
+    solution_filters = facts.get("solution_filters", [])
+    preferred_filter = preferred_solution_filter(solution_filters)
+    if preferred_filter:
+        return [preferred_filter]
+    solutions = facts.get("solutions", [])
+    if solutions:
+        return list(solutions)
+    return list(solution_filters)
+
+
 def build_verification_command_groups(facts, areas):
     area_set = set(areas)
     groups = []
@@ -618,7 +652,9 @@ def build_verification_command_groups(facts, areas):
     )
 
     dotnet_commands = []
-    for solution in facts["solutions"]:
+    dotnet_targets = dotnet_solution_targets(facts)
+    preferred_filter = preferred_solution_filter(facts.get("solution_filters", []))
+    for solution in dotnet_targets:
         dotnet_commands.append(command(f"Restore {solution}", ".", ["dotnet", "restore", solution]))
         dotnet_commands.append(
             command(
@@ -634,13 +670,19 @@ def build_verification_command_groups(facts, areas):
                 ["dotnet", "test", solution, "--no-build", "--verbosity", "minimal"],
             )
         )
+    if preferred_filter:
+        dotnet_reason = f"Detected preferred .NET solution filter: {preferred_filter}."
+    elif dotnet_commands:
+        dotnet_reason = "Detected .NET solution files or filters."
+    else:
+        dotnet_reason = "No .NET solution files or filters detected."
     groups.append(
         command_group(
             "dotnet-solution",
-            "Restore, build, and test detected .NET solution files from the repository root.",
+            "Restore, build, and test the preferred .NET solution/filter verification surface from the repository root.",
             dotnet_commands,
             recommended=bool(dotnet_commands and area_set & {"backend", "maui", "tests"}),
-            reason="Detected .NET solution files." if dotnet_commands else "No .NET solution files detected.",
+            reason=dotnet_reason,
         )
     )
 
