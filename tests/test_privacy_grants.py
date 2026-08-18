@@ -288,10 +288,12 @@ class PrivacyGrantTests(unittest.TestCase):
                     duration="7d",
                 )
                 original = privacy._consent_or_block
+
+                def unexpected_gate(*args, **kwargs):
+                    raise AssertionError("underlying consent gate was invoked")
+
                 try:
-                    privacy._consent_or_block = mock.Mock(
-                        side_effect=AssertionError("underlying consent gate was invoked")
-                    )
+                    privacy._consent_or_block = unexpected_gate
                     privacy_grants._install_privacy_gate()
                     result = privacy._consent_or_block(
                         repo, policy, self._decision(), None
