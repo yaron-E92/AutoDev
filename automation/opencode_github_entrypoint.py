@@ -9,9 +9,10 @@ from automation import (
     github_cli_proxy,
     non_success_report,
     opencode_adapter,
-    opencode_coordinator,
     opencode_failure_entrypoint,
-    opencode_resume,
+    role_coordinator as opencode_coordinator,
+    role_resume,
+    role_runtime,
     workflow_stages,
 )
 
@@ -42,6 +43,11 @@ def run(argv: list[str] | None = None) -> int:
     parser.add_argument("--repo", default=".")
     parser.add_argument("--arguments", default="")
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument(
+        "--runtime",
+        default="",
+        help="role runtime override (default: configured runtime, then opencode)",
+    )
     args = parser.parse_args(argv)
     repo = Path(args.repo).expanduser().resolve()
     proxy = opencode_failure_entrypoint.JsonEventProxy(sys.stdout, repo)
@@ -59,13 +65,15 @@ def run(argv: list[str] | None = None) -> int:
                     if args.resume
                     else set()
                 ),
+                runtime_name=args.runtime,
                 runner=diagnostic_runner,
             )
         except (
             opencode_failure_entrypoint.ProviderCapabilityError,
-            opencode_coordinator.OpenCodeCoordinatorError,
+            opencode_coordinator.RoleCoordinatorError,
+            role_runtime.RoleRuntimeError,
+            role_resume.RoleResumeError,
             opencode_adapter.OpenCodeAdapterError,
-            opencode_resume.OpenCodeResumeError,
             workflow_stages.WorkflowStageError,
             OSError,
             ValueError,
@@ -80,6 +88,7 @@ def run(argv: list[str] | None = None) -> int:
                         getattr(exc, "classification", "")
                         or workflow_stages.FAILURE_DETERMINISTIC
                     ),
+                    "artifact": str(getattr(exc, "diagnostic_path", "") or ""),
                 },
                 arguments=args.arguments,
             )
