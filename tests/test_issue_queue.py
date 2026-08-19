@@ -252,24 +252,24 @@ class IssueQueueTests(unittest.TestCase):
             self.assertEqual(summary["dependency_blocked"], 1)
             self.assertEqual(summary["attention_required"], 1)
 
-    def test_explanation_sorts_open_blockers_deterministically(self):
-        issue = issue_queue.QueueIssue(
-            number=50,
-            title="Target",
-            url="u",
-            state="open",
-            labels=(issue_queue.MANAGED_LABEL,),
-        )
-        blockers = [
-            issue_queue.Blocker(1002, 2, "Second", "u2", "open"),
-            issue_queue.Blocker(1001, 1, "First", "u1", "open"),
-        ]
-        state = issue_queue.classify_issue(issue, blockers, issue_queue.QueuePolicy())
+    def test_explanation_uses_deterministically_sorted_authoritative_blockers(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            fake = FakeGitHub()
+            fake.add_issue(50, labels=[issue_queue.MANAGED_LABEL], title="Target")
+            fake.add_issue(2, title="Second")
+            fake.add_issue(1, title="First")
+            fake.set_blockers(50, [2, 1])
 
-        self.assertEqual(
-            issue_queue.explain_state(state),
-            "#50 blocked by: #1 First, #2 Second",
-        )
+            issue = issue_queue.fetch_issue(repo, fake.repo, 50, runner=fake)
+            blockers = issue_queue.list_blockers(repo, fake.repo, 50, runner=fake)
+            state = issue_queue.classify_issue(issue, blockers, issue_queue.QueuePolicy())
+
+            self.assertEqual([item.number for item in blockers], [1, 2])
+            self.assertEqual(
+                issue_queue.explain_state(state),
+                "#50 blocked by: #1 First, #2 Second",
+            )
 
     def test_native_dependency_api_failure_fails_closed_without_prose_inference(self):
         with tempfile.TemporaryDirectory() as temp_dir:
