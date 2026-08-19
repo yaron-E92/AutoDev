@@ -20,6 +20,8 @@ INTERACTIVE_CONSENT_VALUE = "controlling-terminal"
 # compatibility frontend installs shared workflow hooks, then coordinate routes
 # through automation.role_coordinator with OpenCode as the default role runtime.
 # The retired direct route `module = "automation.opencode_coordinator"` is not used.
+# Non-coordinate compatibility commands still reach the hardened
+# "automation.opencode_runtime" path through automation.opencode_entrypoint.
 
 
 def _current_issue_number() -> int:
