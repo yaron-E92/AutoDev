@@ -81,7 +81,6 @@ on:
         default: 'echo "android_restore_command must be configured when android_enabled=true" >&2; exit 2'
       android_build_command:
         description: Android build/publish command; required when android_enabled is true
-        required: false
         type: string
         default: 'echo "android_build_command must be configured when android_enabled=true" >&2; exit 2'
       android_test_command:
@@ -158,6 +157,7 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 jobs:
   headless:
