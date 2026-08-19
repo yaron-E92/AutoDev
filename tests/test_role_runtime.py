@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import call, patch
+from unittest.mock import patch
 
 from automation import (
     opencode_adapter,
@@ -78,7 +78,10 @@ class RoleRuntimeSelectionTests(unittest.TestCase):
             config.write_text(json.dumps({"role_runtime": "repo-runtime"}), encoding="utf-8")
             with patch.dict(os.environ, {role_runtime.RUNTIME_ENV: "env-runtime"}, clear=True):
                 name, source = role_runtime.resolve_runtime_name(repo)
-                self.assertEqual((name, source), ("env-runtime", f"environment:{role_runtime.RUNTIME_ENV}"))
+                self.assertEqual(
+                    (name, source),
+                    ("env-runtime", f"environment:{role_runtime.RUNTIME_ENV}"),
+                )
                 name, source = role_runtime.resolve_runtime_name(repo, "cli-runtime")
                 self.assertEqual((name, source), ("cli-runtime", "explicit"))
 
@@ -129,7 +132,10 @@ class RoleRuntimeSelectionTests(unittest.TestCase):
                 force_manifest=True,
             )
             role_runtime.persist_selection(repo, name="mock", source="explicit")
-            self.assertEqual(role_runtime.selected_runtime_from_manifest(repo), "opencode")
+            self.assertEqual(
+                role_runtime.selected_runtime_from_manifest(repo),
+                "opencode",
+            )
             role_runtime.persist_selection(
                 repo,
                 name="mock",
@@ -185,19 +191,29 @@ class RoleRuntimeSelectionTests(unittest.TestCase):
                     path,
                     {"reader": mock_snapshot},
                 )
-            result = run_manifest.reconcile_role_snapshots(
+
+            run_manifest.reconcile_role_snapshots(
                 path,
                 {"reader": mock_snapshot},
                 explicit_invalidations={"reader"},
             )
-            self.assertIn("repository-read", result["reader"])
+            manifest = run_manifest.load_manifest(path)
+            self.assertNotIn("repository-read", manifest["completed_stages"])
+            self.assertEqual(
+                manifest["roles"]["reader"]["fingerprint"],
+                mock_snapshot["fingerprint"],
+            )
 
 
 class OpenCodeRoleRuntimeTests(unittest.TestCase):
     def test_opencode_runtime_preserves_agent_command_and_model_mapping(self):
         runtime = opencode_role_runtime.OpenCodeRoleRuntime()
         calls = []
-        completed = SimpleNamespace(returncode=0, stdout='{"type":"text"}\n', stderr="")
+        completed = SimpleNamespace(
+            returncode=0,
+            stdout='{"type":"text"}\n',
+            stderr="",
+        )
 
         def runner(command, **kwargs):
             calls.append((command, kwargs))
@@ -231,7 +247,10 @@ class OpenCodeRoleRuntimeTests(unittest.TestCase):
             result = runtime.invoke(context, runner=runner)
 
         command, kwargs = calls[0]
-        self.assertEqual(command[:4], ["/usr/bin/opencode", "run", "--agent", "autodev-reader"])
+        self.assertEqual(
+            command[:4],
+            ["/usr/bin/opencode", "run", "--agent", "autodev-reader"],
+        )
         self.assertIn("--dir", command)
         self.assertIn("--format", command)
         self.assertEqual(command[-1], "role prompt")
@@ -249,12 +268,15 @@ class RuntimeAgnosticCoordinatorTests(unittest.TestCase):
             {"state": "RESUME", "next_action": "planner", "issue_number": 29},
             {"state": "COMPLETE", "next_action": "complete", "issue_number": 29},
         ]
-        accepted = lambda role: {
-            "state": "ACCEPTED",
-            "role": role,
-            "artifact": f".autodev-run/current/{role}.out",
-            "sha256": "abc",
-        }
+
+        def accepted(role: str) -> dict[str, object]:
+            return {
+                "state": "ACCEPTED",
+                "role": role,
+                "artifact": f".autodev-run/current/{role}.out",
+                "sha256": "abc",
+            }
+
         with tempfile.TemporaryDirectory() as temp_dir, patch.object(
             role_coordinator.opencode_runtime,
             "install_workflow_guards",
@@ -296,7 +318,10 @@ class RuntimeAgnosticCoordinatorTests(unittest.TestCase):
 
     def test_runtime_success_does_not_override_missing_durable_acceptance(self):
         runtime = MockRuntime()
-        snapshots = runtime.role_snapshots(Path("."), runner=lambda *args, **kwargs: None)
+        snapshots = runtime.role_snapshots(
+            Path("."),
+            runner=lambda *args, **kwargs: None,
+        )
         with tempfile.TemporaryDirectory() as temp_dir, patch.object(
             role_coordinator,
             "_prepare_role",
