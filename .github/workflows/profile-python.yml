@@ -1,0 +1,174 @@
+name: Reusable CI profile - Python
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Exact caller ref/SHA to validate
+        required: false
+        type: string
+        default: ''
+      runners:
+        description: JSON array of GitHub runner labels
+        required: false
+        type: string
+        default: '["ubuntu-latest"]'
+      python_versions:
+        description: JSON array of Python versions
+        required: false
+        type: string
+        default: '["3.11"]'
+      working_directory:
+        description: Working directory for commands
+        required: false
+        type: string
+        default: '.'
+      cache:
+        description: Enable setup-python dependency caching
+        required: false
+        type: boolean
+        default: false
+      cache_type:
+        description: setup-python cache type, such as pip, pipenv, or poetry
+        required: false
+        type: string
+        default: pip
+      cache_dependency_path:
+        description: Optional dependency/lockfile path used for cache invalidation
+        required: false
+        type: string
+        default: ''
+      install_command:
+        description: Optional dependency installation command
+        required: false
+        type: string
+        default: ''
+      compile_command:
+        description: Optional compile/import smoke command
+        required: false
+        type: string
+        default: ''
+      lint_command:
+        description: Optional lint command
+        required: false
+        type: string
+        default: ''
+      typecheck_command:
+        description: Optional type-check command
+        required: false
+        type: string
+        default: ''
+      test_command:
+        description: Required test/verification command
+        required: true
+        type: string
+      package_command:
+        description: Optional packaging command
+        required: false
+        type: string
+        default: ''
+      artifact_name:
+        description: Optional artifact name; matrix values are appended automatically
+        required: false
+        type: string
+        default: ''
+      artifact_path:
+        description: Optional artifact path; ignored when artifact_name is empty
+        required: false
+        type: string
+        default: ''
+      artifact_retention_days:
+        description: Artifact retention in days
+        required: false
+        type: number
+        default: 14
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Python ${{ matrix.python }} / ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: ${{ fromJSON(inputs.runners) }}
+        python: ${{ fromJSON(inputs.python_versions) }}
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Check out caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+
+      - name: Set up Python
+        if: ${{ !inputs.cache }}
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Set up Python with dependency cache
+        if: ${{ inputs.cache }}
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: ${{ matrix.python }}
+          cache: ${{ inputs.cache_type }}
+          cache-dependency-path: ${{ inputs.cache_dependency_path }}
+
+      - name: Install dependencies
+        if: inputs.install_command != ''
+        shell: bash
+        working-directory: ${{ inputs.working_directory }}
+        run: ${{ inputs.install_command }}
+
+      - name: Compile or import smoke
+        if: inputs.compile_command != ''
+        shell: bash
+        working-directory: ${{ inputs.working_directory }}
+        run: ${{ inputs.compile_command }}
+
+      - name: Lint
+        if: inputs.lint_command != ''
+        shell: bash
+        working-directory: ${{ inputs.working_directory }}
+        run: ${{ inputs.lint_command }}
+
+      - name: Type check
+        if: inputs.typecheck_command != ''
+        shell: bash
+        working-directory: ${{ inputs.working_directory }}
+        run: ${{ inputs.typecheck_command }}
+
+      - name: Test
+        shell: bash
+        working-directory: ${{ inputs.working_directory }}
+        run: ${{ inputs.test_command }}
+
+      - name: Package
+        if: inputs.package_command != ''
+        shell: bash
+        working-directory: ${{ inputs.working_directory }}
+        run: ${{ inputs.package_command }}
+
+      - name: Upload validation artifacts
+        if: inputs.artifact_name != '' && inputs.artifact_path != '' && always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ inputs.artifact_name }}-${{ matrix.runner }}-py${{ matrix.python }}
+          path: ${{ inputs.artifact_path }}
+          if-no-files-found: error
+          retention-days: ${{ inputs.artifact_retention_days }}
+
+      - name: Summarize Python profile
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### Shared Python CI profile"
+            echo
+            echo "- Runner: \`${{ matrix.runner }}\`"
+            echo "- Python: \`${{ matrix.python }}\`"
+            echo "- Dependency cache: \`${{ inputs.cache }}\`"
+            echo "- Working directory: \`${{ inputs.working_directory }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

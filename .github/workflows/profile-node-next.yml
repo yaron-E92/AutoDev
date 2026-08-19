@@ -1,0 +1,167 @@
+name: Reusable CI profile - Node and Next.js
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Exact caller ref/SHA to validate
+        required: false
+        type: string
+        default: ''
+      runner:
+        description: GitHub runner label
+        required: false
+        type: string
+        default: ubuntu-latest
+      node_version:
+        description: Node.js version/range
+        required: false
+        type: string
+        default: '24'
+      working_directory:
+        description: Working directory for package commands
+        required: false
+        type: string
+        default: '.'
+      cache:
+        description: Enable setup-node package-manager caching
+        required: false
+        type: boolean
+        default: true
+      package_manager:
+        description: setup-node cache manager (npm, yarn, pnpm)
+        required: false
+        type: string
+        default: npm
+      cache_dependency_path:
+        description: Lockfile path used for package cache invalidation
+        required: false
+        type: string
+        default: package-lock.json
+      setup_command:
+        description: Optional pre-install setup, for example corepack enable
+        required: false
+        type: string
+        default: ''
+      install_command:
+        description: Deterministic dependency install command
+        required: false
+        type: string
+        default: 'npm ci'
+      lint_command:
+        description: Optional lint command
+        required: false
+        type: string
+        default: 'npm run lint --if-present'
+      typecheck_command:
+        description: Optional type-check command
+        required: false
+        type: string
+        default: ''
+      test_command:
+        description: Optional test command
+        required: false
+        type: string
+        default: 'npm test --if-present'
+      build_command:
+        description: Production build command (works for Next.js or ordinary Node projects)
+        required: true
+        type: string
+      artifact_name:
+        description: Optional production-build artifact name
+        required: false
+        type: string
+        default: ''
+      artifact_path:
+        description: Optional build output path, such as .next or dist
+        required: false
+        type: string
+        default: ''
+      artifact_retention_days:
+        required: false
+        type: number
+        default: 14
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Node ${{ inputs.node_version }} / ${{ inputs.runner }}
+    runs-on: ${{ inputs.runner }}
+
+    steps:
+      - name: Check out caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+
+      - name: Set up Node.js
+        if: ${{ !inputs.cache }}
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: ${{ inputs.node_version }}
+
+      - name: Set up Node.js with package cache
+        if: ${{ inputs.cache }}
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: ${{ inputs.node_version }}
+          cache: ${{ inputs.package_manager }}
+          cache-dependency-path: ${{ inputs.cache_dependency_path }}
+
+      - name: Package-manager setup
+        if: inputs.setup_command != ''
+        shell: bash
+        working-directory: ${{ inputs.working_directory }}
+        run: ${{ inputs.setup_command }}
+
+      - name: Install dependencies
+        shell: bash
+        working-directory: ${{ inputs.working_directory }}
+        run: ${{ inputs.install_command }}
+
+      - name: Lint
+        if: inputs.lint_command != ''
+        shell: bash
+        working-directory: ${{ inputs.working_directory }}
+        run: ${{ inputs.lint_command }}
+
+      - name: Type check
+        if: inputs.typecheck_command != ''
+        shell: bash
+        working-directory: ${{ inputs.working_directory }}
+        run: ${{ inputs.typecheck_command }}
+
+      - name: Test
+        if: inputs.test_command != ''
+        shell: bash
+        working-directory: ${{ inputs.working_directory }}
+        run: ${{ inputs.test_command }}
+
+      - name: Production build
+        shell: bash
+        working-directory: ${{ inputs.working_directory }}
+        run: ${{ inputs.build_command }}
+
+      - name: Upload build artifact
+        if: inputs.artifact_name != '' && inputs.artifact_path != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: ${{ inputs.artifact_path }}
+          if-no-files-found: error
+          retention-days: ${{ inputs.artifact_retention_days }}
+
+      - name: Summarize Node/Next profile
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### Shared Node/Next CI profile"
+            echo
+            echo "- Runner: \`${{ inputs.runner }}\`"
+            echo "- Node: \`${{ inputs.node_version }}\`"
+            echo "- Package manager/cache: \`${{ inputs.package_manager }}\` / \`${{ inputs.cache }}\`"
+            echo "- Working directory: \`${{ inputs.working_directory }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

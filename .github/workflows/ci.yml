@@ -96,7 +96,7 @@ jobs:
           diff -ru "$RUNNER_TEMP/release-a" "$RUNNER_TEMP/release-b"
 
   version-policy-action:
-    name: Shared version policy action
+    name: Shared policy actions
     runs-on: ubuntu-latest
 
     steps:
@@ -109,26 +109,44 @@ jobs:
       - name: Show runner Node runtime
         run: node --version
 
-      - name: Run dependency-free action tests
+      - name: Run dependency-free version-policy tests
         run: node --test .github/actions/version-policy/index.test.js
 
-      - name: Exercise JavaScript Action runtime directly
-        id: smoke
+      - name: Run dependency-free workflow-policy tests
+        run: node --test .github/actions/workflow-policy/index.test.js
+
+      - name: Exercise version-policy Action runtime directly
+        id: version-smoke
         uses: $/.github/actions/version-policy
         with:
           mode: check-pr
           pr-body: '+semver: none'
           head: HEAD
 
-      - name: Verify smoke outputs
+      - name: Verify version-policy smoke outputs
         shell: bash
         env:
-          BUMP: ${{ steps.smoke.outputs.bump }}
-          TAG_REQUIRED: ${{ steps.smoke.outputs.tag_required }}
+          BUMP: ${{ steps.version-smoke.outputs.bump }}
+          TAG_REQUIRED: ${{ steps.version-smoke.outputs.tag_required }}
         run: |
           set -euo pipefail
           [[ "$BUMP" == "none" ]]
           [[ "$TAG_REQUIRED" == "false" ]]
+
+      - name: Exercise workflow-policy Action runtime directly
+        id: workflow-smoke
+        uses: $/.github/actions/workflow-policy
+        with:
+          workflows-path: .github/workflows
+          require-concurrency: false
+
+      - name: Verify workflow-policy smoke outputs
+        shell: bash
+        env:
+          CHECKED_FILES: ${{ steps.workflow-smoke.outputs.checked_files }}
+        run: |
+          set -euo pipefail
+          [[ "$CHECKED_FILES" =~ ^[1-9][0-9]*$ ]]
 
   python:
     name: Python ${{ matrix.python-version }} / ${{ matrix.os }}

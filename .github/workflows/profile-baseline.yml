@@ -1,0 +1,80 @@
+name: Reusable CI profile - baseline
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Exact caller ref/SHA to validate
+        required: false
+        type: string
+        default: ''
+      run_actionlint:
+        description: Run actionlint against caller workflows
+        required: false
+        type: boolean
+        default: true
+      require_concurrency:
+        description: Require top-level concurrency in non-reusable caller workflows
+        required: false
+        type: boolean
+        default: false
+      actionlint_version:
+        description: actionlint Go module version
+        required: false
+        type: string
+        default: v1.7.12
+
+permissions:
+  contents: read
+
+jobs:
+  policy:
+    name: Workflow policy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          fetch-depth: 1
+
+      - name: Validate shared workflow policy
+        id: policy
+        uses: $/.github/actions/workflow-policy
+        with:
+          workflows-path: .github/workflows
+          require-concurrency: ${{ inputs.require_concurrency }}
+
+      - name: Install actionlint
+        if: inputs.run_actionlint
+        shell: bash
+        env:
+          ACTIONLINT_VERSION: ${{ inputs.actionlint_version }}
+        run: |
+          set -euo pipefail
+          export GOBIN="$RUNNER_TEMP/actionlint-bin"
+          mkdir -p "$GOBIN"
+          go install "github.com/rhysd/actionlint/cmd/actionlint@${ACTIONLINT_VERSION}"
+          "$GOBIN/actionlint" -version
+
+      - name: Lint caller workflows
+        if: inputs.run_actionlint
+        shell: bash
+        run: |
+          "$RUNNER_TEMP/actionlint-bin/actionlint" -color
+
+      - name: Summarize baseline validation
+        shell: bash
+        env:
+          CHECKED_FILES: ${{ steps.policy.outputs.checked_files }}
+        run: |
+          {
+            echo "### Shared baseline CI profile"
+            echo
+            echo "- Workflow files checked: \`$CHECKED_FILES\`"
+            echo "- Immutable external action/workflow refs enforced"
+            echo "- Explicit permissions enforced"
+            echo "- actionlint: \`${{ inputs.run_actionlint }}\`"
+            echo "- caller concurrency required: \`${{ inputs.require_concurrency }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

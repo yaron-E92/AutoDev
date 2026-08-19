@@ -1,0 +1,196 @@
+name: Reusable CI profile - MAUI
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Exact caller ref/SHA to validate
+        required: false
+        type: string
+        default: ''
+      global_json_file:
+        description: global.json path
+        required: false
+        type: string
+        default: global.json
+      dotnet_version:
+        description: SDK version/range when global_json_file is empty
+        required: false
+        type: string
+        default: ''
+      cache:
+        description: Enable setup-dotnet NuGet caching for all MAUI legs
+        required: false
+        type: boolean
+        default: false
+      cache_dependency_path:
+        description: packages.lock.json path/glob used when cache is enabled
+        required: false
+        type: string
+        default: ''
+
+      headless_enabled:
+        description: Run the shared/headless .NET validation leg
+        required: false
+        type: boolean
+        default: true
+      headless_runner:
+        description: Runner for shared/headless validation
+        required: false
+        type: string
+        default: ubuntu-latest
+      headless_setup_command:
+        required: false
+        type: string
+        default: ''
+      headless_restore_command:
+        required: false
+        type: string
+        default: 'dotnet restore'
+      headless_build_command:
+        required: false
+        type: string
+        default: 'dotnet build --no-restore'
+      headless_test_command:
+        required: false
+        type: string
+        default: 'dotnet test --no-build --no-restore'
+      headless_test_results_path:
+        required: false
+        type: string
+        default: ''
+
+      android_enabled:
+        description: Run Android product-shape validation
+        required: false
+        type: boolean
+        default: true
+      android_runner:
+        required: false
+        type: string
+        default: ubuntu-latest
+      android_setup_command:
+        description: Workload/Android SDK setup command for the caller project
+        required: false
+        type: string
+        default: 'dotnet workload install maui-android --skip-manifest-update'
+      android_restore_command:
+        description: Android restore command; required when android_enabled is true
+        required: false
+        type: string
+        default: 'echo "android_restore_command must be configured when android_enabled=true" >&2; exit 2'
+      android_build_command:
+        description: Android build/publish command; required when android_enabled is true
+        required: false
+        type: string
+        default: 'echo "android_build_command must be configured when android_enabled=true" >&2; exit 2'
+      android_test_command:
+        description: Android smoke/product verification command; required when android_enabled is true
+        required: false
+        type: string
+        default: 'echo "android_test_command must be configured when android_enabled=true" >&2; exit 2'
+      android_test_results_path:
+        required: false
+        type: string
+        default: ''
+
+      windows_enabled:
+        description: Run Windows product-shape validation
+        required: false
+        type: boolean
+        default: true
+      windows_runner:
+        required: false
+        type: string
+        default: windows-latest
+      windows_setup_command:
+        description: Workload/setup command for Windows MAUI validation
+        required: false
+        type: string
+        default: 'dotnet workload install maui --skip-manifest-update'
+      windows_restore_command:
+        description: Windows restore command; required when windows_enabled is true
+        required: false
+        type: string
+        default: 'echo "windows_restore_command must be configured when windows_enabled=true" >&2; exit 2'
+      windows_build_command:
+        description: Windows build/publish command; required when windows_enabled is true
+        required: false
+        type: string
+        default: 'echo "windows_build_command must be configured when windows_enabled=true" >&2; exit 2'
+      windows_test_command:
+        description: Windows smoke/product verification command; required when windows_enabled is true
+        required: false
+        type: string
+        default: 'echo "windows_test_command must be configured when windows_enabled=true" >&2; exit 2'
+      windows_test_results_path:
+        required: false
+        type: string
+        default: ''
+    secrets:
+      nuget_token:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  headless:
+    name: MAUI shared/headless
+    if: inputs.headless_enabled
+    uses: $/.github/workflows/profile-dotnet.yml
+    with:
+      ref: ${{ inputs.ref }}
+      runner: ${{ inputs.headless_runner }}
+      global_json_file: ${{ inputs.global_json_file }}
+      dotnet_version: ${{ inputs.dotnet_version }}
+      cache: ${{ inputs.cache }}
+      cache_dependency_path: ${{ inputs.cache_dependency_path }}
+      setup_command: ${{ inputs.headless_setup_command }}
+      restore_command: ${{ inputs.headless_restore_command }}
+      build_command: ${{ inputs.headless_build_command }}
+      test_command: ${{ inputs.headless_test_command }}
+      test_results_path: ${{ inputs.headless_test_results_path }}
+      artifact_name: maui-headless-results
+    secrets:
+      nuget_token: ${{ secrets.nuget_token }}
+
+  android:
+    name: MAUI Android
+    if: inputs.android_enabled
+    uses: $/.github/workflows/profile-dotnet.yml
+    with:
+      ref: ${{ inputs.ref }}
+      runner: ${{ inputs.android_runner }}
+      global_json_file: ${{ inputs.global_json_file }}
+      dotnet_version: ${{ inputs.dotnet_version }}
+      cache: ${{ inputs.cache }}
+      cache_dependency_path: ${{ inputs.cache_dependency_path }}
+      setup_command: ${{ inputs.android_setup_command }}
+      restore_command: ${{ inputs.android_restore_command }}
+      build_command: ${{ inputs.android_build_command }}
+      test_command: ${{ inputs.android_test_command }}
+      test_results_path: ${{ inputs.android_test_results_path }}
+      artifact_name: maui-android-results
+    secrets:
+      nuget_token: ${{ secrets.nuget_token }}
+
+  windows:
+    name: MAUI Windows
+    if: inputs.windows_enabled
+    uses: $/.github/workflows/profile-dotnet.yml
+    with:
+      ref: ${{ inputs.ref }}
+      runner: ${{ inputs.windows_runner }}
+      global_json_file: ${{ inputs.global_json_file }}
+      dotnet_version: ${{ inputs.dotnet_version }}
+      cache: ${{ inputs.cache }}
+      cache_dependency_path: ${{ inputs.cache_dependency_path }}
+      setup_command: ${{ inputs.windows_setup_command }}
+      restore_command: ${{ inputs.windows_restore_command }}
+      build_command: ${{ inputs.windows_build_command }}
+      test_command: ${{ inputs.windows_test_command }}
+      test_results_path: ${{ inputs.windows_test_results_path }}
+      artifact_name: maui-windows-results
+    secrets:
+      nuget_token: ${{ secrets.nuget_token }}

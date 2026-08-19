@@ -1,0 +1,17 @@
+name: Shared workflow policy
+description: Validate immutable external refs and baseline workflow safety without adding project dependencies.
+inputs:
+  workflows-path:
+    description: Workflow directory to scan
+    required: false
+    default: .github/workflows
+  require-concurrency:
+    description: Require top-level concurrency in non-reusable workflows
+    required: false
+    default: 'false'
+outputs:
+  checked_files:
+    description: Number of workflow files checked
+runs:
+  using: node24
+  main: index.js

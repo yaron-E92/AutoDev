@@ -37,6 +37,9 @@ on:
       tag_status:
         value: ${{ jobs.version.outputs.tag_status }}
 
+permissions:
+  contents: read
+
 jobs:
   version:
     name: Advance trusted version tag

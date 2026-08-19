@@ -1,0 +1,175 @@
+name: Reusable CI profile - .NET
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Exact caller ref/SHA to validate
+        required: false
+        type: string
+        default: ''
+      runner:
+        description: GitHub runner label
+        required: false
+        type: string
+        default: ubuntu-latest
+      working_directory:
+        description: Working directory for commands
+        required: false
+        type: string
+        default: '.'
+      global_json_file:
+        description: global.json path; leave empty to use dotnet_version
+        required: false
+        type: string
+        default: global.json
+      dotnet_version:
+        description: SDK version/range used when global_json_file is empty
+        required: false
+        type: string
+        default: ''
+      cache:
+        description: Enable setup-dotnet NuGet caching; requires caller lockfiles
+        required: false
+        type: boolean
+        default: false
+      cache_dependency_path:
+        description: Optional packages.lock.json path/glob for setup-dotnet caching
+        required: false
+        type: string
+        default: ''
+      setup_command:
+        description: Optional repository-specific setup command (feeds/workloads/etc.)
+        required: false
+        type: string
+        default: ''
+      restore_command:
+        description: Restore command
+        required: true
+        type: string
+      build_command:
+        description: Build command
+        required: true
+        type: string
+      test_command:
+        description: Test command
+        required: true
+        type: string
+      lint_command:
+        description: Optional analyzer/format command
+        required: false
+        type: string
+        default: ''
+      test_results_path:
+        description: Optional TRX/coverage/result path; when set at least one result must exist
+        required: false
+        type: string
+        default: ''
+      artifact_name:
+        description: Result artifact name
+        required: false
+        type: string
+        default: dotnet-test-results
+      artifact_retention_days:
+        description: Result artifact retention in days
+        required: false
+        type: number
+        default: 14
+    secrets:
+      nuget_token:
+        description: Optional caller-provided package-feed token exposed as NUGET_AUTH_TOKEN
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: .NET validate / ${{ inputs.runner }}
+    runs-on: ${{ inputs.runner }}
+    env:
+      NUGET_AUTH_TOKEN: ${{ secrets.nuget_token }}
+
+    steps:
+      - name: Check out caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+
+      - name: Set up .NET from global.json
+        if: inputs.global_json_file != '' && !inputs.cache
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: ${{ inputs.global_json_file }}
+
+      - name: Set up .NET version
+        if: inputs.global_json_file == '' && !inputs.cache
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: ${{ inputs.dotnet_version }}
+
+      - name: Set up .NET from global.json with NuGet cache
+        if: inputs.global_json_file != '' && inputs.cache
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: ${{ inputs.global_json_file }}
+          cache: true
+          cache-dependency-path: ${{ inputs.cache_dependency_path }}
+
+      - name: Set up .NET version with NuGet cache
+        if: inputs.global_json_file == '' && inputs.cache
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: ${{ inputs.dotnet_version }}
+          cache: true
+          cache-dependency-path: ${{ inputs.cache_dependency_path }}
+
+      - name: Repository-specific setup
+        if: inputs.setup_command != ''
+        shell: bash
+        working-directory: ${{ inputs.working_directory }}
+        run: ${{ inputs.setup_command }}
+
+      - name: Restore
+        shell: bash
+        working-directory: ${{ inputs.working_directory }}
+        run: ${{ inputs.restore_command }}
+
+      - name: Build
+        shell: bash
+        working-directory: ${{ inputs.working_directory }}
+        run: ${{ inputs.build_command }}
+
+      - name: Test
+        shell: bash
+        working-directory: ${{ inputs.working_directory }}
+        run: ${{ inputs.test_command }}
+
+      - name: Lint and analyzers
+        if: inputs.lint_command != ''
+        shell: bash
+        working-directory: ${{ inputs.working_directory }}
+        run: ${{ inputs.lint_command }}
+
+      - name: Require and upload test results
+        if: inputs.test_results_path != '' && always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ inputs.artifact_name }}-${{ inputs.runner }}
+          path: ${{ inputs.test_results_path }}
+          if-no-files-found: error
+          retention-days: ${{ inputs.artifact_retention_days }}
+
+      - name: Summarize .NET profile
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### Shared .NET CI profile"
+            echo
+            echo "- Runner: \`${{ inputs.runner }}\`"
+            echo "- Working directory: \`${{ inputs.working_directory }}\`"
+            echo "- global.json: \`${{ inputs.global_json_file || '(not used)' }}\`"
+            echo "- NuGet cache: \`${{ inputs.cache }}\`"
+            echo "- Test results required: \`${{ inputs.test_results_path != '' }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
