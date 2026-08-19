@@ -145,7 +145,20 @@ def build_role_snapshot(
     return run_manifest.build_role_snapshot(configured_value, safe)
 
 
-def persist_selection(repo: Path, *, name: str, source: str) -> None:
+def persist_selection(
+    repo: Path,
+    *,
+    name: str,
+    source: str,
+    force_manifest: bool = False,
+) -> None:
+    """Persist safe runtime selection without erasing an unvalidated resume identity.
+
+    Diagnostics may show the runtime selected for the current invocation immediately.
+    A pre-existing manifest keeps its previous runtime identity until snapshot
+    reconciliation succeeds, unless the caller explicitly confirms that transition.
+    """
+
     repo = repo.expanduser().resolve()
     current = repo / workflow_stages.CURRENT_DIR
     diagnostics_path = current / workflow_stages.DIAGNOSTICS_FILE
@@ -155,17 +168,26 @@ def persist_selection(repo: Path, *, name: str, source: str) -> None:
         _write_json_atomic(diagnostics_path, diagnostics)
 
     manifest_path = current / run_manifest.MANIFEST_NAME
-    if manifest_path.is_file():
-        try:
-            manifest = run_manifest.load_manifest(manifest_path)
-        except (OSError, ValueError, run_manifest.ManifestError):
-            return
-        manifest["role_runtime"] = {"name": name, "source": source}
-        run_manifest.save_manifest(manifest_path, manifest)
+    if not manifest_path.is_file():
+        return
+    try:
+        manifest = run_manifest.load_manifest(manifest_path)
+    except (OSError, ValueError, run_manifest.ManifestError):
+        return
+    previous = manifest.get("role_runtime", {})
+    previous_name = str(previous.get("name", "")) if isinstance(previous, dict) else ""
+    if previous_name and previous_name != name and not force_manifest:
+        return
+    manifest["role_runtime"] = {"name": name, "source": source}
+    run_manifest.save_manifest(manifest_path, manifest)
 
 
 def selected_runtime_from_manifest(repo: Path) -> str:
-    path = repo.expanduser().resolve() / workflow_stages.CURRENT_DIR / run_manifest.MANIFEST_NAME
+    path = (
+        repo.expanduser().resolve()
+        / workflow_stages.CURRENT_DIR
+        / run_manifest.MANIFEST_NAME
+    )
     if not path.is_file():
         return ""
     try:
@@ -216,5 +238,8 @@ def _read_json(path: Path) -> dict[str, object]:
 def _write_json_atomic(path: Path, value: dict[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + ".tmp")
-    temporary.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    temporary.write_text(
+        json.dumps(value, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
     temporary.replace(path)
