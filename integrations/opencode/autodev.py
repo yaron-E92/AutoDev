@@ -19,6 +19,7 @@ INTERACTIVE_CONSENT_VALUE = "controlling-terminal"
 # The installed bridge always enters automation.opencode_entrypoint. That
 # compatibility frontend installs shared workflow hooks, then coordinate routes
 # through automation.role_coordinator with OpenCode as the default role runtime.
+# The retired direct route `module = "automation.opencode_coordinator"` is not used.
 
 
 def _current_issue_number() -> int:
