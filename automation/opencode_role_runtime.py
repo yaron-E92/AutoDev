@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import time
@@ -18,8 +19,26 @@ from automation import (
 class OpenCodeRoleRuntime:
     name = "opencode"
 
+    def __init__(self) -> None:
+        self._mappings: dict[str, dict[str, str]] = {}
+
     def validate_arguments(self, arguments: str) -> None:
         opencode_adapter.reject_unsupported_model_overrides(arguments)
+
+    def _resolve_mappings(
+        self,
+        repo: Path,
+        *,
+        runner: Callable[..., object],
+        which=None,
+    ) -> dict[str, dict[str, str]]:
+        if not self._mappings:
+            self._mappings = opencode_adapter.resolve_opencode_model_mappings(
+                repo,
+                runner=runner,
+                which=which,
+            )
+        return self._mappings
 
     def role_snapshots(
         self,
@@ -28,11 +47,7 @@ class OpenCodeRoleRuntime:
         runner: Callable[..., object] = subprocess.run,
         which=None,
     ) -> dict[str, object]:
-        mappings = opencode_adapter.resolve_opencode_model_mappings(
-            repo,
-            runner=runner,
-            which=which,
-        )
+        mappings = self._resolve_mappings(repo, runner=runner, which=which)
         snapshots: dict[str, object] = {}
         for role in opencode_adapter.ROLE_NAMES:
             mapping = mappings.get(role, {})
@@ -76,11 +91,7 @@ class OpenCodeRoleRuntime:
         environment = dict(os.environ)
         model = ""
         try:
-            mappings = opencode_adapter.resolve_opencode_model_mappings(
-                repo,
-                runner=runner,
-                which=which,
-            )
+            mappings = self._resolve_mappings(repo, runner=runner, which=which)
             model = str(mappings.get(context.role, {}).get("model", "")).strip()
             policy = privacy.load_policy(repo)
             if policy.enabled:
@@ -88,13 +99,20 @@ class OpenCodeRoleRuntime:
                     raise privacy.PrivacyError(
                         f"cannot resolve the effective OpenCode model for AutoDev role {context.role}; privacy cannot be verified"
                     )
-                _, environment = privacy.authorize_opencode_role(
+                decision, environment = privacy.authorize_opencode_role(
                     repo,
                     role=context.role,
                     model=model,
                     opencode_cli=executable,
                     runner=runner,
                     base_env=environment,
+                )
+                print(
+                    json.dumps(
+                        {"event": "privacy", **decision.safe_metadata()},
+                        sort_keys=True,
+                    ),
+                    flush=True,
                 )
         except privacy.PrivacyError as exc:
             raise role_runtime.RoleRuntimeError(
