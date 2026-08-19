@@ -20,12 +20,13 @@ on:
         required: true
         type: string
 
+permissions:
+  contents: read
+
 jobs:
   verify:
     name: Windows / exact source
     runs-on: windows-latest
-    permissions:
-      contents: read
     steps:
       - name: Reject a stale dispatch ref
         shell: pwsh
