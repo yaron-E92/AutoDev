@@ -6,11 +6,20 @@ import time
 from pathlib import Path
 from typing import Callable
 
-from automation import opencode_adapter, opencode_cli, privacy, role_runtime, workflow_stages
+from automation import (
+    opencode_adapter,
+    opencode_cli,
+    privacy,
+    role_runtime,
+    run_manifest,
+)
 
 
 class OpenCodeRoleRuntime:
     name = "opencode"
+
+    def validate_arguments(self, arguments: str) -> None:
+        opencode_adapter.reject_unsupported_model_overrides(arguments)
 
     def role_snapshots(
         self,
@@ -30,23 +39,25 @@ class OpenCodeRoleRuntime:
             model = str(mapping.get("model", ""))
             provider = model.split("/", 1)[0] if "/" in model else ""
             agent = str(mapping.get("agent", f"autodev-{role}"))
-            snapshots[role] = role_runtime.build_role_snapshot(
-                runtime=self.name,
-                role=role,
-                configured={
-                    "agent": agent,
-                    "model": model,
-                    "source": str(mapping.get("source", "inherited")),
-                    "inherits_from": str(mapping.get("inherits_from", "")),
-                },
-                safe_metadata={
-                    "transport": self.name,
-                    "provider": provider,
-                    "profile_name": str(mapping.get("source", "inherited")),
-                    "model": model,
-                    "agent": agent,
-                },
-            )
+
+            # Keep the pre-#160 OpenCode fingerprint shape exactly. Runtime
+            # identity already participated as transport=opencode, so adding a
+            # second runtime field would falsely invalidate in-progress runs.
+            configured = {
+                "transport": self.name,
+                "agent": agent,
+                "model": model,
+                "source": str(mapping.get("source", "inherited")),
+                "inherits_from": str(mapping.get("inherits_from", "")),
+            }
+            safe = {
+                "transport": self.name,
+                "provider": provider,
+                "profile_name": str(mapping.get("source", "inherited")),
+                "model": model,
+                "agent": agent,
+            }
+            snapshots[role] = run_manifest.build_role_snapshot(configured, safe)
         return snapshots
 
     def invoke(
@@ -128,7 +139,10 @@ class OpenCodeRoleRuntime:
                 phase=context.phase,
                 returncode=None,
                 elapsed_ms=int((time.monotonic() - started) * 1000),
-                stdout=_text(getattr(exc, "stdout", "") or getattr(exc, "output", "")),
+                stdout=_text(
+                    getattr(exc, "stdout", "")
+                    or getattr(exc, "output", "")
+                ),
                 stderr=_text(getattr(exc, "stderr", "")),
                 termination="runtime-timeout",
                 model=model,
