@@ -8,15 +8,59 @@ on:
     branches:
       - main
   workflow_call:
+    inputs:
+      ref:
+        description: Optional exact ref/SHA to validate when CI is reused
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: read
+
+env:
+  AUTODEV_CI_REF: ${{ inputs.ref || github.sha }}
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
+  version-intent:
+    name: Version intent
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out full history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ env.AUTODEV_CI_REF }}
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.11"
+
+      - name: Validate explicit +semver intent and candidate version
+        id: version
+        shell: bash
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -euo pipefail
+          python -m automation.version_policy check-pr --repo . --body-env PR_BODY
+          {
+            echo "### Version intent"
+            echo
+            echo "This pull request has an explicit, valid \`+semver:\` directive."
+            echo "Version tags are advanced only after successful trusted \`main\` CI."
+            echo "Creating a version tag does **not** publish a release."
+          } >> "$GITHUB_STEP_SUMMARY"
+
   workflow-lint:
     name: Workflow lint and immutable refs
     runs-on: ubuntu-latest
@@ -24,6 +68,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ env.AUTODEV_CI_REF }}
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
@@ -57,6 +103,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          ref: ${{ env.AUTODEV_CI_REF }}
           fetch-depth: 0
 
       - name: Set up Python
@@ -68,8 +115,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python -m automation.package_release --repo . --out "$RUNNER_TEMP/release-a" --version v0.0.0-ci --commit "$GITHUB_SHA"
-          python -m automation.package_release --repo . --out "$RUNNER_TEMP/release-b" --version v0.0.0-ci --commit "$GITHUB_SHA"
+          validated_sha="$(git rev-parse HEAD)"
+          python -m automation.package_release --repo . --out "$RUNNER_TEMP/release-a" --version v0.0.0-ci --commit "$validated_sha"
+          python -m automation.package_release --repo . --out "$RUNNER_TEMP/release-b" --version v0.0.0-ci --commit "$validated_sha"
           diff -ru "$RUNNER_TEMP/release-a" "$RUNNER_TEMP/release-b"
 
   python:
@@ -88,6 +136,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ env.AUTODEV_CI_REF }}
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
@@ -113,6 +163,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ env.AUTODEV_CI_REF }}
 
       - name: Validate tracked Bash scripts
         shell: bash
@@ -137,6 +189,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ env.AUTODEV_CI_REF }}
 
       - name: Validate tracked PowerShell scripts
         shell: pwsh
@@ -178,6 +232,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ env.AUTODEV_CI_REF }}
 
       - name: Reject tracked generated artifacts and caches
         shell: bash
@@ -192,3 +248,84 @@ jobs:
             printf 'Forbidden tracked artifact: %s\n' "${forbidden[@]}" >&2
             exit 1
           fi
+
+  version-tag:
+    name: Advance version tag
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      always() &&
+      needs.workflow-lint.result == 'success' &&
+      needs.release-reproducibility.result == 'success' &&
+      needs.python.result == 'success' &&
+      needs.bash-syntax.result == 'success' &&
+      needs.powershell-syntax.result == 'success' &&
+      needs.repository-hygiene.result == 'success'
+    needs:
+      - workflow-lint
+      - release-reproducibility
+      - python
+      - bash-syntax
+      - powershell-syntax
+      - repository-hygiene
+    runs-on: ubuntu-latest
+    concurrency:
+      group: autodev-version-main
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      pull-requests: read
+
+    steps:
+      - name: Check out exact successful main candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ env.AUTODEV_CI_REF }}
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.11"
+
+      - name: Resolve change intent and create trusted annotated tag
+        id: version
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          python -m automation.version_policy resolve-main \
+            --repo . \
+            --repository "$GITHUB_REPOSITORY" \
+            --head "$GITHUB_SHA" \
+            --branch main \
+            --create-tag \
+            --github-output "$GITHUB_OUTPUT"
+
+      - name: Summarize version advancement
+        shell: bash
+        env:
+          BASE_VERSION: ${{ steps.version.outputs.base_version }}
+          BUMP: ${{ steps.version.outputs.bump }}
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
+          TAG_REQUIRED: ${{ steps.version.outputs.tag_required }}
+          TAG_STATUS: ${{ steps.version.outputs.tag_status }}
+          SUPERSEDED: ${{ steps.version.outputs.superseded }}
+        run: |
+          {
+            echo "### Version advancement"
+            echo
+            echo "- Base version: \`$BASE_VERSION\`"
+            echo "- Highest intent: \`$BUMP\`"
+            echo "- Candidate version: \`$VERSION\`"
+            echo "- Tag: \`$TAG\`"
+            echo "- Tag required: \`$TAG_REQUIRED\`"
+            echo "- Tag status: \`$TAG_STATUS\`"
+            echo "- Superseded main run: \`$SUPERSEDED\`"
+            echo
+            echo "This workflow advances version metadata only. **No release is published automatically.**"
+          } >> "$GITHUB_STEP_SUMMARY"

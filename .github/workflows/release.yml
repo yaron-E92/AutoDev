@@ -1,21 +1,26 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing trusted version tag to publish (for example v1.2.3)
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.tag }}
   cancel-in-progress: false
 
 jobs:
   ci:
-    name: Required CI
+    name: Required CI for selected tag
     uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ inputs.tag }}
     permissions:
       contents: read
 
@@ -29,10 +34,23 @@ jobs:
       attestations: write
 
     steps:
-      - name: Check out exact tag commit
+      - name: Validate requested existing version tag
+        id: release
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || {
+            echo "Release tag must be canonical vMAJOR.MINOR.PATCH: $RELEASE_TAG" >&2
+            exit 1
+          }
+          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Check out exact existing tag
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ steps.release.outputs.tag }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -42,29 +60,50 @@ jobs:
           python-version: "3.11"
 
       - name: Verify immutable release identity
+        id: identity
         shell: bash
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
         run: |
           set -euo pipefail
-          [[ "$GITHUB_REF_TYPE" == "tag" ]] || { echo "Release must be triggered by a tag." >&2; exit 1; }
-          [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]] || {
-            echo "Tag must be a v-prefixed semantic version: $GITHUB_REF_NAME" >&2
+          git show-ref --verify --quiet "refs/tags/$RELEASE_TAG" || {
+            echo "Requested release tag does not exist: $RELEASE_TAG" >&2
             exit 1
           }
-          tag_sha="$(git rev-list -n 1 "$GITHUB_REF_NAME")"
-          [[ "$tag_sha" == "$GITHUB_SHA" ]] || {
-            echo "Tag $GITHUB_REF_NAME resolves to $tag_sha, not workflow commit $GITHUB_SHA" >&2
+          tag_type="$(git cat-file -t "refs/tags/$RELEASE_TAG")"
+          [[ "$tag_type" == "tag" ]] || {
+            echo "Requested release ref must be an annotated tag, got: $tag_type" >&2
             exit 1
           }
+          tag_sha="$(git rev-list -n 1 "$RELEASE_TAG")"
+          head_sha="$(git rev-parse HEAD)"
+          [[ "$tag_sha" == "$head_sha" ]] || {
+            echo "Tag $RELEASE_TAG resolves to $tag_sha, but checkout resolved to $head_sha" >&2
+            exit 1
+          }
+          echo "sha=$tag_sha" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Manual release identity"
+            echo
+            echo "- Tag: \`$RELEASE_TAG\`"
+            echo "- Commit: \`$tag_sha\`"
+            echo
+            echo "Required CI re-ran against this exact tag before publication."
+            echo "This release was started manually; version-tag creation alone does not publish releases."
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Build deterministic release bundles
         shell: bash
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_SHA: ${{ steps.identity.outputs.sha }}
         run: |
           set -euo pipefail
           python -m automation.package_release \
             --repo . \
             --out dist \
-            --version "$GITHUB_REF_NAME" \
-            --commit "$GITHUB_SHA"
+            --version "$RELEASE_TAG" \
+            --commit "$RELEASE_SHA"
           (cd dist && sha256sum -c SHA256SUMS)
 
       - name: Generate build provenance attestations
@@ -76,11 +115,13 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_SHA: ${{ steps.identity.outputs.sha }}
         run: |
           set -euo pipefail
-          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             mkdir -p existing-release
-            gh release download "$GITHUB_REF_NAME" \
+            gh release download "$RELEASE_TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --dir existing-release
             for current in dist/*; do
@@ -91,17 +132,17 @@ jobs:
                 exit 1
               }
               cmp --silent "$current" "$previous" || {
-                echo "Existing release asset $name differs from the deterministic artifact for $GITHUB_SHA; refusing replacement." >&2
+                echo "Existing release asset $name differs from the deterministic artifact for $RELEASE_SHA; refusing replacement." >&2
                 exit 1
               }
             done
-            echo "Release $GITHUB_REF_NAME already contains byte-identical assets; idempotent rerun complete."
+            echo "Release $RELEASE_TAG already contains byte-identical assets; idempotent rerun complete."
             exit 0
           fi
 
-          gh release create "$GITHUB_REF_NAME" dist/* \
+          gh release create "$RELEASE_TAG" dist/* \
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
-            --target "$GITHUB_SHA" \
-            --title "$GITHUB_REF_NAME" \
+            --target "$RELEASE_SHA" \
+            --title "$RELEASE_TAG" \
             --generate-notes

@@ -5,7 +5,15 @@ import json
 import subprocess
 from pathlib import Path
 
-from automation import opencode_adapter, opencode_coordinator, opencode_runtime, privacy, workflow_stages
+from automation import (
+    opencode_adapter,
+    opencode_role_runtime,
+    opencode_runtime,
+    role_coordinator,
+    role_resume,
+    role_runtime,
+    workflow_stages,
+)
 
 
 ROLE_NAMES = ("reader", "synthesizer", "planner", "implementer", "fixer", "verifier")
@@ -13,7 +21,7 @@ ROLE_NAMES = ("reader", "synthesizer", "planner", "implementer", "fixer", "verif
 
 def run(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Run one standalone AutoDev OpenCode role through the privacy-gated subprocess path."
+        description="Run one standalone AutoDev OpenCode role through the privacy-gated role runtime."
     )
     parser.add_argument("--role", choices=ROLE_NAMES, required=True)
     parser.add_argument("--repo", default=".")
@@ -22,25 +30,32 @@ def run(argv: list[str] | None = None) -> int:
 
     repo = Path(args.repo).expanduser().resolve()
     opencode_runtime.install_workflow_guards()
+    runtime = opencode_role_runtime.OpenCodeRoleRuntime()
     try:
+        runtime.validate_arguments(args.arguments)
+        snapshots = runtime.role_snapshots(repo, runner=subprocess.run)
         opencode_adapter.prepare_role(args.role, repo, args.arguments)
-        acceptance = opencode_coordinator.run_role(
+        acceptance = role_coordinator.run_role(
             repo,
             args.role,
+            runtime,
+            snapshots,
             already_prepared=True,
             runner=subprocess.run,
         )
         payload = {
             "state": "ACCEPTED",
             "role": args.role,
+            "runtime": runtime.name,
             "artifact": str(acceptance.get("artifact", "")),
         }
         print(json.dumps(payload, sort_keys=True), flush=True)
         return 0
     except (
         opencode_adapter.OpenCodeAdapterError,
-        opencode_coordinator.OpenCodeCoordinatorError,
-        privacy.PrivacyError,
+        role_coordinator.RoleCoordinatorError,
+        role_runtime.RoleRuntimeError,
+        role_resume.RoleResumeError,
         workflow_stages.WorkflowStageError,
         OSError,
         ValueError,
@@ -48,7 +63,10 @@ def run(argv: list[str] | None = None) -> int:
         payload = {
             "state": "FAILED",
             "role": args.role,
-            "classification": str(getattr(exc, "classification", "") or "deterministic"),
+            "runtime": runtime.name,
+            "classification": str(
+                getattr(exc, "classification", "") or "deterministic"
+            ),
             "reason": str(exc),
         }
         print(json.dumps(payload, sort_keys=True), flush=True)

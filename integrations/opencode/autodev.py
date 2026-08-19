@@ -16,9 +16,12 @@ DEFAULT_MAX_SEMANTIC_REPAIR_ATTEMPTS = "2"
 INTERACTIVE_CONSENT_ARG = "--interactive-consent"
 INTERACTIVE_CONSENT_ENV = "AUTODEV_INTERACTIVE_CONSENT"
 INTERACTIVE_CONSENT_VALUE = "controlling-terminal"
-# The guarded entrypoint preserves the established bridge boundaries:
-# runtime execution -> "automation.opencode_runtime"
-# coordinate execution -> module = "automation.opencode_coordinator"
+# The installed bridge always enters automation.opencode_entrypoint. That
+# compatibility frontend installs shared workflow hooks, then coordinate routes
+# through automation.role_coordinator with OpenCode as the default role runtime.
+# The retired direct route `module = "automation.opencode_coordinator"` is not used.
+# Non-coordinate compatibility commands still reach the hardened
+# "automation.opencode_runtime" path through automation.opencode_entrypoint.
 
 
 def _current_issue_number() -> int:
