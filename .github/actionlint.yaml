@@ -1,0 +1,9 @@
+paths:
+  ".github/workflows/**/*":
+    ignore:
+      # GitHub.com supports and recommends $/ self-repository references, but
+      # actionlint v1.7.12 does not yet parse them (upstream issue #711).
+      # Keep these ignores narrow so all other action/workflow syntax remains
+      # fully linted.
+      - 'reusable workflow call "\$/\.github/workflows/'
+      - 'specifying action "\$/\.github/actions/'
