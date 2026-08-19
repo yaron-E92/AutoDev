@@ -11,7 +11,9 @@ const BUMP_RANK = { none: 0, patch: 1, minor: 2, major: 3 };
 class VersionPolicyError extends Error {}
 
 function input(name, fallback = '') {
-  const key = `INPUT_${name.replace(/ /g, '_').replace(/-/g, '_').toUpperCase()}`;
+  // GitHub exposes action inputs as INPUT_<NAME>, uppercasing and replacing
+  // spaces with underscores while preserving punctuation such as hyphens.
+  const key = `INPUT_${name.replace(/ /g, '_').toUpperCase()}`;
   const value = process.env[key];
   return value === undefined || value === '' ? fallback : value;
 }
