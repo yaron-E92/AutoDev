@@ -30,7 +30,10 @@ def validate_action_refs(repo: Path) -> list[str]:
             if not match:
                 continue
             value = match.group(1)
-            if value.startswith("./") or value.startswith("docker://"):
+            # ./ and $/ both resolve to content from the running repository
+            # commit rather than an independently mutable external ref. $/ is
+            # GitHub's explicit self-repository syntax for workflows/actions.
+            if value.startswith("./") or value.startswith("$/") or value.startswith("docker://"):
                 continue
             target, separator, ref = value.rpartition("@")
             if not separator or not target or not FULL_SHA_RE.fullmatch(ref):
