@@ -108,14 +108,15 @@ def resolve_runtime_name(repo: Path, requested: str = "") -> tuple[str, str]:
         return _validate_name(configured), CONFIG_RELATIVE.as_posix()
 
     user_path = user_config_path()
-    configured = _runtime_from_config(user_path, required=False)
-    if configured:
-        return _validate_name(configured), str(user_path)
+    if user_path is not None:
+        configured = _runtime_from_config(user_path, required=False)
+        if configured:
+            return _validate_name(configured), str(user_path)
 
     return DEFAULT_RUNTIME, "default"
 
 
-def user_config_path() -> Path:
+def user_config_path() -> Path | None:
     explicit = os.environ.get(USER_CONFIG_ENV, "").strip()
     if explicit:
         return Path(explicit).expanduser()
@@ -125,7 +126,14 @@ def user_config_path() -> Path:
     appdata = os.environ.get("APPDATA", "").strip()
     if os.name == "nt" and appdata:
         return Path(appdata).expanduser() / "AutoDev" / "config.json"
-    return Path.home() / ".config" / "autodev" / "config.json"
+    try:
+        home = Path.home()
+    except RuntimeError:
+        # Headless Windows/service accounts can legitimately have no resolvable
+        # home directory. That means there is no implicit user config; it must
+        # not prevent repository/default runtime selection.
+        return None
+    return home / ".config" / "autodev" / "config.json"
 
 
 def select_runtime(
