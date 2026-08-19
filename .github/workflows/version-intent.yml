@@ -1,0 +1,85 @@
+name: Reusable version intent
+
+on:
+  workflow_call:
+    inputs:
+      pr_body:
+        description: Pull request body containing exactly one +semver directive
+        required: true
+        type: string
+      head:
+        description: Exact caller ref/SHA to inspect; defaults to caller workflow SHA
+        required: false
+        type: string
+        default: ''
+      base_version:
+        description: Version to use when no canonical vMAJOR.MINOR.PATCH tag exists
+        required: false
+        type: string
+        default: 0.0.0
+    outputs:
+      base_tag:
+        value: ${{ jobs.version.outputs.base_tag }}
+      base_version:
+        value: ${{ jobs.version.outputs.base_version }}
+      bump:
+        value: ${{ jobs.version.outputs.bump }}
+      version:
+        value: ${{ jobs.version.outputs.version }}
+      tag:
+        value: ${{ jobs.version.outputs.tag }}
+      source_sha:
+        value: ${{ jobs.version.outputs.source_sha }}
+      tag_required:
+        value: ${{ jobs.version.outputs.tag_required }}
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    name: Validate version intent
+    runs-on: ubuntu-latest
+    outputs:
+      base_tag: ${{ steps.version.outputs.base_tag }}
+      base_version: ${{ steps.version.outputs.base_version }}
+      bump: ${{ steps.version.outputs.bump }}
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      source_sha: ${{ steps.version.outputs.source_sha }}
+      tag_required: ${{ steps.version.outputs.tag_required }}
+
+    steps:
+      - name: Check out caller repository with full history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.head || github.sha }}
+          fetch-depth: 0
+
+      - name: Validate explicit +semver intent
+        id: version
+        uses: $/.github/actions/version-policy
+        with:
+          mode: check-pr
+          pr-body: ${{ inputs.pr_body }}
+          head: ${{ inputs.head || github.sha }}
+          base-version: ${{ inputs.base_version }}
+
+      - name: Summarize candidate version
+        shell: bash
+        env:
+          BASE_TAG: ${{ steps.version.outputs.base_tag }}
+          BUMP: ${{ steps.version.outputs.bump }}
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          {
+            echo "### Version intent"
+            echo
+            echo "- Base tag: \`${BASE_TAG:-'(none)'}\`"
+            echo "- Intent: \`$BUMP\`"
+            echo "- Candidate version: \`$VERSION\`"
+            echo "- Candidate tag: \`$TAG\`"
+            echo
+            echo "This workflow is read-only. Version tags advance only after trusted main CI."
+          } >> "$GITHUB_STEP_SUMMARY"

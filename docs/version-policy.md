@@ -1,0 +1,162 @@
+# Shared version policy
+
+AutoDev provides one GitHub Actions version-policy component for repositories that use the ecosystem convention:
+
+```text
++semver: major
++semver: minor
++semver: patch
++semver: none
+```
+
+The shared component is intentionally independent of the caller's implementation language. A .NET, TypeScript, Python, mixed-language, or otherwise unrelated repository does not install a product dependency merely to resolve versions.
+
+## Lifecycle boundary
+
+Version advancement and release publication are separate lifecycle decisions:
+
+```text
+pull request
+  -> validate exactly one +semver intent (read-only)
+  -> merge
+  -> required main CI succeeds
+  -> resolve highest eligible intent since latest canonical tag
+  -> create annotated vMAJOR.MINOR.PATCH tag
+  -> stop
+
+manual release later
+  -> select existing trusted tag
+  -> build/sign/verify/package/publish for that exact tag
+```
+
+Creating a version tag does not publish a GitHub Release, package, signing job, deployment, or store artifact.
+
+## Components
+
+### JavaScript Action
+
+`.github/actions/version-policy`
+
+The Action is dependency-free JavaScript executed by GitHub's Action runtime. It owns deterministic version semantics and git/GitHub resolution:
+
+- exact `+semver:` parsing;
+- canonical `vMAJOR.MINOR.PATCH` history;
+- highest explicit bump across associated merged pull requests;
+- no implicit patch for legacy/unannotated direct commits;
+- stale-main detection;
+- annotated/idempotent tag allocation;
+- conflicting-tag refusal.
+
+It exposes:
+
+- `base_tag`
+- `base_version`
+- `bump`
+- `version`
+- `tag`
+- `source_sha`
+- `tag_required`
+- `superseded`
+- `tag_status`
+- `intents`
+
+### Reusable PR workflow
+
+`.github/workflows/version-intent.yml`
+
+This workflow is read-only. It checks out the caller repository with full history, executes the Action in `check-pr` mode, and exposes the candidate version outputs.
+
+### Reusable trusted-main workflow
+
+`.github/workflows/version-tag.yml`
+
+This workflow owns the narrow write boundary. It:
+
+1. checks out the exact caller SHA;
+2. serializes tag allocation per repository/branch;
+3. resolves associated merged PR intents;
+4. proves the candidate is still current `origin/<branch>`;
+5. creates an annotated tag only when a bump is required;
+6. stops without releasing anything.
+
+The caller must grant sufficient `GITHUB_TOKEN` permissions for the called workflow. Reusable-workflow permissions can be maintained or reduced through a call chain, but not elevated above the caller's grant.
+
+## Caller wiring
+
+Consumers should pin the reusable workflow to an immutable AutoDev commit SHA.
+
+Pull-request validation:
+
+```yaml
+jobs:
+  version-intent:
+    if: github.event_name == 'pull_request'
+    uses: yaron-E92/AutoDev/.github/workflows/version-intent.yml@<AUTODEV_COMMIT_SHA>
+    with:
+      pr_body: ${{ github.event.pull_request.body }}
+      head: ${{ github.sha }}
+    permissions:
+      contents: read
+```
+
+Trusted-main allocation should depend on every required repository-specific CI job:
+
+```yaml
+jobs:
+  version-tag:
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      always() &&
+      needs.build.result == 'success' &&
+      needs.test.result == 'success'
+    needs:
+      - build
+      - test
+    uses: yaron-E92/AutoDev/.github/workflows/version-tag.yml@<AUTODEV_COMMIT_SHA>
+    with:
+      head: ${{ github.sha }}
+      branch: main
+    permissions:
+      contents: write
+      pull-requests: read
+```
+
+The product repository remains responsible for deciding which CI jobs are mandatory before version advancement.
+
+## Product-specific metadata
+
+The shared resolver owns SemVer identity, not every platform's packaging rules.
+
+Examples of thin caller-side adapters:
+
+- .NET assembly/file/informational versions derived from the shared SemVer;
+- NuGet package version derived from the shared SemVer;
+- npm/web build metadata derived from the shared SemVer;
+- Android numeric `versionCode` derived monotonically from the tagged version;
+- MSIX/platform-specific version formatting derived from the same source version.
+
+These adapters must not independently choose a bump or create/move tags.
+
+## Existing GitVersion/custom resolvers
+
+When migrating a repository:
+
+1. make the shared Action authoritative for intent and tag allocation;
+2. remove any implicit-patch default;
+3. remove tag writes from repository-specific GitVersion/custom jobs;
+4. keep GitVersion temporarily only when it still provides useful derived metadata;
+5. migrate those derived values to thin adapters over the shared output when practical.
+
+Merge-message preservation is no longer the authority for release intent because the PR body is queried through GitHub's commit-to-pull-request association API.
+
+## Updating consumers
+
+Cross-repository consumers should use a full AutoDev commit SHA, not `main` or a floating action tag. Upgrading the shared policy is therefore intentional:
+
+1. merge and validate the new AutoDev implementation;
+2. record its exact immutable SHA;
+3. update consumer workflow references in small repository-specific PRs;
+4. allow each consumer CI to validate the upgrade before merge.
+
+This prevents a central workflow edit from silently changing version behavior across every repository at once.
