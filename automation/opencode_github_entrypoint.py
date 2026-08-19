@@ -56,6 +56,9 @@ def run(argv: list[str] | None = None) -> int:
     sys.stdout = proxy
     try:
         try:
+            selected_name, _ = role_runtime.resolve_runtime_name(repo, args.runtime)
+            if selected_name == "opencode":
+                opencode_adapter.reject_unsupported_model_overrides(args.arguments)
             payload = opencode_coordinator.coordinate(
                 repo,
                 arguments=args.arguments,
