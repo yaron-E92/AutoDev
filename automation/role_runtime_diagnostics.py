@@ -151,7 +151,10 @@ def record_attempt(
         correction_counts = diagnostics.get("protocol_correction_attempts", {})
         if not isinstance(correction_counts, dict):
             correction_counts = {}
-        correction_counts[role] = int(correction_counts.get(role, 0) or 0) + 1
+        used = diagnostics.get("protocol_correction_used", {})
+        adapter_already_recorded = isinstance(used, dict) and bool(used.get(role))
+        if not adapter_already_recorded:
+            correction_counts[role] = int(correction_counts.get(role, 0) or 0) + 1
         diagnostics["protocol_correction_attempts"] = correction_counts
 
     artifact = inspect_artifact(output_path, validation_error=validation_error, accepted=accepted)
