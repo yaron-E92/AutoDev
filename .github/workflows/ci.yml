@@ -8,9 +8,18 @@ on:
     branches:
       - main
   workflow_call:
+    inputs:
+      ref:
+        description: Optional exact ref/SHA to validate when CI is reused
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: read
+
+env:
+  AUTODEV_CI_REF: ${{ inputs.ref || github.sha }}
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -28,6 +37,7 @@ jobs:
       - name: Check out full history
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          ref: ${{ env.AUTODEV_CI_REF }}
           fetch-depth: 0
 
       - name: Set up Python
@@ -58,6 +68,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ env.AUTODEV_CI_REF }}
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
@@ -91,6 +103,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          ref: ${{ env.AUTODEV_CI_REF }}
           fetch-depth: 0
 
       - name: Set up Python
@@ -102,8 +115,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python -m automation.package_release --repo . --out "$RUNNER_TEMP/release-a" --version v0.0.0-ci --commit "$GITHUB_SHA"
-          python -m automation.package_release --repo . --out "$RUNNER_TEMP/release-b" --version v0.0.0-ci --commit "$GITHUB_SHA"
+          validated_sha="$(git rev-parse HEAD)"
+          python -m automation.package_release --repo . --out "$RUNNER_TEMP/release-a" --version v0.0.0-ci --commit "$validated_sha"
+          python -m automation.package_release --repo . --out "$RUNNER_TEMP/release-b" --version v0.0.0-ci --commit "$validated_sha"
           diff -ru "$RUNNER_TEMP/release-a" "$RUNNER_TEMP/release-b"
 
   python:
@@ -122,6 +136,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ env.AUTODEV_CI_REF }}
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
@@ -147,6 +163,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ env.AUTODEV_CI_REF }}
 
       - name: Validate tracked Bash scripts
         shell: bash
@@ -171,6 +189,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ env.AUTODEV_CI_REF }}
 
       - name: Validate tracked PowerShell scripts
         shell: pwsh
@@ -212,6 +232,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ env.AUTODEV_CI_REF }}
 
       - name: Reject tracked generated artifacts and caches
         shell: bash
@@ -258,7 +280,7 @@ jobs:
       - name: Check out exact successful main candidate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ env.AUTODEV_CI_REF }}
           fetch-depth: 0
 
       - name: Set up Python
