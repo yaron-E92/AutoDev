@@ -34,15 +34,18 @@ Selection uses this precedence, from highest to lowest:
 1. explicit per-run `--runtime`;
 2. `AUTODEV_ROLE_RUNTIME` environment variable;
 3. repository `.autodev/config.json` field `role_runtime`;
-4. default `opencode`.
+4. user AutoDev configuration field `role_runtime`;
+5. default `opencode`.
 
-Example repository configuration:
+Example repository or user configuration:
 
 ```json
 {
   "role_runtime": "opencode"
 }
 ```
+
+The user configuration is resolved from `AUTODEV_USER_CONFIG` when set. Otherwise AutoDev uses `$XDG_CONFIG_HOME/autodev/config.json` when available, `%APPDATA%/AutoDev/config.json` on Windows, or `~/.config/autodev/config.json` as the portable fallback. Repository configuration intentionally overrides user configuration.
 
 Example explicit invocation through the current compatibility frontend:
 
@@ -56,9 +59,11 @@ An explicitly selected unknown runtime fails before model-heavy role execution. 
 
 ## Runtime identity and resume
 
-The selected runtime is recorded as safe metadata in run diagnostics and the durable run manifest. Each role snapshot includes the runtime identifier in its execution fingerprint.
+The selected runtime is recorded as safe metadata in run diagnostics and the durable run manifest. Each role snapshot includes the runtime identity in its execution fingerprint.
 
-Consequently, changing the runtime for a role whose output has already been completed follows the same protection as changing an execution-affecting model configuration: resume is refused until the operator explicitly invalidates the affected role, for example with the existing `--invalidate-role` mechanism. A rejected runtime switch does not overwrite the previous manifest identity.
+OpenCode already fingerprinted `transport: opencode` before the runtime abstraction existed. The OpenCode runtime deliberately preserves that exact fingerprint shape, so installing this change does not invalidate otherwise-compatible in-progress OpenCode runs.
+
+Consequently, changing to a different runtime for a role whose output has already been completed follows the same protection as changing an execution-affecting model configuration: resume is refused until the operator explicitly invalidates the affected role, for example with the existing `--invalidate-role` mechanism. A rejected runtime switch does not overwrite the previous manifest identity.
 
 ## Runtime contract
 
@@ -85,7 +90,8 @@ The OpenCode adapter is first-class and remains the default implementation. It o
 - resolving the OpenCode CLI;
 - invoking installed `autodev-<role>` agents;
 - reading effective OpenCode role/model mappings;
-- applying OpenCode-specific privacy authorization before invocation.
+- applying OpenCode-specific privacy authorization before invocation;
+- preserving OpenCode-specific argument restrictions such as the prohibition on ad-hoc per-run model overrides.
 
 It returns a common role invocation result to the coordinator. The coordinator does not build or inspect the `opencode run` command.
 
