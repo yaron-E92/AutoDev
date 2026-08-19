@@ -1,0 +1,62 @@
+name: AutoDev Version Policy
+description: Resolve explicit +semver change intent and allocate trusted annotated version tags without publishing releases.
+author: AutoDev
+
+inputs:
+  mode:
+    description: check-pr or resolve-main
+    required: true
+  pr-body:
+    description: Pull request body used by check-pr mode
+    required: false
+    default: ''
+  repository:
+    description: GitHub repository in owner/name form; defaults to GITHUB_REPOSITORY
+    required: false
+    default: ''
+  head:
+    description: Candidate commit/ref; defaults to GITHUB_SHA
+    required: false
+    default: ''
+  branch:
+    description: Trusted default branch for resolve-main
+    required: false
+    default: main
+  github-token:
+    description: GitHub token used to inspect associated PRs and push tags
+    required: false
+    default: ''
+  create-tag:
+    description: Whether resolve-main should create/push the annotated tag
+    required: false
+    default: 'false'
+  base-version:
+    description: Version used when no canonical version tag exists
+    required: false
+    default: 0.0.0
+
+outputs:
+  base_tag:
+    description: Latest reachable canonical version tag, or empty when none exists
+  base_version:
+    description: Base semantic version
+  bump:
+    description: Selected major, minor, patch, or none intent
+  version:
+    description: Resolved semantic version without v prefix
+  tag:
+    description: Canonical v-prefixed version tag
+  source_sha:
+    description: Source commit SHA used for the decision
+  tag_required:
+    description: Whether a new version tag is required
+  superseded:
+    description: Whether the candidate stopped being current main before allocation
+  tag_status:
+    description: created, already-exists, concurrent-identical, no-tag, superseded, or not-requested
+  intents:
+    description: JSON array of explicit intents contributing to the main resolution
+
+runs:
+  using: node24
+  main: index.js
