@@ -95,6 +95,18 @@ class OpenCodeRoleRuntime:
             model = str(mappings.get(context.role, {}).get("model", "")).strip()
             policy = privacy.load_policy(repo)
             if policy.enabled:
+                # The legacy coordinator installed this immediately before every
+                # OpenCode subprocess. Keep that boundary here so batch consent,
+                # exact environment consent, and persistent timed grants are all
+                # resolved before any role prompt can leave the machine.
+                from automation import privacy_consent
+
+                privacy_consent.ensure_run_consent(
+                    repo,
+                    mappings,
+                    executable=executable,
+                    runner=runner,
+                )
                 if not model:
                     raise privacy.PrivacyError(
                         f"cannot resolve the effective OpenCode model for AutoDev role {context.role}; privacy cannot be verified"
