@@ -61,7 +61,8 @@ jobs:
       - name: Lint caller workflows
         if: inputs.run_actionlint
         shell: bash
-        run: "$RUNNER_TEMP/actionlint-bin/actionlint" -color
+        run: |
+          "$RUNNER_TEMP/actionlint-bin/actionlint" -color
 
       - name: Summarize baseline validation
         shell: bash
