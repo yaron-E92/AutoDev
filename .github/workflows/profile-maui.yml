@@ -75,15 +75,20 @@ on:
         type: string
         default: 'dotnet workload install maui-android --skip-manifest-update'
       android_restore_command:
-        required: true
+        description: Android restore command; required when android_enabled is true
+        required: false
         type: string
+        default: 'echo "android_restore_command must be configured when android_enabled=true" >&2; exit 2'
       android_build_command:
-        required: true
+        description: Android build/publish command; required when android_enabled is true
+        required: false
         type: string
+        default: 'echo "android_build_command must be configured when android_enabled=true" >&2; exit 2'
       android_test_command:
-        description: Android smoke/test command; use a deterministic product check when emulator testing is not applicable
-        required: true
+        description: Android smoke/product verification command; required when android_enabled is true
+        required: false
         type: string
+        default: 'echo "android_test_command must be configured when android_enabled=true" >&2; exit 2'
       android_test_results_path:
         required: false
         type: string
@@ -104,15 +109,20 @@ on:
         type: string
         default: 'dotnet workload install maui --skip-manifest-update'
       windows_restore_command:
-        required: true
+        description: Windows restore command; required when windows_enabled is true
+        required: false
         type: string
+        default: 'echo "windows_restore_command must be configured when windows_enabled=true" >&2; exit 2'
       windows_build_command:
-        required: true
+        description: Windows build/publish command; required when windows_enabled is true
+        required: false
         type: string
+        default: 'echo "windows_build_command must be configured when windows_enabled=true" >&2; exit 2'
       windows_test_command:
-        description: Windows smoke/test command; may be a publish/output verification command
-        required: true
+        description: Windows smoke/product verification command; required when windows_enabled is true
+        required: false
         type: string
+        default: 'echo "windows_test_command must be configured when windows_enabled=true" >&2; exit 2'
       windows_test_results_path:
         required: false
         type: string
