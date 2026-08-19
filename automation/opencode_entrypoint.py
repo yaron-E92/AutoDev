@@ -5,6 +5,7 @@ import sys
 from automation import (
     ci_outcomes,
     context_optimization,
+    issue_queue,
     opencode_github_entrypoint,
     opencode_role_entrypoint,
     opencode_runtime,
@@ -20,6 +21,7 @@ from automation import (
 COORDINATE_COMMAND = "coordinate"
 ROLE_COMMAND = "role"
 PRIVACY_COMMAND = "privacy"
+QUEUE_COMMAND = "queue"
 
 
 def run(argv: list[str] | None = None) -> int:
@@ -34,6 +36,8 @@ def run(argv: list[str] | None = None) -> int:
     values = list(sys.argv[1:] if argv is None else argv)
     if values and values[0] == PRIVACY_COMMAND:
         return privacy_grants.run_cli(values[1:])
+    if values and values[0] == QUEUE_COMMAND:
+        return issue_queue.run_cli(values[1:])
     if values and values[0] == COORDINATE_COMMAND:
         return opencode_github_entrypoint.run(values[1:])
     if values and values[0] == ROLE_COMMAND:
