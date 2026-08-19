@@ -1,0 +1,109 @@
+name: Reusable trusted version tag
+
+on:
+  workflow_call:
+    inputs:
+      head:
+        description: Exact successful caller main SHA to tag
+        required: true
+        type: string
+      branch:
+        description: Trusted default branch
+        required: false
+        type: string
+        default: main
+      base_version:
+        description: Version to use when no canonical vMAJOR.MINOR.PATCH tag exists
+        required: false
+        type: string
+        default: 0.0.0
+    outputs:
+      base_tag:
+        value: ${{ jobs.version.outputs.base_tag }}
+      base_version:
+        value: ${{ jobs.version.outputs.base_version }}
+      bump:
+        value: ${{ jobs.version.outputs.bump }}
+      version:
+        value: ${{ jobs.version.outputs.version }}
+      tag:
+        value: ${{ jobs.version.outputs.tag }}
+      source_sha:
+        value: ${{ jobs.version.outputs.source_sha }}
+      tag_required:
+        value: ${{ jobs.version.outputs.tag_required }}
+      superseded:
+        value: ${{ jobs.version.outputs.superseded }}
+      tag_status:
+        value: ${{ jobs.version.outputs.tag_status }}
+
+jobs:
+  version:
+    name: Advance trusted version tag
+    runs-on: ubuntu-latest
+    concurrency:
+      group: autodev-version-${{ github.repository }}-${{ inputs.branch }}
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      pull-requests: read
+    outputs:
+      base_tag: ${{ steps.version.outputs.base_tag }}
+      base_version: ${{ steps.version.outputs.base_version }}
+      bump: ${{ steps.version.outputs.bump }}
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      source_sha: ${{ steps.version.outputs.source_sha }}
+      tag_required: ${{ steps.version.outputs.tag_required }}
+      superseded: ${{ steps.version.outputs.superseded }}
+      tag_status: ${{ steps.version.outputs.tag_status }}
+
+    steps:
+      - name: Check out exact successful caller main SHA
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.head }}
+          fetch-depth: 0
+
+      - name: Configure annotated tag identity
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Resolve merged change intent and allocate tag
+        id: version
+        uses: $/.github/actions/version-policy
+        with:
+          mode: resolve-main
+          repository: ${{ github.repository }}
+          head: ${{ inputs.head }}
+          branch: ${{ inputs.branch }}
+          base-version: ${{ inputs.base_version }}
+          github-token: ${{ github.token }}
+          create-tag: 'true'
+
+      - name: Summarize version advancement
+        shell: bash
+        env:
+          BASE_TAG: ${{ steps.version.outputs.base_tag }}
+          BUMP: ${{ steps.version.outputs.bump }}
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
+          TAG_REQUIRED: ${{ steps.version.outputs.tag_required }}
+          SUPERSEDED: ${{ steps.version.outputs.superseded }}
+          TAG_STATUS: ${{ steps.version.outputs.tag_status }}
+        run: |
+          {
+            echo "### Version advancement"
+            echo
+            echo "- Base tag: \`${BASE_TAG:-'(none)'}\`"
+            echo "- Highest intent: \`$BUMP\`"
+            echo "- Version: \`$VERSION\`"
+            echo "- Tag: \`$TAG\`"
+            echo "- Tag required: \`$TAG_REQUIRED\`"
+            echo "- Superseded: \`$SUPERSEDED\`"
+            echo "- Tag status: \`$TAG_STATUS\`"
+            echo
+            echo "Version advancement stops here. **No release, package publication, signing, or deployment is triggered by this workflow.**"
+          } >> "$GITHUB_STEP_SUMMARY"
