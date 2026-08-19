@@ -12,6 +12,7 @@ from automation import run_manifest, workflow_stages
 
 DEFAULT_RUNTIME = "opencode"
 RUNTIME_ENV = "AUTODEV_ROLE_RUNTIME"
+USER_CONFIG_ENV = "AUTODEV_USER_CONFIG"
 CONFIG_RELATIVE = Path(".autodev") / "config.json"
 _RUNTIME_NAME = re.compile(r"^[a-z][a-z0-9_-]*$")
 
@@ -102,11 +103,29 @@ def resolve_runtime_name(repo: Path, requested: str = "") -> tuple[str, str]:
     if env_value:
         return _validate_name(env_value), f"environment:{RUNTIME_ENV}"
 
-    configured = _configured_runtime(repo)
+    configured = _runtime_from_config(repo / CONFIG_RELATIVE, required=False)
     if configured:
         return _validate_name(configured), CONFIG_RELATIVE.as_posix()
 
+    user_path = user_config_path()
+    configured = _runtime_from_config(user_path, required=False)
+    if configured:
+        return _validate_name(configured), str(user_path)
+
     return DEFAULT_RUNTIME, "default"
+
+
+def user_config_path() -> Path:
+    explicit = os.environ.get(USER_CONFIG_ENV, "").strip()
+    if explicit:
+        return Path(explicit).expanduser()
+    xdg = os.environ.get("XDG_CONFIG_HOME", "").strip()
+    if xdg:
+        return Path(xdg).expanduser() / "autodev" / "config.json"
+    appdata = os.environ.get("APPDATA", "").strip()
+    if os.name == "nt" and appdata:
+        return Path(appdata).expanduser() / "AutoDev" / "config.json"
+    return Path.home() / ".config" / "autodev" / "config.json"
 
 
 def select_runtime(
@@ -198,22 +217,23 @@ def selected_runtime_from_manifest(repo: Path) -> str:
     return str(value.get("name", "")) if isinstance(value, dict) else ""
 
 
-def _configured_runtime(repo: Path) -> str:
-    path = repo / CONFIG_RELATIVE
+def _runtime_from_config(path: Path, *, required: bool) -> str:
     if not path.is_file():
+        if required:
+            raise RoleRuntimeError(f"runtime configuration does not exist: {path}")
         return ""
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        raise RoleRuntimeError(f"cannot read {CONFIG_RELATIVE.as_posix()}: {exc}") from exc
+        raise RoleRuntimeError(f"cannot read runtime configuration {path}: {exc}") from exc
     if not isinstance(value, dict):
-        raise RoleRuntimeError(f"{CONFIG_RELATIVE.as_posix()} must contain a JSON object")
+        raise RoleRuntimeError(f"runtime configuration {path} must contain a JSON object")
     raw = value.get("role_runtime", "")
     if raw in (None, ""):
         return ""
     if not isinstance(raw, str):
         raise RoleRuntimeError(
-            f"{CONFIG_RELATIVE.as_posix()} field role_runtime must be a string"
+            f"runtime configuration {path} field role_runtime must be a string"
         )
     return raw.strip()
 
