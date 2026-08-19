@@ -10,6 +10,7 @@ from automation import (
     opencode_runtime,
     pr_head_sync,
     privacy_consent,
+    privacy_grants,
     semantic_repair_budget,
     windows_semantic_order,
     windows_verification,
@@ -18,6 +19,7 @@ from automation import (
 
 COORDINATE_COMMAND = "coordinate"
 ROLE_COMMAND = "role"
+PRIVACY_COMMAND = "privacy"
 
 
 def run(argv: list[str] | None = None) -> int:
@@ -28,7 +30,10 @@ def run(argv: list[str] | None = None) -> int:
     windows_semantic_order.install()
     context_optimization.install()
     privacy_consent.install()
+    privacy_grants.install(run_consent=True)
     values = list(sys.argv[1:] if argv is None else argv)
+    if values and values[0] == PRIVACY_COMMAND:
+        return privacy_grants.run_cli(values[1:])
     if values and values[0] == COORDINATE_COMMAND:
         return opencode_github_entrypoint.run(values[1:])
     if values and values[0] == ROLE_COMMAND:
