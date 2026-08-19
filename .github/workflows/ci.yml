@@ -37,38 +37,14 @@ jobs:
       contents: read
 
   workflow-lint:
-    name: Workflow lint and immutable refs
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          ref: ${{ env.AUTODEV_CI_REF }}
-
-      - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
-        with:
-          python-version: "3.11"
-
-      - name: Install actionlint
-        shell: bash
-        env:
-          ACTIONLINT_VERSION: v1.7.12
-        run: |
-          set -euo pipefail
-          export GOBIN="$RUNNER_TEMP/actionlint-bin"
-          mkdir -p "$GOBIN"
-          go install "github.com/rhysd/actionlint/cmd/actionlint@${ACTIONLINT_VERSION}"
-          "$GOBIN/actionlint" -version
-
-      - name: Lint every workflow
-        shell: bash
-        run: |
-          "$RUNNER_TEMP/actionlint-bin/actionlint" -color
-
-      - name: Reject mutable external action refs
-        run: python -m automation.validate_workflows --repo .
+    name: Baseline workflow policy
+    uses: $/.github/workflows/profile-baseline.yml
+    with:
+      ref: ${{ inputs.ref || github.sha }}
+      run_actionlint: true
+      require_concurrency: false
+    permissions:
+      contents: read
 
   release-reproducibility:
     name: Release bundle reproducibility
@@ -96,7 +72,7 @@ jobs:
           diff -ru "$RUNNER_TEMP/release-a" "$RUNNER_TEMP/release-b"
 
   version-policy-action:
-    name: Shared version policy action
+    name: Shared policy actions
     runs-on: ubuntu-latest
 
     steps:
@@ -109,62 +85,59 @@ jobs:
       - name: Show runner Node runtime
         run: node --version
 
-      - name: Run dependency-free action tests
+      - name: Run dependency-free version-policy tests
         run: node --test .github/actions/version-policy/index.test.js
 
-      - name: Exercise JavaScript Action runtime directly
-        id: smoke
+      - name: Run dependency-free workflow-policy tests
+        run: node --test .github/actions/workflow-policy/index.test.js
+
+      - name: Exercise version-policy Action runtime directly
+        id: version-smoke
         uses: $/.github/actions/version-policy
         with:
           mode: check-pr
           pr-body: '+semver: none'
           head: HEAD
 
-      - name: Verify smoke outputs
+      - name: Verify version-policy smoke outputs
         shell: bash
         env:
-          BUMP: ${{ steps.smoke.outputs.bump }}
-          TAG_REQUIRED: ${{ steps.smoke.outputs.tag_required }}
+          BUMP: ${{ steps.version-smoke.outputs.bump }}
+          TAG_REQUIRED: ${{ steps.version-smoke.outputs.tag_required }}
         run: |
           set -euo pipefail
           [[ "$BUMP" == "none" ]]
           [[ "$TAG_REQUIRED" == "false" ]]
 
+      - name: Exercise workflow-policy Action runtime directly
+        id: workflow-smoke
+        uses: $/.github/actions/workflow-policy
+        with:
+          workflows-path: .github/workflows
+          require-concurrency: false
+
+      - name: Verify workflow-policy smoke outputs
+        shell: bash
+        env:
+          CHECKED_FILES: ${{ steps.workflow-smoke.outputs.checked_files }}
+        run: |
+          set -euo pipefail
+          [[ "$CHECKED_FILES" =~ ^[1-9][0-9]*$ ]]
+
   python:
-    name: Python ${{ matrix.python-version }} / ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os:
-          - ubuntu-latest
-          - windows-latest
-        python-version:
-          - "3.11"
-          - "3.14"
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          ref: ${{ env.AUTODEV_CI_REF }}
-
-      - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
-        with:
-          python-version: ${{ matrix.python-version }}
-
-      - name: Compile Python sources
-        run: python -m compileall automation area_reader_v2 benchmarks tests
-
-      - name: Run unit tests
-        run: python -m unittest discover -s tests -v
-
-      - name: Run mocked issue-to-PR smoke tests
-        run: >-
-          python -m unittest -v
-          tests.test_run_real_issue.RunRealIssueTests.test_plan_only_uses_reader_provider_for_planning_not_coder_provider
-          tests.test_run_real_issue.RunRealIssueTests.test_dry_run_implementation_calls_coder_and_saves_patch
+    name: Shared Python profile
+    uses: $/.github/workflows/profile-python.yml
+    with:
+      ref: ${{ inputs.ref || github.sha }}
+      runners: '["ubuntu-latest","windows-latest"]'
+      python_versions: '["3.11","3.14"]'
+      cache: false
+      compile_command: 'python -m compileall automation area_reader_v2 benchmarks tests'
+      test_command: |
+        python -m unittest discover -s tests -v
+        python -m unittest -v tests.test_run_real_issue.RunRealIssueTests.test_plan_only_uses_reader_provider_for_planning_not_coder_provider tests.test_run_real_issue.RunRealIssueTests.test_dry_run_implementation_calls_coder_and_saves_patch
+    permissions:
+      contents: read
 
   bash-syntax:
     name: Bash syntax
