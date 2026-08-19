@@ -12,6 +12,7 @@ from automation import (
     pr_head_sync,
     privacy_consent,
     privacy_grants,
+    role_workflow_hooks,
     semantic_repair_budget,
     windows_semantic_order,
     windows_verification,
@@ -33,6 +34,10 @@ def run(argv: list[str] | None = None) -> int:
     context_optimization.install()
     privacy_consent.install()
     privacy_grants.install(run_consent=True)
+    # Existing workflow policy hooks historically wrapped opencode_coordinator.
+    # Bridge their runtime-neutral behavior into the canonical role coordinator
+    # only after those hooks have installed their underlying workflow patches.
+    role_workflow_hooks.install()
     values = list(sys.argv[1:] if argv is None else argv)
     if values and values[0] == PRIVACY_COMMAND:
         return privacy_grants.run_cli(values[1:])
