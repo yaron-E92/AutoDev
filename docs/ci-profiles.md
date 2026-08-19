@@ -64,19 +64,28 @@ Standardizes .NET setup and validation:
 
 `cache: true` is opt-in because setup-dotnet package caching expects lockfiles. Repositories without lockfiles should leave it disabled until their dependency policy supports it.
 
+A "headless .NET" CI role does not require a configuration literally named `NoGUI`. Callers may point this profile at a dedicated configuration, solution slice/filter, or explicit project/test commands that exclude the platform presentation project.
+
 ### `profile-maui.yml`
 
-Composes `profile-dotnet.yml` rather than copying .NET setup into each platform leg.
+Provides independently controllable:
 
-It provides independently controllable:
-
-- shared/headless validation;
+- shared/headless validation through `profile-dotnet.yml`;
 - Android product-shape validation;
-- Windows product-shape validation.
+- Windows product-shape validation through `profile-dotnet.yml`.
 
 Android and Windows are enabled by default. Their restore/build/test commands deliberately fail with a configuration message until the caller supplies project-specific commands. A repository may explicitly disable a platform leg when it is genuinely not applicable; path filtering or convenience logic must not silently turn required product validation into a no-op.
 
-MAUI workload/platform setup remains an explicit command input because project/workload needs differ. As migrations expose repeated safe caching patterns, those patterns should move into this shared profile rather than being copied between consumers.
+The normal Android path composes `profile-dotnet.yml`, matching the lightweight build/test behavior used by consumers such as TATATORPLAG. Callers that need stronger device/emulator validation can additionally provide `android_runtime_smoke_command`. When that input is non-empty, the profile uses its Android runtime path instead: it performs the same shared checkout/.NET/setup/restore/build/test responsibilities, optionally provisions a pinned JDK, runs an optional `android_runtime_setup_command`, and then executes the caller's runtime smoke command. This lets a repository keep product-specific scripts (for example, install/run/health assertions) while removing copied GitHub Actions orchestration.
+
+Runtime-smoke inputs include:
+
+- `android_runtime_smoke_command` — enables the richer Android runtime path;
+- `android_runtime_setup_command` — optional setup immediately before runtime validation;
+- `android_runtime_java_distribution` / `android_runtime_java_version` — pinned setup-java configuration, defaulting to Microsoft JDK 21; set the version to empty when Java is caller-managed;
+- `android_runtime_timeout_minutes` — job timeout, default 45 minutes.
+
+MAUI workload/platform commands remain explicit because project/workload needs differ. Repeated safe setup/caching patterns discovered across consumers should move into this profile rather than being copied between repositories.
 
 ### `profile-node-next.yml`
 
@@ -104,10 +113,10 @@ A CI profile does not publish a release merely because it creates or validates a
 Repository-specific behavior belongs in one of three places:
 
 1. **profile command inputs** when the behavior is part of normal validation;
-2. **local caller jobs** when the behavior is genuinely unique (emulator orchestration, specialized data services, generated fixtures, etc.);
+2. **local caller jobs** only when the behavior remains genuinely unique and cannot yet be represented by a safe shared hook;
 3. **manual release/signing workflows** for protected publication concerns.
 
-If the same local extension appears in multiple consumers, promote it into a shared profile rather than copying it again.
+If the same local extension appears in multiple consumers, promote it into a shared profile rather than copying it again. Emulator/device runtime validation is a shared MAUI concern; the reusable profile should own orchestration while the caller owns the product-specific smoke script and assertions.
 
 ## Secrets
 

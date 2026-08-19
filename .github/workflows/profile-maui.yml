@@ -85,7 +85,7 @@ on:
         type: string
         default: 'echo "android_build_command must be configured when android_enabled=true" >&2; exit 2'
       android_test_command:
-        description: Android smoke/product verification command; required when android_enabled is true
+        description: Android test/product verification command; required when android_enabled is true
         required: false
         type: string
         default: 'echo "android_test_command must be configured when android_enabled=true" >&2; exit 2'
@@ -93,6 +93,31 @@ on:
         required: false
         type: string
         default: ''
+      android_runtime_setup_command:
+        description: Optional setup immediately before Android runtime/emulator smoke validation
+        required: false
+        type: string
+        default: ''
+      android_runtime_smoke_command:
+        description: Optional runtime/emulator smoke command run after normal Android build/test validation
+        required: false
+        type: string
+        default: ''
+      android_runtime_java_distribution:
+        description: setup-java distribution used when Android runtime smoke is enabled
+        required: false
+        type: string
+        default: microsoft
+      android_runtime_java_version:
+        description: JDK version used when Android runtime smoke is enabled; leave empty to skip setup-java
+        required: false
+        type: string
+        default: '21'
+      android_runtime_timeout_minutes:
+        description: Job timeout when Android runtime smoke is enabled
+        required: false
+        type: number
+        default: 45
 
       windows_enabled:
         description: Run Windows product-shape validation
@@ -157,7 +182,7 @@ jobs:
 
   android:
     name: MAUI Android
-    if: inputs.android_enabled
+    if: inputs.android_enabled && inputs.android_runtime_smoke_command == ''
     uses: $/.github/workflows/profile-dotnet.yml
     with:
       ref: ${{ inputs.ref }}
@@ -174,6 +199,103 @@ jobs:
       artifact_name: maui-android-results
     secrets:
       nuget_token: ${{ secrets.nuget_token }}
+
+  android-runtime:
+    name: MAUI Android runtime smoke
+    if: inputs.android_enabled && inputs.android_runtime_smoke_command != ''
+    runs-on: ${{ inputs.android_runner }}
+    timeout-minutes: ${{ inputs.android_runtime_timeout_minutes }}
+    env:
+      NUGET_AUTH_TOKEN: ${{ secrets.nuget_token }}
+
+    steps:
+      - name: Check out caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+
+      - name: Set up .NET from global.json
+        if: inputs.global_json_file != '' && !inputs.cache
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: ${{ inputs.global_json_file }}
+
+      - name: Set up .NET version
+        if: inputs.global_json_file == '' && !inputs.cache
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: ${{ inputs.dotnet_version }}
+
+      - name: Set up .NET from global.json with NuGet cache
+        if: inputs.global_json_file != '' && inputs.cache
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: ${{ inputs.global_json_file }}
+          cache: true
+          cache-dependency-path: ${{ inputs.cache_dependency_path }}
+
+      - name: Set up .NET version with NuGet cache
+        if: inputs.global_json_file == '' && inputs.cache
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: ${{ inputs.dotnet_version }}
+          cache: true
+          cache-dependency-path: ${{ inputs.cache_dependency_path }}
+
+      - name: Set up JDK for runtime smoke
+        if: inputs.android_runtime_java_version != ''
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+        with:
+          distribution: ${{ inputs.android_runtime_java_distribution }}
+          java-version: ${{ inputs.android_runtime_java_version }}
+
+      - name: Repository-specific Android setup
+        if: inputs.android_setup_command != ''
+        shell: bash
+        run: ${{ inputs.android_setup_command }}
+
+      - name: Restore Android dependencies
+        shell: bash
+        run: ${{ inputs.android_restore_command }}
+
+      - name: Build Android product
+        shell: bash
+        run: ${{ inputs.android_build_command }}
+
+      - name: Test Android product
+        shell: bash
+        run: ${{ inputs.android_test_command }}
+
+      - name: Runtime-specific setup
+        if: inputs.android_runtime_setup_command != ''
+        shell: bash
+        run: ${{ inputs.android_runtime_setup_command }}
+
+      - name: Run Android runtime smoke
+        shell: bash
+        run: ${{ inputs.android_runtime_smoke_command }}
+
+      - name: Require and upload Android test results
+        if: inputs.android_test_results_path != '' && always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: maui-android-results-${{ inputs.android_runner }}
+          path: ${{ inputs.android_test_results_path }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Summarize Android runtime profile
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### Shared MAUI Android runtime validation"
+            echo
+            echo "- Runner: \`${{ inputs.android_runner }}\`"
+            echo "- Runtime smoke: enabled"
+            echo "- Runtime JDK: \`${{ inputs.android_runtime_java_version || '(caller-managed)' }}\`"
+            echo "- Test results required: \`${{ inputs.android_test_results_path != '' }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   windows:
     name: MAUI Windows
