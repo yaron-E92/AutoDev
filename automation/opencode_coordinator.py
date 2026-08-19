@@ -10,7 +10,15 @@ import time
 from pathlib import Path
 from typing import Callable
 
-from automation import opencode_adapter, opencode_cli, opencode_resume, opencode_runtime, privacy, workflow_stages
+from automation import (
+    opencode_adapter,
+    opencode_cli,
+    opencode_resume,
+    opencode_runtime,
+    privacy,
+    role_runtime_diagnostics,
+    workflow_stages,
+)
 
 
 ROLE_PROMPT = (
@@ -41,9 +49,16 @@ MAX_TRANSITIONS = 100
 
 
 class OpenCodeCoordinatorError(RuntimeError):
-    def __init__(self, message: str, *, classification: str = workflow_stages.FAILURE_DETERMINISTIC) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        classification: str = workflow_stages.FAILURE_DETERMINISTIC,
+        diagnostic_path: str = "",
+    ) -> None:
         super().__init__(message)
         self.classification = classification
+        self.diagnostic_path = diagnostic_path
 
 
 def role_timeout_seconds(role: str) -> int:
@@ -121,6 +136,37 @@ def _prepare_role(repo: Path, role: str, *, repair_kind: str = "") -> None:
     opencode_adapter.prepare_role(role, repo, arguments)
 
 
+def _record_runtime_failure(
+    repo: Path,
+    role: str,
+    *,
+    phase: str,
+    repair_kind: str,
+    returncode: int | None,
+    elapsed_ms: int,
+    stdout: object = "",
+    stderr: object = "",
+    termination: str,
+    classification: str,
+    reason: str,
+) -> str:
+    return role_runtime_diagnostics.record_attempt(
+        repo,
+        role=role,
+        phase=phase,
+        runtime="opencode",
+        output_path=_role_output_path(repo, role),
+        returncode=returncode,
+        elapsed_ms=elapsed_ms,
+        stdout=stdout,
+        stderr=stderr,
+        accepted=False,
+        failure_classification=classification,
+        failure_reason=reason,
+        termination=termination,
+    )
+
+
 def _run_agent_process(
     repo: Path,
     role: str,
@@ -130,7 +176,7 @@ def _run_agent_process(
     which=None,
     repair_kind: str = "",
     phase: str = "work",
-) -> None:
+) -> dict[str, object]:
     try:
         executable = opencode_cli.resolve_opencode_cli(which=which)
     except opencode_cli.OpenCodeCliError as exc:
@@ -215,24 +261,70 @@ def _run_agent_process(
             ),
             flush=True,
         )
-        raise OpenCodeCoordinatorError(
-            f"OpenCode role {role} exceeded configured timeout of {timeout_seconds} seconds",
+        reason = f"OpenCode role {role} exceeded configured timeout of {timeout_seconds} seconds"
+        diagnostic = _record_runtime_failure(
+            repo,
+            role,
+            phase=phase,
+            repair_kind=repair_kind,
+            returncode=None,
+            elapsed_ms=elapsed_ms,
+            stdout=getattr(exc, "stdout", "") or getattr(exc, "output", "") or "",
+            stderr=getattr(exc, "stderr", "") or "",
+            termination="runtime-timeout",
             classification=workflow_stages.FAILURE_TRANSIENT,
+            reason=reason,
+        )
+        raise OpenCodeCoordinatorError(
+            f"{reason}; diagnostic: {diagnostic}",
+            classification=workflow_stages.FAILURE_TRANSIENT,
+            diagnostic_path=diagnostic,
         ) from exc
     except OSError as exc:
-        raise OpenCodeCoordinatorError(
-            f"could not launch OpenCode role {role} via {executable!r}: {exc}",
+        elapsed_ms = int((time.monotonic() - started) * 1000)
+        reason = f"could not launch OpenCode role {role} via {executable!r}: {exc}"
+        diagnostic = _record_runtime_failure(
+            repo,
+            role,
+            phase=phase,
+            repair_kind=repair_kind,
+            returncode=None,
+            elapsed_ms=elapsed_ms,
+            stderr=str(exc),
+            termination="runtime-launch-failed",
             classification=workflow_stages.FAILURE_TRANSIENT,
+            reason=reason,
+        )
+        raise OpenCodeCoordinatorError(
+            f"{reason}; diagnostic: {diagnostic}",
+            classification=workflow_stages.FAILURE_TRANSIENT,
+            diagnostic_path=diagnostic,
         ) from exc
 
+    elapsed_ms = int((time.monotonic() - started) * 1000)
     returncode = int(getattr(completed, "returncode", 1))
+    stderr = str(getattr(completed, "stderr", "") or "")
+    stdout = str(getattr(completed, "stdout", "") or "")
     if returncode != 0:
-        stderr = str(getattr(completed, "stderr", "") or "").strip()
-        stdout = str(getattr(completed, "stdout", "") or "").strip()
-        detail = (stderr or stdout)[-2000:]
-        raise OpenCodeCoordinatorError(
-            f"OpenCode role {role} exited with code {returncode}" + (f": {detail}" if detail else ""),
+        detail = (stderr.strip() or stdout.strip())[-2000:]
+        reason = f"OpenCode role {role} exited with code {returncode}" + (f": {detail}" if detail else "")
+        diagnostic = _record_runtime_failure(
+            repo,
+            role,
+            phase=phase,
+            repair_kind=repair_kind,
+            returncode=returncode,
+            elapsed_ms=elapsed_ms,
+            stdout=stdout,
+            stderr=stderr,
+            termination="runtime-nonzero",
             classification=workflow_stages.FAILURE_TRANSIENT,
+            reason=reason,
+        )
+        raise OpenCodeCoordinatorError(
+            f"{reason}; diagnostic: {diagnostic}",
+            classification=workflow_stages.FAILURE_TRANSIENT,
+            diagnostic_path=diagnostic,
         )
 
     finished = {
@@ -240,11 +332,50 @@ def _run_agent_process(
         "role": role,
         "phase": phase,
         "returncode": returncode,
-        "elapsed_ms": int((time.monotonic() - started) * 1000),
+        "elapsed_ms": elapsed_ms,
     }
     if repair_kind:
         finished["repair_kind"] = repair_kind
     print(json.dumps(finished, sort_keys=True), flush=True)
+    return {
+        "runtime": "opencode",
+        "role": role,
+        "phase": phase,
+        "returncode": returncode,
+        "elapsed_ms": elapsed_ms,
+        "stdout": stdout,
+        "stderr": stderr,
+        "termination": "completed",
+    }
+
+
+def _record_validated_attempt(
+    repo: Path,
+    role: str,
+    process: dict[str, object],
+    output: Path | None,
+    *,
+    accepted: bool,
+    validation_error: str = "",
+    classification: str = "",
+    reason: str = "",
+) -> str:
+    return role_runtime_diagnostics.record_attempt(
+        repo,
+        role=role,
+        phase=str(process.get("phase", "work")),
+        runtime=str(process.get("runtime", "opencode")),
+        output_path=output,
+        returncode=int(process.get("returncode", 0) or 0),
+        elapsed_ms=int(process.get("elapsed_ms", 0) or 0),
+        stdout=process.get("stdout", ""),
+        stderr=process.get("stderr", ""),
+        accepted=accepted,
+        validation_error=validation_error,
+        failure_classification=classification,
+        failure_reason=reason,
+        termination=str(process.get("termination", "completed")),
+    )
 
 
 def run_role(
@@ -262,7 +393,7 @@ def run_role(
     prompt = ROLE_PROMPT.format(role=role)
     if repair_kind:
         prompt += f" The prepared repair kind is {repair_kind}."
-    _run_agent_process(
+    initial = _run_agent_process(
         repo,
         role,
         prompt,
@@ -272,15 +403,29 @@ def run_role(
     )
 
     output = _role_output_path(repo, role)
+    last_diagnostic = ""
     try:
         opencode_adapter.accept_role(role, repo, output)
     except opencode_adapter.OpenCodeAdapterError as first_error:
+        reason = f"OpenCode role {role} output was rejected: {first_error}"
+        last_diagnostic = _record_validated_attempt(
+            repo,
+            role,
+            initial,
+            output,
+            accepted=False,
+            validation_error=str(first_error),
+            classification=role_runtime_diagnostics.FAILURE_ROLE_PROTOCOL,
+            reason=reason,
+        )
         correction = repo / workflow_stages.CURRENT_DIR / f"contract-correction-{role}.md"
         if not correction.is_file():
             raise OpenCodeCoordinatorError(
-                f"OpenCode role {role} output was rejected: {first_error}"
+                f"{reason}; diagnostic: {last_diagnostic}",
+                classification=role_runtime_diagnostics.FAILURE_ROLE_PROTOCOL,
+                diagnostic_path=last_diagnostic,
             ) from first_error
-        _run_agent_process(
+        correction_process = _run_agent_process(
             repo,
             role,
             CORRECTION_PROMPT.format(role=role),
@@ -292,15 +437,48 @@ def run_role(
         try:
             opencode_adapter.accept_role(role, repo, output)
         except opencode_adapter.OpenCodeAdapterError as second_error:
+            reason = f"OpenCode role {role} protocol correction failed: {second_error}"
+            last_diagnostic = _record_validated_attempt(
+                repo,
+                role,
+                correction_process,
+                output,
+                accepted=False,
+                validation_error=str(second_error),
+                classification=role_runtime_diagnostics.FAILURE_ROLE_PROTOCOL_EXHAUSTED,
+                reason=reason,
+            )
             raise OpenCodeCoordinatorError(
-                f"OpenCode role {role} protocol correction failed: {second_error}"
+                f"{reason}; diagnostic: {last_diagnostic}",
+                classification=role_runtime_diagnostics.FAILURE_ROLE_PROTOCOL_EXHAUSTED,
+                diagnostic_path=last_diagnostic,
             ) from second_error
+        last_diagnostic = _record_validated_attempt(
+            repo,
+            role,
+            correction_process,
+            output,
+            accepted=True,
+        )
+    else:
+        last_diagnostic = _record_validated_attempt(
+            repo,
+            role,
+            initial,
+            output,
+            accepted=True,
+        )
 
     acceptance = role_acceptance(repo, role)
     if acceptance.get("state") != "ACCEPTED":
-        raise OpenCodeCoordinatorError(
+        reason = (
             f"OpenCode role {role} was not durably accepted after Python validation: "
             f"{acceptance.get('state')} — {acceptance.get('reason', '')}"
+        )
+        raise OpenCodeCoordinatorError(
+            f"{reason}; last role attempt: {last_diagnostic}",
+            classification=role_runtime_diagnostics.FAILURE_ROLE_PROTOCOL,
+            diagnostic_path=last_diagnostic,
         )
     print(json.dumps({"event": "role-accepted", **acceptance}, sort_keys=True), flush=True)
     return acceptance
@@ -363,6 +541,7 @@ def terminal_payload(repo: Path, payload: dict[str, object], *, arguments: str =
         classification=str(
             payload.get("failure_classification", "") or workflow_stages.FAILURE_DETERMINISTIC
         ),
+        diagnostic_path=str(payload.get("artifact", "")),
     )
     if opencode_resume.has_manifest(repo):
         opencode_resume.checkpoint_failure(
@@ -381,6 +560,9 @@ def terminal_payload(repo: Path, payload: dict[str, object], *, arguments: str =
         failure_fingerprint=str(payload.get("failure_fingerprint", "")),
     )
     result["stage"] = "python-coordinator"
+    artifact = str(payload.get("artifact", ""))
+    if artifact:
+        result["artifact"] = artifact
     return result
 
 
@@ -559,6 +741,7 @@ def run(argv: list[str] | None = None) -> int:
         OSError,
         ValueError,
     ) as exc:
+        diagnostic_path = str(getattr(exc, "diagnostic_path", "") or "")
         payload = terminal_payload(
             Path(args.repo).expanduser().resolve(),
             {
@@ -568,6 +751,7 @@ def run(argv: list[str] | None = None) -> int:
                 "failure_classification": str(
                     getattr(exc, "classification", "") or workflow_stages.FAILURE_DETERMINISTIC
                 ),
+                "artifact": diagnostic_path,
             },
             arguments=args.arguments,
         )
