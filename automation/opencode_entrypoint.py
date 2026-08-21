@@ -5,6 +5,7 @@ import sys
 from automation import (
     ci_outcomes,
     context_optimization,
+    execution_classification_hooks,
     issue_queue,
     opencode_github_entrypoint,
     opencode_role_entrypoint,
@@ -38,6 +39,10 @@ def run(argv: list[str] | None = None) -> int:
     # Bridge their runtime-neutral behavior into the canonical role coordinator
     # only after those hooks have installed their underlying workflow patches.
     role_workflow_hooks.install()
+    # Manual/external execution classification must wrap the final shared role
+    # and resume boundaries so both slash-command and Python coordination stop
+    # before implementation when attention is required.
+    execution_classification_hooks.install()
     values = list(sys.argv[1:] if argv is None else argv)
     if values and values[0] == PRIVACY_COMMAND:
         return privacy_grants.run_cli(values[1:])
