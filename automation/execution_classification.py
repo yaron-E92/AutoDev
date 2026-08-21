@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 
@@ -11,10 +11,15 @@ MIXED = "mixed"
 MANUAL_EXTERNAL = "manual-external"
 CLASSIFICATIONS = {AUTOMATABLE, MIXED, MANUAL_EXTERNAL}
 
+PROTOCOL_VERSION = 1
+PROTOCOL_STATE_FIELD = "ExecutionClassificationProtocolVersion"
 CLASSIFICATION_FILE = "execution-classification.json"
 MANUAL_ACTION_PLAN_FILE = "manual-action-plan.md"
 CLASSIFICATION_BLOCK_START = "AUTODEV_EXECUTION_CLASSIFICATION_JSON"
 CLASSIFICATION_BLOCK_END = "END_AUTODEV_EXECUTION_CLASSIFICATION_JSON"
+# This marker means: the declared manual prerequisite is complete and an
+# automatable continuation remains. A fully manual issue with no repository
+# continuation should be closed by the operator instead of adding this marker.
 MANUAL_EVIDENCE_MARKER = "<!-- autodev:manual-evidence=complete -->"
 
 _SIMPLE_DECLARATION = re.compile(
@@ -53,24 +58,27 @@ class ExecutionReport:
 
     @property
     def attention_required(self) -> bool:
-        if self.classification == MANUAL_EXTERNAL:
-            return True
-        if self.classification != MIXED:
+        if self.classification == AUTOMATABLE:
             return False
-        if not self.autonomous_criteria:
-            return True
-        if self.manual_prerequisite_blocks_implementation and not self.completion_evidence_present:
-            return True
-        return not self.autonomous_subset_independent and not self.completion_evidence_present
+        # The explicit evidence marker is an operator-owned signal that the
+        # manual prerequisite is satisfied and a repository continuation exists.
+        # Reader must then re-evaluate the remaining work before implementation.
+        return not self.completion_evidence_present
+
+    @property
+    def decomposition_recommended(self) -> bool:
+        return (
+            self.classification == MIXED
+            and self.autonomous_subset_independent
+            and not self.completion_evidence_present
+        )
 
     @property
     def partial_autonomous_execution(self) -> bool:
-        return (
-            self.classification == MIXED
-            and bool(self.autonomous_criteria)
-            and not self.attention_required
-            and not self.completion_evidence_present
-        )
+        # #162 deliberately does not silently redefine a mixed parent issue.
+        # Independent repository work should be decomposed into a child/follow-up
+        # while the parent remains attention-required.
+        return False
 
     def to_json(self) -> dict[str, object]:
         value = asdict(self)
@@ -82,6 +90,7 @@ class ExecutionReport:
         ):
             value[name] = list(value[name])
         value["attention_required"] = self.attention_required
+        value["decomposition_recommended"] = self.decomposition_recommended
         value["partial_autonomous_execution"] = self.partial_autonomous_execution
         return value
 
@@ -90,11 +99,21 @@ def manual_evidence_present(issue_text: str) -> bool:
     return MANUAL_EVIDENCE_MARKER.casefold() in (issue_text or "").casefold()
 
 
+def protocol_enabled(state: dict[str, object]) -> bool:
+    return int(state.get(PROTOCOL_STATE_FIELD, 0) or 0) >= PROTOCOL_VERSION
+
+
+def enable_protocol(state: dict[str, object]) -> None:
+    state[PROTOCOL_STATE_FIELD] = PROTOCOL_VERSION
+
+
 def _string_list(raw: object, field: str) -> tuple[str, ...]:
     if raw is None:
         return ()
     if not isinstance(raw, list):
-        raise ExecutionClassificationError(f"execution classification field {field} must be an array of strings")
+        raise ExecutionClassificationError(
+            f"execution classification field {field} must be an array of strings"
+        )
     values: list[str] = []
     for item in raw:
         if not isinstance(item, str) or not item.strip():
@@ -191,14 +210,20 @@ def _structured_block(text: str) -> dict[str, object] | None:
             f"execution classification block contains invalid JSON: {exc.msg}"
         ) from exc
     if not isinstance(value, dict):
-        raise ExecutionClassificationError("execution classification block must contain one JSON object")
+        raise ExecutionClassificationError(
+            "execution classification block must contain one JSON object"
+        )
     return value
 
 
 def explicit_classification(issue_text: str) -> ExecutionReport | None:
     structured = _structured_block(issue_text)
     if structured is not None:
-        return _report_from_mapping(structured, source="operator-metadata", issue_text=issue_text)
+        return _report_from_mapping(
+            structured,
+            source="operator-metadata",
+            issue_text=issue_text,
+        )
 
     match = _SIMPLE_DECLARATION.search(issue_text or "")
     if not match:
@@ -228,10 +253,14 @@ def explicit_classification(issue_text: str) -> ExecutionReport | None:
             "classification": MANUAL_EXTERNAL,
             "reason": "Operator explicitly declared the substantive outcome manual/external.",
             "autonomous_criteria": [],
-            "manual_criteria": ["Complete the manual/external acceptance criteria described in the issue."],
-            "human_actions": ["Complete the external prerequisite through the authorized human/provider workflow."],
+            "manual_criteria": [
+                "Complete the manual/external acceptance criteria described in the issue."
+            ],
+            "human_actions": [
+                "Complete the external prerequisite through the authorized human/provider workflow."
+            ],
             "resume_evidence": [
-                f"Record only non-secret completion state/identifiers, then add {MANUAL_EVIDENCE_MARKER} if an automatable follow-up remains."
+                "Record only non-secret completion state or identifiers. If an automatable continuation remains, add the documented manual-evidence completion marker; otherwise close the fully manual issue."
             ],
             "manual_prerequisite_blocks_implementation": True,
             "autonomous_subset_independent": False,
@@ -256,23 +285,18 @@ def resolve_reader_classification(reader_text: str, issue_text: str) -> Executio
     if explicit is None:
         return reader
 
-    # Explicit manual/external metadata is an operator-owned stop condition and is
-    # handled before Reader. For declarations that still reach Reader, allow the
-    # bounded semantic check to make execution *more* conservative, never less.
+    # Once the operator supplies explicit completion evidence, Reader owns a
+    # fresh bounded classification of what remains. This prevents an old mixed
+    # or manual declaration from permanently freezing an automatable follow-up.
+    if explicit.completion_evidence_present:
+        return replace(reader, source="reader-after-manual-evidence")
+
+    # Otherwise operator metadata is authoritative, except that Reader may make
+    # execution more conservative when it detects an obvious semantic mismatch.
     rank = {AUTOMATABLE: 0, MIXED: 1, MANUAL_EXTERNAL: 2}
     if rank[reader.classification] > rank[explicit.classification]:
-        return ExecutionReport(
-            **{
-                **reader.__dict__,
-                "source": "reader-safety-downgrade",
-            }
-        )
-    return ExecutionReport(
-        **{
-            **explicit.__dict__,
-            "source": "operator-metadata-confirmed",
-        }
-    )
+        return replace(reader, source="reader-safety-downgrade")
+    return replace(explicit, source="operator-metadata-confirmed")
 
 
 def reader_contract_instructions() -> str:
@@ -297,13 +321,14 @@ At the END of reader-brief.md, include exactly this marker-delimited JSON object
 
 Rules:
 - automatable: manual_criteria, human_actions, and resume_evidence must be empty; both booleans false.
-- mixed: list both autonomous and manual criteria. If code/config depends on an identity, credential, purchased resource, external identifier, or other unavailable prerequisite, set manual_prerequisite_blocks_implementation=true and autonomous_subset_independent=false. If a repository-only subset is independently useful and mergeable before manual completion, set the inverse and bound that subset explicitly.
+- mixed: list both autonomous and manual criteria. If code/config depends on an identity, credential, purchased resource, external identifier, or other unavailable prerequisite, set manual_prerequisite_blocks_implementation=true and autonomous_subset_independent=false. If repository-only work is independently useful before manual completion, set autonomous_subset_independent=true, but do not silently implement that subset on the parent: recommend a child/follow-up issue while the parent remains attention-required.
 - manual-external: list the substantive manual criteria/actions/evidence; do not invent placeholder production identities or a documentation-only patch.
 - Resume evidence must never contain or request secret values, passwords, tokens, credentials, private keys, or certificate key material. State/identifier presence and provider/GitHub metadata are acceptable.
 """
 
 
 def apply_state_fields(state: dict[str, object], report: ExecutionReport) -> None:
+    enable_protocol(state)
     state["ExecutionClassification"] = report.classification
     state["ExecutionClassificationSource"] = report.source
     state["ExecutionReason"] = report.reason
@@ -311,13 +336,19 @@ def apply_state_fields(state: dict[str, object], report: ExecutionReport) -> Non
     state["ManualCriteria"] = list(report.manual_criteria)
     state["HumanActions"] = list(report.human_actions)
     state["ResumeEvidence"] = list(report.resume_evidence)
-    state["ManualPrerequisiteBlocksImplementation"] = report.manual_prerequisite_blocks_implementation
+    state["ManualPrerequisiteBlocksImplementation"] = (
+        report.manual_prerequisite_blocks_implementation
+    )
     state["AutonomousSubsetIndependent"] = report.autonomous_subset_independent
     state["ManualCompletionEvidencePresent"] = report.completion_evidence_present
+    state["DecompositionRecommended"] = report.decomposition_recommended
     state["PartialAutonomousExecution"] = report.partial_autonomous_execution
 
 
-def persist_artifacts(current: Path, report: ExecutionReport) -> tuple[Path, Path | None]:
+def persist_artifacts(
+    current: Path,
+    report: ExecutionReport,
+) -> tuple[Path, Path | None]:
     current.mkdir(parents=True, exist_ok=True)
     classification_path = current / CLASSIFICATION_FILE
     classification_path.write_text(
@@ -339,33 +370,58 @@ def load_report(current: Path) -> ExecutionReport | None:
     if not isinstance(raw, dict):
         return None
     try:
+        classification = str(raw.get("classification", ""))
+        if classification not in CLASSIFICATIONS:
+            return None
         return ExecutionReport(
-            classification=str(raw.get("classification", "")),
+            classification=classification,
             reason=str(raw.get("reason", "")),
-            autonomous_criteria=tuple(str(item) for item in raw.get("autonomous_criteria", []) if str(item)),
-            manual_criteria=tuple(str(item) for item in raw.get("manual_criteria", []) if str(item)),
-            human_actions=tuple(str(item) for item in raw.get("human_actions", []) if str(item)),
-            resume_evidence=tuple(str(item) for item in raw.get("resume_evidence", []) if str(item)),
-            manual_prerequisite_blocks_implementation=bool(raw.get("manual_prerequisite_blocks_implementation", False)),
-            autonomous_subset_independent=bool(raw.get("autonomous_subset_independent", False)),
+            autonomous_criteria=tuple(
+                str(item)
+                for item in raw.get("autonomous_criteria", [])
+                if str(item)
+            ),
+            manual_criteria=tuple(
+                str(item) for item in raw.get("manual_criteria", []) if str(item)
+            ),
+            human_actions=tuple(
+                str(item) for item in raw.get("human_actions", []) if str(item)
+            ),
+            resume_evidence=tuple(
+                str(item) for item in raw.get("resume_evidence", []) if str(item)
+            ),
+            manual_prerequisite_blocks_implementation=bool(
+                raw.get("manual_prerequisite_blocks_implementation", False)
+            ),
+            autonomous_subset_independent=bool(
+                raw.get("autonomous_subset_independent", False)
+            ),
             source=str(raw.get("source", "")),
-            completion_evidence_present=bool(raw.get("completion_evidence_present", False)),
+            completion_evidence_present=bool(
+                raw.get("completion_evidence_present", False)
+            ),
         )
     except (TypeError, ValueError):
         return None
 
 
 def render_manual_action_plan(report: ExecutionReport) -> str:
-    def section(title: str, values: tuple[str, ...], empty: str) -> list[str]:
+    def section(
+        title: str,
+        values: tuple[str, ...],
+        empty: str,
+    ) -> list[str]:
         lines = [f"## {title}", ""]
         if values:
-            lines.extend(f"{index}. {value}" for index, value in enumerate(values, start=1))
+            lines.extend(
+                f"{index}. {value}" for index, value in enumerate(values, start=1)
+            )
         else:
             lines.append(empty)
         lines.append("")
         return lines
 
-    queue_state = "attention" if report.attention_required else "autonomous-subset"
+    queue_state = "attention" if report.attention_required else "re-evaluate"
     lines = [
         "# AutoDev manual/external action plan",
         "",
@@ -376,25 +432,49 @@ def render_manual_action_plan(report: ExecutionReport) -> str:
         f"Manual completion evidence present: {'yes' if report.completion_evidence_present else 'no'}",
         "",
     ]
-    lines.extend(section("Autonomous criteria", report.autonomous_criteria, "None on this issue."))
-    lines.extend(section("Manual/external criteria", report.manual_criteria, "None."))
-    lines.extend(section("Human next actions", report.human_actions, "None."))
-    lines.extend(section("Resume evidence (secret-free)", report.resume_evidence, "None required."))
+    lines.extend(
+        section(
+            "Autonomous criteria",
+            report.autonomous_criteria,
+            "None on this issue.",
+        )
+    )
+    lines.extend(
+        section(
+            "Manual/external criteria",
+            report.manual_criteria,
+            "None.",
+        )
+    )
+    lines.extend(
+        section("Human next actions", report.human_actions, "None.")
+    )
+    lines.extend(
+        section(
+            "Resume evidence (secret-free)",
+            report.resume_evidence,
+            "None required.",
+        )
+    )
     if report.classification == MIXED:
         lines.extend(
             [
-                "## Partial-work boundary",
+                "## Mixed-work boundary",
                 "",
                 (
                     "The manual prerequisite blocks implementation. Stop before Implementer/Fixer until the declared resume evidence exists."
-                    if report.attention_required
-                    else "Only the autonomous criteria listed above may be implemented. The parent issue must remain open/attention-required for unresolved manual criteria; prefer a child issue when practical."
+                    if report.manual_prerequisite_blocks_implementation
+                    else "The repository-only subset is independently useful, but AutoDev will not silently redefine or complete the mixed parent issue. Create/link a child or follow-up issue for the autonomous criteria while this parent remains attention-required."
                 ),
                 "",
             ]
         )
     lines.extend(
         [
+            "## Resume signal",
+            "",
+            f"If the manual prerequisite is complete AND automatable repository work remains, add `{MANUAL_EVIDENCE_MARKER}` to the issue and rerun queue reconciliation/AutoDev. If no autonomous continuation remains, close the fully manual issue instead.",
+            "",
             "## Evidence safety",
             "",
             "Record only non-secret state, identifiers, metadata, linked-issue state, or deterministic verification results. Never copy passwords, tokens, credentials, certificate private keys, or other secret values into issues or AutoDev run artifacts.",
@@ -404,19 +484,24 @@ def render_manual_action_plan(report: ExecutionReport) -> str:
     return "\n".join(lines)
 
 
-def scoped_issue_text(issue_text: str, report: ExecutionReport | None) -> str:
+def scoped_issue_text(
+    issue_text: str,
+    report: ExecutionReport | None,
+) -> str:
     if report is None or report.classification == AUTOMATABLE:
         return issue_text
-    autonomous = "\n".join(f"- {item}" for item in report.autonomous_criteria) or "- None"
+    autonomous = (
+        "\n".join(f"- {item}" for item in report.autonomous_criteria) or "- None"
+    )
     manual = "\n".join(f"- {item}" for item in report.manual_criteria) or "- None"
     return (
         issue_text.rstrip()
         + "\n\n## AutoDev execution boundary (deterministic)\n\n"
         + f"Classification: {report.classification}\n\n"
-        + "Implement ONLY these autonomous criteria:\n"
+        + "Autonomous criteria:\n"
         + autonomous
-        + "\n\nDo NOT claim these manual/external criteria as implemented:\n"
+        + "\n\nManual/external criteria that MUST remain unresolved:\n"
         + manual
         + "\n\nDo not invent provider identities, credentials, purchased resources, external IDs, or secret values. "
-        "For mixed partial execution, keep the parent issue's manual criteria explicitly unresolved.\n"
+        "Mixed parent issues must be decomposed rather than silently narrowed.\n"
     )
