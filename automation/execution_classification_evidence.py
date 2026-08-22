@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from dataclasses import replace
 from pathlib import Path
 
@@ -102,7 +103,62 @@ def refresh_manual_completion_evidence(
     return refreshed
 
 
+def _install_fail_closed_queue_evidence_cache() -> None:
+    # The queue hook keeps body-derived evidence separate from QueueIssue so the
+    # existing queue API remains stable. Clear that ephemeral cache before every
+    # authoritative refresh: if the extra body query fails, absence of fresh
+    # evidence must keep `autodev:attention` rather than reusing a stale `true`.
+    current_list = issue_queue.list_issues
+    if not getattr(current_list, "_autodev_manual_evidence_cache_reset", False):
+        original_list = current_list
+
+        def list_issues(
+            repo: Path,
+            github_repo: str,
+            *,
+            limit: int = issue_queue.DEFAULT_LIMIT,
+            runner=subprocess.run,
+        ):
+            hooks._MANUAL_EVIDENCE_BY_ISSUE.clear()  # type: ignore[attr-defined]
+            return original_list(
+                repo,
+                github_repo,
+                limit=limit,
+                runner=runner,
+            )
+
+        list_issues._autodev_manual_evidence_cache_reset = True  # type: ignore[attr-defined]
+        issue_queue.list_issues = list_issues
+
+    current_fetch = issue_queue.fetch_issue
+    if not getattr(current_fetch, "_autodev_manual_evidence_cache_reset", False):
+        original_fetch = current_fetch
+
+        def fetch_issue(
+            repo: Path,
+            github_repo: str,
+            issue_number: int,
+            *,
+            runner=subprocess.run,
+        ):
+            hooks._MANUAL_EVIDENCE_BY_ISSUE.pop(  # type: ignore[attr-defined]
+                issue_number,
+                None,
+            )
+            return original_fetch(
+                repo,
+                github_repo,
+                issue_number,
+                runner=runner,
+            )
+
+        fetch_issue._autodev_manual_evidence_cache_reset = True  # type: ignore[attr-defined]
+        issue_queue.fetch_issue = fetch_issue
+
+
 def install() -> None:
+    _install_fail_closed_queue_evidence_cache()
+
     current = hooks._attention_resume_payload  # type: ignore[attr-defined]
     if getattr(current, "_autodev_manual_evidence_refresh", False):
         return
