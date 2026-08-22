@@ -204,6 +204,53 @@ class ExecutionClassificationHookTests(unittest.TestCase):
         self.assertEqual(calls, ["preflight", "prepare"])
         run_role.assert_not_called()
 
+    def test_attention_prepare_persists_resumable_issue_checkpoint(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            current = repo / workflow_stages.CURRENT_DIR
+            current.mkdir(parents=True)
+            workflow_stages.write_state(current, self._prepared_state())
+
+            def fake_stage(_repo, name, **kwargs):
+                self.assertEqual(name, "prepare")
+                return {
+                    "state": "ATTENTION_REQUIRED",
+                    "reason": "external identity validation is required",
+                    "successful_non_runnable": True,
+                }
+
+            with patch.object(role_coordinator, "run_stage", side_effect=fake_stage), patch.object(
+                role_coordinator.opencode_adapter,
+                "_ensure_opencode_protocol",
+            ) as ensure_protocol, patch.object(
+                role_coordinator.role_resume,
+                "has_manifest",
+                return_value=False,
+            ), patch.object(
+                role_coordinator.role_resume,
+                "create_manifest",
+            ) as create_manifest, patch.object(
+                role_coordinator.role_runtime,
+                "persist_selection",
+            ) as persist_selection:
+                execution_classification_evidence._install_attention_prepare_manifest()
+                payload = role_coordinator.run_stage(
+                    repo,
+                    "prepare",
+                    runtime_name="opencode",
+                )
+
+            self.assertEqual(payload["state"], "ATTENTION_REQUIRED")
+            ensure_protocol.assert_called_once_with(current)
+            create_manifest.assert_called_once()
+            self.assertEqual(create_manifest.call_args.kwargs["runtime_name"], "opencode")
+            persist_selection.assert_called_once_with(
+                repo,
+                name="opencode",
+                source="selected",
+                force_manifest=True,
+            )
+
     def test_attention_required_is_a_successful_terminal_cli_state(self):
         self.assertIn(
             "ATTENTION_REQUIRED",
