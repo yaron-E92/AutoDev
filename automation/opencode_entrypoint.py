@@ -5,6 +5,7 @@ import sys
 from automation import (
     ci_outcomes,
     context_optimization,
+    execution_classification_evidence,
     execution_classification_hooks,
     issue_queue,
     opencode_github_entrypoint,
@@ -43,6 +44,9 @@ def run(argv: list[str] | None = None) -> int:
     # and resume boundaries so both slash-command and Python coordination stop
     # before implementation when attention is required.
     execution_classification_hooks.install()
+    # Re-check only the explicit secret-free completion signal on resume, then
+    # return to Reader so the remaining work is classified from fresh evidence.
+    execution_classification_evidence.install()
     values = list(sys.argv[1:] if argv is None else argv)
     if values and values[0] == PRIVACY_COMMAND:
         return privacy_grants.run_cli(values[1:])
