@@ -241,15 +241,21 @@ class ExecutionClassificationHookTests(unittest.TestCase):
                 )
 
             self.assertEqual(payload["state"], "ATTENTION_REQUIRED")
-            ensure_protocol.assert_called_once_with(current)
+            ensure_protocol.assert_called_once()
+            self.assertEqual(
+                ensure_protocol.call_args.args[0].resolve(),
+                current.resolve(),
+            )
             create_manifest.assert_called_once()
             self.assertEqual(create_manifest.call_args.kwargs["runtime_name"], "opencode")
-            persist_selection.assert_called_once_with(
-                repo,
-                name="opencode",
-                source="selected",
-                force_manifest=True,
+            persist_selection.assert_called_once()
+            self.assertEqual(
+                persist_selection.call_args.args[0].resolve(),
+                repo.resolve(),
             )
+            self.assertEqual(persist_selection.call_args.kwargs["name"], "opencode")
+            self.assertEqual(persist_selection.call_args.kwargs["source"], "selected")
+            self.assertTrue(persist_selection.call_args.kwargs["force_manifest"])
 
     def test_attention_required_is_a_successful_terminal_cli_state(self):
         self.assertIn(
