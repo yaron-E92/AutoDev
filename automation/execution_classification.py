@@ -37,6 +37,10 @@ _SECRET_EVIDENCE_REQUEST = re.compile(
     r"\b(?:password|secret(?:\s+value)?|private\s+key|token|credential)\b",
     re.IGNORECASE,
 )
+_SAFE_EVIDENCE_QUALIFIER = re.compile(
+    r"\b(?:non[- ]secret|secret[- ]free)\b",
+    re.IGNORECASE,
+)
 
 
 class ExecutionClassificationError(ValueError):
@@ -124,6 +128,16 @@ def _string_list(raw: object, field: str) -> tuple[str, ...]:
     return tuple(values)
 
 
+def _requests_secret_evidence(value: str) -> bool:
+    # The contract deliberately encourages phrases such as "non-secret resource
+    # identifier" and "secret-free metadata". Strip those positive safety
+    # qualifiers before checking for imperative requests to persist actual secret
+    # material. This keeps the guard fail-closed for e.g. "Paste the API token"
+    # without rejecting the safe language AutoDev itself asks Reader to produce.
+    normalized = _SAFE_EVIDENCE_QUALIFIER.sub("public-metadata", value)
+    return bool(_SECRET_EVIDENCE_REQUEST.search(normalized))
+
+
 def _report_from_mapping(
     raw: object,
     *,
@@ -180,7 +194,7 @@ def _report_from_mapping(
         independent = False
 
     for item in resume_evidence:
-        if _SECRET_EVIDENCE_REQUEST.search(item):
+        if _requests_secret_evidence(item):
             raise ExecutionClassificationError(
                 "resume evidence must be secret-free metadata/state proof; never request password, token, credential, secret value, or private-key material"
             )
