@@ -75,6 +75,103 @@ def _remove_legacy_bridge_config(target_repo: Path, installed: list[Path]) -> No
     installed[:] = [item for item in installed if item != path]
 
 
+def _modernize_agent_text(text: str) -> str:
+    """Render an installed OpenCode agent against the canonical global CLI.
+
+    The checked-in integration templates remain usable by the low-level legacy
+    installer during the migration window. The canonical installer removes the
+    machine-specific .opencode/autodev.json dependency and makes `autodev` the
+    only launcher an installed agent is expected to invoke.
+    """
+
+    replacements = (
+        (
+            "read `.opencode/autodev.json` once and use its non-empty `python` field as the exact bridge launcher",
+            "use the installed `autodev` command as the exact bridge launcher",
+        ),
+        (
+            "Read `.opencode/autodev.json` once and use its non-empty `python` field as the exact bridge launcher",
+            "Use the installed `autodev` command as the exact bridge launcher",
+        ),
+        (
+            "use the installer-selected launcher from `.opencode/autodev.json`",
+            "use the installed `autodev` command",
+        ),
+        (
+            "Use the installer-selected launcher from `.opencode/autodev.json`",
+            "Use the installed `autodev` command",
+        ),
+        (
+            "use its non-empty `python` field as the exact bridge launcher",
+            "use the installed `autodev` command as the exact bridge launcher",
+        ),
+        (
+            "Never edit `.opencode/autodev.json`; it is installer-owned bridge configuration.",
+            "Never rewrite user-owned OpenCode configuration merely to choose the AutoDev launcher.",
+        ),
+    )
+    for old, new in replacements:
+        text = text.replace(old, new)
+
+    rendered: list[str] = []
+    seen_permission_lines: set[str] = set()
+    in_frontmatter = True
+    frontmatter_delimiters = 0
+    for line in text.splitlines():
+        if line.strip() == "---":
+            frontmatter_delimiters += 1
+            if frontmatter_delimiters >= 2:
+                in_frontmatter = False
+        if '".opencode/autodev.json": allow' in line:
+            continue
+        if in_frontmatter and '"python3 .opencode/autodev.py ' in line:
+            continue
+        if in_frontmatter and '"python .opencode/autodev.py ' in line:
+            line = line.replace("python .opencode/autodev.py", "autodev")
+            if line in seen_permission_lines:
+                continue
+            seen_permission_lines.add(line)
+        rendered.append(line)
+    text = "\n".join(rendered) + "\n"
+
+    # Static prose/command examples should prefer the canonical command. A
+    # generated role-contract artifact may still carry the legacy prefix during
+    # compatibility; the common instruction below tells the agent how to
+    # translate that prefix without changing any arguments.
+    text = text.replace("python3 .opencode/autodev.py", "autodev")
+    text = text.replace("python .opencode/autodev.py", "autodev")
+    text = text.replace("`.opencode/autodev.json`", "the installed `autodev` launcher")
+
+    instruction = (
+        "\n**Canonical AutoDev launcher:** use the installed `autodev` command exactly; "
+        "do not probe for Python interpreters or alternate bridge paths. If a generated "
+        "legacy role-contract command begins with `python .opencode/autodev.py` or "
+        "`python3 .opencode/autodev.py`, replace only that leading compatibility prefix "
+        "with `autodev` and preserve every remaining argument. Repository-local "
+        "`.opencode/autodev.py` / `.opencode/autodev.ps1` are temporary compatibility "
+        "shims, not configuration sources.\n"
+    )
+    marker = "\n---\n"
+    second = text.find(marker, text.find(marker) + len(marker))
+    if second >= 0:
+        insert_at = second + len(marker)
+        text = text[:insert_at] + instruction + text[insert_at:]
+    else:
+        text += instruction
+    return text
+
+
+def _modernize_installed_agents(target_repo: Path) -> None:
+    agents = target_repo / ".opencode" / "agents"
+    for name in opencode_adapter.AGENT_FILES:
+        path = agents / name
+        if not path.is_file():
+            raise opencode_adapter.OpenCodeAdapterError(
+                f"installed OpenCode agent is missing: {path}"
+            )
+        path.write_text(_modernize_agent_text(path.read_text(encoding="utf-8")), encoding="utf-8")
+
+
 def install_assets(
     target_repo: Path,
     autodev_root: Path = opencode_adapter.AUTODEV_ROOT,
@@ -92,9 +189,8 @@ def install_assets(
     # The low-level legacy adapter still emits .opencode/autodev.json for
     # backward-compatible direct callers. The canonical installer removes it:
     # generic AutoDev configuration must not live under the OpenCode namespace.
-    # The generated Python/PowerShell wrappers are compatibility shims that now
-    # delegate to the user-level `autodev` launcher first.
     _remove_legacy_bridge_config(target_repo, installed)
+    _modernize_installed_agents(target_repo)
 
     source = autodev_root / "integrations" / "opencode" / "python-commands"
     destination = target_repo / ".opencode" / "commands"
