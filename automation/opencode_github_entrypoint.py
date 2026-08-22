@@ -17,6 +17,14 @@ from automation import (
 )
 
 
+SUCCESSFUL_TERMINAL_STATES = {
+    "PR_READY",
+    "BLOCKED",
+    "WAITING",
+    "ATTENTION_REQUIRED",
+}
+
+
 def diagnostic_runner(command, *args, **kwargs):
     completed = opencode_failure_entrypoint.classified_runner(command, *args, **kwargs)
     if (
@@ -116,7 +124,7 @@ def run(argv: list[str] | None = None) -> int:
     if report_path:
         print(f"AutoDev report: {report_path}", flush=True)
     print(json.dumps(payload, sort_keys=True), flush=True)
-    return 0 if payload.get("state") in {"PR_READY", "BLOCKED", "WAITING"} else 1
+    return 0 if payload.get("state") in SUCCESSFUL_TERMINAL_STATES else 1
 
 
 def main() -> int:
