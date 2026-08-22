@@ -14,14 +14,14 @@ AutoDev separates **authorization** from **derived queue state**.
 
 ## Commands
 
-From an installed target repository:
+After the user-level launcher and target repository are installed (see `docs/installation.md`):
 
 ```text
-python .opencode/autodev.py queue reconcile
-python .opencode/autodev.py queue status
-python .opencode/autodev.py queue explain 123
-python .opencode/autodev.py queue next
-python .opencode/autodev.py queue next --dry-run
+autodev queue reconcile
+autodev queue status
+autodev queue explain 123
+autodev queue next
+autodev queue next --dry-run
 ```
 
 `reconcile` is state-based and idempotent. It scans current issue/dependency state, so it does not matter whether AutoDev was running when a blocker closed. Closed native blocker relationships are pruned, unresolved blockers keep the issue blocked, and the final blocker closing makes an otherwise eligible managed issue ready.

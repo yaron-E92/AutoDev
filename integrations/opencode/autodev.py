@@ -4,6 +4,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -16,12 +17,6 @@ DEFAULT_MAX_SEMANTIC_REPAIR_ATTEMPTS = "2"
 INTERACTIVE_CONSENT_ARG = "--interactive-consent"
 INTERACTIVE_CONSENT_ENV = "AUTODEV_INTERACTIVE_CONSENT"
 INTERACTIVE_CONSENT_VALUE = "controlling-terminal"
-# The installed bridge always enters automation.opencode_entrypoint. That
-# compatibility frontend installs shared workflow hooks, then coordinate routes
-# through automation.role_coordinator with OpenCode as the default role runtime.
-# The retired direct route `module = "automation.opencode_coordinator"` is not used.
-# Non-coordinate compatibility commands still reach the hardened
-# "automation.opencode_runtime" path through automation.opencode_entrypoint.
 
 
 def _current_issue_number() -> int:
@@ -155,6 +150,22 @@ def _bridge_environment(
     return env
 
 
+def _launcher_environment(
+    repo: Path,
+    *,
+    runner: Callable[..., object] = subprocess.run,
+    interactive_consent: bool = False,
+) -> dict[str, str]:
+    env = dict(os.environ)
+    env["AUTODEV_TARGET_REPO"] = str(repo.resolve())
+    if interactive_consent:
+        env[INTERACTIVE_CONSENT_ENV] = INTERACTIVE_CONSENT_VALUE
+    else:
+        env.pop(INTERACTIVE_CONSENT_ENV, None)
+    _resolve_github_environment(env, repo, runner=runner)
+    return env
+
+
 def _load_config(config_path: Path) -> tuple[Path, str]:
     try:
         config = json.loads(config_path.read_text(encoding="utf-8"))
@@ -179,19 +190,38 @@ def _load_config(config_path: Path) -> tuple[Path, str]:
 
 
 def main() -> int:
+    repo = Path.cwd()
+    raw_arguments, interactive_consent = _consume_interactive_consent_argument(sys.argv[1:])
+    arguments = _arguments_with_current_issue(raw_arguments)
+
+    launcher = shutil.which("autodev")
+    if launcher:
+        completed = subprocess.run(
+            [launcher, *arguments],
+            cwd=repo,
+            env=_launcher_environment(repo, interactive_consent=interactive_consent),
+            check=False,
+        )
+        return completed.returncode
+
+    # Backward compatibility for repositories installed before #153. New
+    # installations use the user-level `autodev` launcher and remove this
+    # machine-specific generic config from .opencode.
     root = Path(__file__).resolve().parent
     config_path = root / "autodev.json"
     try:
         autodev_root, python = _load_config(config_path)
     except ValueError as exc:
-        print(f"Invalid AutoDev OpenCode configuration: {config_path}: {exc}", file=sys.stderr)
+        print(
+            "AutoDev launcher is not on PATH and the legacy OpenCode configuration "
+            f"cannot be used: {config_path}: {exc}. Run `autodev install --user` "
+            "and `autodev repo install`.",
+            file=sys.stderr,
+        )
         return 1
 
-    repo = Path.cwd()
-    raw_arguments, interactive_consent = _consume_interactive_consent_argument(sys.argv[1:])
-    arguments = _arguments_with_current_issue(raw_arguments)
     completed = subprocess.run(
-        [python, "-m", "automation.opencode_entrypoint", *arguments],
+        [python, "-m", "automation.autodev_cli", *arguments],
         cwd=repo,
         env=_bridge_environment(
             python,

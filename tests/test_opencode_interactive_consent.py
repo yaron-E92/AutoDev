@@ -63,7 +63,7 @@ class OpenCodeInteractiveConsentTests(unittest.TestCase):
         )
         self.assertNotIn(BRIDGE.INTERACTIVE_CONSENT_ENV, unattended)
 
-    def test_installed_python_commands_opt_into_interactive_consent(self):
+    def test_installed_python_commands_use_first_class_cli_and_opt_into_interactive_consent(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             target = Path(temp_dir).resolve()
             opencode_install.install_assets(
@@ -79,6 +79,8 @@ class OpenCodeInteractiveConsentTests(unittest.TestCase):
         for name, content in rendered.items():
             with self.subTest(command=name):
                 self.assertIn("--interactive-consent", content)
+                self.assertIn("!`autodev ", content)
+                self.assertNotIn(".opencode/autodev.py", content)
                 self.assertNotIn(opencode_install.PYTHON_SHELL_PLACEHOLDER, content)
 
 
