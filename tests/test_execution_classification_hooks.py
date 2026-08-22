@@ -184,6 +184,9 @@ class ExecutionClassificationHookTests(unittest.TestCase):
             self.fail(f"unexpected stage after manual attention: {name}")
 
         with patch.object(
+            role_coordinator.opencode_runtime,
+            "install_workflow_guards",
+        ), patch.object(
             role_coordinator.role_runtime,
             "select_runtime",
             return_value=(runtime, "test"),
