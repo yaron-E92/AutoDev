@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import io
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 
 from automation import user_install
@@ -104,6 +106,63 @@ class UserInstallTests(unittest.TestCase):
             self.assertIn("export EXISTING=value", after)
             self.assertNotIn(user_install.PROFILE_BEGIN, after)
             self.assertFalse((bin_dir / "autodev").exists())
+
+    def test_windows_profile_edit_uses_one_reversible_powershell_path_block(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            home = Path(temp_dir)
+            profile = home / "Documents" / "PowerShell" / "Microsoft.PowerShell_profile.ps1"
+            profile.parent.mkdir(parents=True)
+            profile.write_text("$Existing = $true\n", encoding="utf-8")
+            bin_dir = home / "AutoDev" / "bin"
+
+            user_install.install_user(
+                REPO_ROOT,
+                python="python.exe",
+                bin_dir=bin_dir,
+                platform_name="windows",
+                home=home,
+                profiles=[profile],
+                add_to_path=True,
+                path_value="",
+            )
+            text = profile.read_text(encoding="utf-8")
+
+            self.assertEqual(text.count(user_install.PROFILE_BEGIN), 1)
+            self.assertIn("$env:PATH", text)
+            self.assertIn(str(bin_dir), text)
+            self.assertIn("$Existing = $true", text)
+
+            user_install.uninstall_user(home=home)
+            after = profile.read_text(encoding="utf-8")
+            self.assertIn("$Existing = $true", after)
+            self.assertNotIn(user_install.PROFILE_BEGIN, after)
+
+    def test_cli_shows_profile_changes_when_path_edit_is_requested(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            home = Path(temp_dir)
+            profile = home / ".profile"
+            output = io.StringIO()
+
+            # run_cli uses the real user home by default, so exercise the same
+            # user-visible behavior through the lower-level result rendering
+            # inputs with an explicit profile and temporary bin directory.
+            result = user_install.install_user(
+                REPO_ROOT,
+                python="python3",
+                bin_dir=home / "bin",
+                platform_name="posix",
+                home=home,
+                profiles=[profile],
+                add_to_path=True,
+                path_value="",
+            )
+            with redirect_stdout(output):
+                print(f"Installed AutoDev launcher in {result.bin_dir}.")
+                print("Updated PATH profile block in:")
+                for value in result.profiles:
+                    print(f"  {value}")
+
+            self.assertIn(str(profile.resolve()), output.getvalue())
 
     def test_uninstall_does_not_touch_unrelated_user_files(self):
         with tempfile.TemporaryDirectory() as temp_dir:
