@@ -17,6 +17,14 @@ from automation import (
 )
 
 
+SUCCESSFUL_TERMINAL_STATES = {
+    "PR_READY",
+    "BLOCKED",
+    "WAITING",
+    "ATTENTION_REQUIRED",
+}
+
+
 def diagnostic_runner(command, *args, **kwargs):
     completed = opencode_failure_entrypoint.classified_runner(command, *args, **kwargs)
     if (
@@ -112,11 +120,21 @@ def run(argv: list[str] | None = None) -> int:
             "repeated_failure", False
         )
 
+    # ATTENTION_REQUIRED is a successful non-runnable classification, not a
+    # failed run. If this run previously failed before being reclassified, do
+    # not leave that obsolete diagnostic next to the current attention state.
+    if payload.get("state") == "ATTENTION_REQUIRED":
+        (
+            repo
+            / workflow_stages.CURRENT_DIR
+            / non_success_report.REPORT_NAME
+        ).unlink(missing_ok=True)
+
     payload, report_path = non_success_report.update_report(repo, payload)
     if report_path:
         print(f"AutoDev report: {report_path}", flush=True)
     print(json.dumps(payload, sort_keys=True), flush=True)
-    return 0 if payload.get("state") in {"PR_READY", "BLOCKED", "WAITING"} else 1
+    return 0 if payload.get("state") in SUCCESSFUL_TERMINAL_STATES else 1
 
 
 def main() -> int:
