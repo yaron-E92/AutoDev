@@ -6,6 +6,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from automation import opencode_adapter, opencode_install
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 OPEN_CODE_ROOT = REPO_ROOT / "integrations" / "opencode"
@@ -36,7 +38,11 @@ class OpenCodeLocalCoordinatorHardeningTests(unittest.TestCase):
             with self.subTest(remote=remote):
                 self.assertEqual(self.bridge._github_identity_from_remote(remote), expected)
 
-        self.assertIsNone(self.bridge._github_identity_from_remote("https://gitlab.com/yaron-E92/AutoDev.git"))
+        self.assertIsNone(
+            self.bridge._github_identity_from_remote(
+                "https://gitlab.com/yaron-E92/AutoDev.git"
+            )
+        )
         self.assertIsNone(self.bridge._github_identity_from_remote("not-a-remote"))
 
     def test_missing_github_identity_is_derived_without_overriding_explicit_values(self):
@@ -89,7 +95,7 @@ class OpenCodeLocalCoordinatorHardeningTests(unittest.TestCase):
         self.assertEqual(env["GITHUB_REPO"], "TATATORPLAG")
         self.assertEqual(env["AUTODEV_PYTHON"], "python3")
 
-    def test_bridge_config_requires_version_root_and_python(self):
+    def test_bridge_config_loader_remains_only_for_legacy_compatibility(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             config_path = root / "autodev.json"
@@ -114,23 +120,34 @@ class OpenCodeLocalCoordinatorHardeningTests(unittest.TestCase):
                     self.bridge._load_config(config_path)
                 self.assertIn(expected, str(raised.exception))
 
-    def test_coordinator_is_closed_world_and_uses_installer_launcher(self):
-        coordinator = (OPEN_CODE_ROOT / "agents" / "autodev-coordinator.md").read_text(
-            encoding="utf-8"
-        )
+    def test_canonical_installed_coordinator_is_closed_world_and_uses_autodev_launcher(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target = Path(temp_dir)
+            opencode_install.install_assets(target, REPO_ROOT, python_command="python3")
+            coordinator = (target / ".opencode" / "agents" / "autodev-coordinator.md").read_text(
+                encoding="utf-8"
+            )
+
         self.assertIn('permission:\n  "*": deny', coordinator)
-        self.assertIn('".opencode/autodev.json": allow', coordinator)
-        self.assertIn("use its non-empty `python` field as the exact bridge launcher", coordinator)
-        self.assertIn("Never probe, try, or fall back to a different Python command", coordinator)
+        self.assertNotIn(".opencode/autodev.json", coordinator)
+        self.assertIn('"autodev stage *": allow', coordinator)
+        self.assertIn("Canonical AutoDev launcher", coordinator)
+        self.assertIn("installed `autodev` command", coordinator)
+        self.assertIn("do not probe", coordinator.casefold())
         self.assertIn("Unrelated built-in, plugin, or MCP tools are denied by default", coordinator)
 
-    def test_all_role_agents_use_installer_selected_launcher_without_probing(self):
-        for path in (OPEN_CODE_ROOT / "agents").glob("autodev-*.md"):
-            text = path.read_text(encoding="utf-8")
-            with self.subTest(agent=path.name):
-                self.assertIn(".opencode/autodev.json", text)
-                self.assertIn("exact bridge launcher", text)
-                self.assertNotIn("use `python3` instead only when", text)
+    def test_all_canonical_installed_role_agents_use_first_class_launcher_without_config_duplication(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target = Path(temp_dir)
+            opencode_install.install_assets(target, REPO_ROOT, python_command="python3")
+            for name in opencode_adapter.AGENT_FILES:
+                path = target / ".opencode" / "agents" / name
+                text = path.read_text(encoding="utf-8")
+                with self.subTest(agent=name):
+                    self.assertNotIn(".opencode/autodev.json", text)
+                    self.assertIn("Canonical AutoDev launcher", text)
+                    self.assertIn("installed `autodev` command", text)
+                    self.assertIn("do not probe", text.casefold())
 
 
 if __name__ == "__main__":
