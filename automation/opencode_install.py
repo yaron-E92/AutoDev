@@ -22,6 +22,7 @@ PYTHON_SHELL_PLACEHOLDER = "__AUTODEV_PYTHON_SHELL__"
 WINDOWS_CALLER_TEMPLATE = Path("integrations") / "github-actions" / "autodev-windows-verification.yml"
 WINDOWS_CALLER_TARGET = Path(".github") / "workflows" / "autodev-windows-verification.yml"
 WINDOWS_SETUP_PLACEHOLDER = "      # __AUTODEV_REPOSITORY_SETUP__"
+LEGACY_BRIDGE_CONFIG = Path(".opencode") / "autodev.json"
 
 
 def _render_windows_setup(config: dict[str, object] | None) -> str:
@@ -54,6 +55,26 @@ def _render_windows_setup(config: dict[str, object] | None) -> str:
     return "\n".join(lines)
 
 
+def _remove_legacy_bridge_config(target_repo: Path, installed: list[Path]) -> None:
+    path = target_repo / LEGACY_BRIDGE_CONFIG
+    if not path.is_file():
+        return
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise opencode_adapter.OpenCodeAdapterError(
+            f"legacy AutoDev OpenCode config is not recognized and will not be removed: {path}"
+        ) from exc
+    if not isinstance(value, dict) or value.get("version") != 1 or not set(value).issubset(
+        {"version", "autodev_root", "python"}
+    ):
+        raise opencode_adapter.OpenCodeAdapterError(
+            f"legacy AutoDev OpenCode config is not recognized and will not be removed: {path}"
+        )
+    path.unlink()
+    installed[:] = [item for item in installed if item != path]
+
+
 def install_assets(
     target_repo: Path,
     autodev_root: Path = opencode_adapter.AUTODEV_ROOT,
@@ -67,6 +88,13 @@ def install_assets(
         autodev_root,
         python_command=python_command,
     )
+
+    # The low-level legacy adapter still emits .opencode/autodev.json for
+    # backward-compatible direct callers. The canonical installer removes it:
+    # generic AutoDev configuration must not live under the OpenCode namespace.
+    # The generated Python/PowerShell wrappers are compatibility shims that now
+    # delegate to the user-level `autodev` launcher first.
+    _remove_legacy_bridge_config(target_repo, installed)
 
     source = autodev_root / "integrations" / "opencode" / "python-commands"
     destination = target_repo / ".opencode" / "commands"
@@ -131,7 +159,8 @@ def run(argv: list[str] | None = None) -> int:
     )
     target = Path(args.target_repo).resolve()
     print(
-        f"Installed {len(installed)} AutoDev assets into {target}. "
+        f"Installed {len(installed)} AutoDev OpenCode assets into {target}. "
+        "The OpenCode wrappers are compatibility shims over the user-level `autodev` CLI. "
         f"If {WINDOWS_CALLER_TARGET.as_posix()} is new or changed, commit/merge it to the target "
         "repository default branch before a Windows-required AutoDev run can dispatch GitHub Actions verification."
     )
