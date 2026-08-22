@@ -223,7 +223,12 @@ def install_user(
     state_path = install_state_path(home=home)
     state_path.parent.mkdir(parents=True, exist_ok=True)
     state_path.write_text(
-        json.dumps({"schema_version": INSTALL_SCHEMA, **result.to_json()}, indent=2, sort_keys=True) + "\n",
+        json.dumps(
+            {"schema_version": INSTALL_SCHEMA, **result.to_json()},
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
         encoding="utf-8",
     )
     return result
@@ -242,7 +247,8 @@ def uninstall_user(*, home: Path | None = None) -> tuple[str, ...]:
     home = (home or Path.home()).expanduser().resolve()
     state = load_install_state(home=home)
     removed: list[str] = []
-    for raw in state.get("launchers", []) if isinstance(state.get("launchers"), list) else []:
+    launchers = state.get("launchers", [])
+    for raw in launchers if isinstance(launchers, list) else []:
         path = Path(str(raw)).expanduser()
         try:
             if path.is_file():
@@ -250,7 +256,8 @@ def uninstall_user(*, home: Path | None = None) -> tuple[str, ...]:
                 removed.append(str(path))
         except OSError as exc:
             raise UserInstallError(f"cannot remove launcher {path}: {exc}") from exc
-    for raw in state.get("profiles", []) if isinstance(state.get("profiles"), list) else []:
+    profiles = state.get("profiles", [])
+    for raw in profiles if isinstance(profiles, list) else []:
         remove_profile_update(Path(str(raw)))
     state_path = install_state_path(home=home)
     if state_path.is_file():
@@ -270,28 +277,47 @@ def run_cli(argv: list[str] | None = None, *, autodev_root: Path | None = None) 
     args = parser.parse_args(argv)
     if not args.user:
         parser.error("--user is required")
-    if args.uninstall:
-        removed = uninstall_user()
-        payload = {"state": "UNINSTALLED", "removed": list(removed)}
-        print(json.dumps(payload, sort_keys=True) if args.json else f"Removed {len(removed)} AutoDev launcher(s).")
-        return 0
-    root = (autodev_root or Path(__file__).resolve().parents[1]).expanduser().resolve()
-    result = install_user(
-        root,
-        python=args.python,
-        bin_dir=Path(args.bin_dir) if args.bin_dir else None,
-        profiles=[Path(value) for value in args.profile],
-        add_to_path=bool(args.add_to_path),
-    )
+    if args.profile and not args.add_to_path:
+        parser.error("--profile requires --add-to-path")
+
+    try:
+        if args.uninstall:
+            removed = uninstall_user()
+            payload = {"state": "UNINSTALLED", "removed": list(removed)}
+            print(
+                json.dumps(payload, sort_keys=True)
+                if args.json
+                else f"Removed {len(removed)} AutoDev launcher(s) and any recorded AutoDev PATH profile block."
+            )
+            return 0
+
+        root = (autodev_root or Path(__file__).resolve().parents[1]).expanduser().resolve()
+        result = install_user(
+            root,
+            python=args.python,
+            bin_dir=Path(args.bin_dir) if args.bin_dir else None,
+            profiles=[Path(value) for value in args.profile],
+            add_to_path=bool(args.add_to_path),
+        )
+    except UserInstallError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
     if args.json:
         print(json.dumps({"state": "INSTALLED", **result.to_json()}, sort_keys=True))
-    else:
-        print(f"Installed AutoDev launcher in {result.bin_dir}.")
-        if not result.on_path:
-            print(
-                f"{result.bin_dir} is not currently on PATH. Re-run with --add-to-path "
-                "or add that directory to PATH explicitly."
-            )
+        return 0
+
+    print(f"Installed AutoDev launcher in {result.bin_dir}.")
+    if result.profiles:
+        print("Updated PATH profile block in:")
+        for profile in result.profiles:
+            print(f"  {profile}")
+        print("Open a new shell (or reload the listed profile) before relying on the new PATH entry.")
+    elif not result.on_path:
+        print(
+            f"{result.bin_dir} is not currently on PATH. Re-run with --add-to-path "
+            "or add that directory to PATH explicitly."
+        )
     return 0
 
 
