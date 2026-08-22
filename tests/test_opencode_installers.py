@@ -75,6 +75,26 @@ class OpenCodeInstallerTests(unittest.TestCase):
         self.assertIn("-SourceName 'private-feed'", workflow)
         self.assertLess(workflow.index("Configure private packages"), workflow.index("Execute Windows verification"))
 
+    def test_canonical_installer_removes_generic_opencode_config_and_modernizes_agents(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target = Path(temp_dir).resolve()
+            user_asset = target / ".opencode" / "custom.md"
+            user_asset.parent.mkdir(parents=True)
+            user_asset.write_text("preserve", encoding="utf-8")
+
+            opencode_install.install_assets(target, REPO_ROOT, python_command="python3")
+
+            self.assertFalse((target / ".opencode" / "autodev.json").exists())
+            self.assertEqual(user_asset.read_text(encoding="utf-8"), "preserve")
+            self.assertTrue((target / ".opencode" / "autodev.py").is_file())
+            self.assertTrue((target / ".opencode" / "autodev.ps1").is_file())
+            for name in opencode_adapter.AGENT_FILES:
+                text = (target / ".opencode" / "agents" / name).read_text(encoding="utf-8")
+                with self.subTest(agent=name):
+                    self.assertNotIn(".opencode/autodev.json", text)
+                    self.assertIn("Canonical AutoDev launcher", text)
+                    self.assertIn("autodev", text)
+
     def test_deprecated_adapter_install_delegates_to_complete_canonical_installer(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             target = Path(temp_dir).resolve()
@@ -94,9 +114,11 @@ class OpenCodeInstallerTests(unittest.TestCase):
                 )
             workflow = target / opencode_install.WINDOWS_CALLER_TARGET
             workflow_exists = workflow.is_file()
+            generic_config_exists = (target / ".opencode" / "autodev.json").exists()
 
         self.assertEqual(code, 0)
         self.assertTrue(workflow_exists)
+        self.assertFalse(generic_config_exists)
         self.assertIn("DEPRECATED", stderr.getvalue())
         self.assertIn("automation.opencode_install", stderr.getvalue())
         self.assertIn("Installed", stdout.getvalue())
