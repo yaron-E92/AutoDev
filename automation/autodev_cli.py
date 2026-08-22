@@ -7,11 +7,26 @@ from pathlib import Path
 from automation import opencode_entrypoint, user_install
 
 
+INTERACTIVE_CONSENT_ARG = "--interactive-consent"
 INTERACTIVE_CONSENT_ENV = "AUTODEV_INTERACTIVE_CONSENT"
 INTERACTIVE_CONSENT_VALUE = "controlling-terminal"
 
 
-def _enable_interactive_consent_for_direct_cli() -> None:
+def _consume_interactive_consent_argument(values: list[str]) -> tuple[list[str], bool]:
+    forwarded: list[str] = []
+    interactive = False
+    for value in values:
+        if value == INTERACTIVE_CONSENT_ARG:
+            interactive = True
+            continue
+        forwarded.append(value)
+    return forwarded, interactive
+
+
+def _enable_interactive_consent_for_direct_cli(*, explicit: bool = False) -> None:
+    if explicit:
+        os.environ[INTERACTIVE_CONSENT_ENV] = INTERACTIVE_CONSENT_VALUE
+        return
     if os.environ.get("AUTODEV_HEADLESS", "").strip():
         return
     try:
@@ -41,7 +56,8 @@ OpenCode slash commands are an optional frontend over this same Python core.
 
 
 def run(argv: list[str] | None = None) -> int:
-    values = list(sys.argv[1:] if argv is None else argv)
+    raw_values = list(sys.argv[1:] if argv is None else argv)
+    values, explicit_interactive = _consume_interactive_consent_argument(raw_values)
     if not values or values[0] in {"-h", "--help", "help"}:
         print(_help(), end="")
         return 0
@@ -61,7 +77,7 @@ def run(argv: list[str] | None = None) -> int:
         )
         return 2
 
-    _enable_interactive_consent_for_direct_cli()
+    _enable_interactive_consent_for_direct_cli(explicit=explicit_interactive)
     if command == "resume":
         return opencode_entrypoint.run(["coordinate", "--resume", *rest])
     return opencode_entrypoint.run(values)
