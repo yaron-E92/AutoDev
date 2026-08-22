@@ -8,6 +8,7 @@ from automation import (
     execution_classification as execution,
     execution_classification_hooks as hooks,
     issue_queue,
+    role_coordinator,
     workflow_stages,
 )
 
@@ -156,8 +157,49 @@ def _install_fail_closed_queue_evidence_cache() -> None:
         issue_queue.fetch_issue = fetch_issue
 
 
+def _install_attention_prepare_manifest() -> None:
+    # Normal prepare creates the resumability manifest only for CONTINUE. An
+    # explicit manual declaration intentionally returns ATTENTION_REQUIRED from
+    # prepare, but that state must still be resumable after the human supplies
+    # the completion marker. Create the same issue-selected checkpoint without
+    # launching any role or creating any shipment branch/PR.
+    current = role_coordinator.run_stage
+    if getattr(current, "_autodev_manual_attention_manifest", False):
+        return
+    original = current
+
+    def run_stage(repo: Path, name: str, **kwargs):
+        payload = original(repo, name, **kwargs)
+        resolved = Path(repo).expanduser().resolve()
+        current_dir = resolved / workflow_stages.CURRENT_DIR
+        if (
+            name == "prepare"
+            and payload.get("state") == hooks.ATTENTION_STATE
+            and current_dir.is_dir()
+            and not role_coordinator.role_resume.has_manifest(resolved)
+        ):
+            runtime_name = str(kwargs.get("runtime_name", "")).strip() or "opencode"
+            role_coordinator.opencode_adapter._ensure_opencode_protocol(current_dir)
+            role_coordinator.role_resume.create_manifest(
+                resolved,
+                workflow_stages.read_state(current_dir),
+                runtime_name=runtime_name,
+            )
+            role_coordinator.role_runtime.persist_selection(
+                resolved,
+                name=runtime_name,
+                source="selected",
+                force_manifest=True,
+            )
+        return payload
+
+    run_stage._autodev_manual_attention_manifest = True  # type: ignore[attr-defined]
+    role_coordinator.run_stage = run_stage
+
+
 def install() -> None:
     _install_fail_closed_queue_evidence_cache()
+    _install_attention_prepare_manifest()
 
     current = hooks._attention_resume_payload  # type: ignore[attr-defined]
     if getattr(current, "_autodev_manual_evidence_refresh", False):
