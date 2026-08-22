@@ -219,7 +219,7 @@ class ExecutionClassificationHookTests(unittest.TestCase):
                     "successful_non_runnable": True,
                 }
 
-            with patch.object(role_coordinator, "run_stage", side_effect=fake_stage), patch.object(
+            with patch.object(role_coordinator, "run_stage", new=fake_stage), patch.object(
                 role_coordinator.opencode_adapter,
                 "_ensure_opencode_protocol",
             ) as ensure_protocol, patch.object(
