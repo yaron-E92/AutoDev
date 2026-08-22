@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import shlex
 from pathlib import Path
 
 from automation import opencode_adapter, windows_verification
@@ -19,6 +18,7 @@ PYTHON_COMMAND_TEMPLATES = (
     "autodev-verify.md",
 )
 PYTHON_SHELL_PLACEHOLDER = "__AUTODEV_PYTHON_SHELL__"
+LEGACY_COMMAND_PREFIX = f"{PYTHON_SHELL_PLACEHOLDER} .opencode/autodev.py"
 WINDOWS_CALLER_TEMPLATE = Path("integrations") / "github-actions" / "autodev-windows-verification.yml"
 WINDOWS_CALLER_TARGET = Path(".github") / "workflows" / "autodev-windows-verification.yml"
 WINDOWS_SETUP_PLACEHOLDER = "      # __AUTODEV_REPOSITORY_SETUP__"
@@ -134,10 +134,6 @@ def _modernize_agent_text(text: str) -> str:
         rendered.append(line)
     text = "\n".join(rendered) + "\n"
 
-    # Static prose/command examples should prefer the canonical command. A
-    # generated role-contract artifact may still carry the legacy prefix during
-    # compatibility; the common instruction below tells the agent how to
-    # translate that prefix without changing any arguments.
     text = text.replace("python3 .opencode/autodev.py", "autodev")
     text = text.replace("python .opencode/autodev.py", "autodev")
     text = text.replace("`.opencode/autodev.json`", "the installed `autodev` launcher")
@@ -151,13 +147,7 @@ def _modernize_agent_text(text: str) -> str:
         "`.opencode/autodev.py` / `.opencode/autodev.ps1` are temporary compatibility "
         "shims, not configuration sources.\n"
     )
-    marker = "\n---\n"
-    second = text.find(marker, text.find(marker) + len(marker))
-    if second >= 0:
-        insert_at = second + len(marker)
-        text = text[:insert_at] + instruction + text[insert_at:]
-    else:
-        text += instruction
+    text += instruction
     return text
 
 
@@ -169,7 +159,19 @@ def _modernize_installed_agents(target_repo: Path) -> None:
             raise opencode_adapter.OpenCodeAdapterError(
                 f"installed OpenCode agent is missing: {path}"
             )
-        path.write_text(_modernize_agent_text(path.read_text(encoding="utf-8")), encoding="utf-8")
+        path.write_text(
+            _modernize_agent_text(path.read_text(encoding="utf-8")),
+            encoding="utf-8",
+        )
+
+
+def _render_python_command(template: str, template_path: Path) -> str:
+    if template.count(PYTHON_SHELL_PLACEHOLDER) != 1 or template.count(LEGACY_COMMAND_PREFIX) != 1:
+        raise opencode_adapter.OpenCodeAdapterError(
+            "Python-coordinator command template must contain exactly one canonical legacy bridge prefix: "
+            f"{template_path}"
+        )
+    return template.replace(LEGACY_COMMAND_PREFIX, "autodev")
 
 
 def install_assets(
@@ -194,21 +196,15 @@ def install_assets(
 
     source = autodev_root / "integrations" / "opencode" / "python-commands"
     destination = target_repo / ".opencode" / "commands"
-    rendered_launcher = shlex.quote(python_command)
     for name in PYTHON_COMMAND_TEMPLATES:
         template_path = source / name
         if not template_path.is_file():
             raise opencode_adapter.OpenCodeAdapterError(
                 f"missing canonical Python-coordinator OpenCode command template: {template_path}"
             )
-        template = template_path.read_text(encoding="utf-8")
-        if template.count(PYTHON_SHELL_PLACEHOLDER) != 1:
-            raise opencode_adapter.OpenCodeAdapterError(
-                f"Python-coordinator command template must contain exactly one launcher placeholder: {template_path}"
-            )
         target = destination / name
         target.write_text(
-            template.replace(PYTHON_SHELL_PLACEHOLDER, rendered_launcher),
+            _render_python_command(template_path.read_text(encoding="utf-8"), template_path),
             encoding="utf-8",
         )
         if target not in installed:
@@ -256,7 +252,7 @@ def run(argv: list[str] | None = None) -> int:
     target = Path(args.target_repo).resolve()
     print(
         f"Installed {len(installed)} AutoDev OpenCode assets into {target}. "
-        "The OpenCode wrappers are compatibility shims over the user-level `autodev` CLI. "
+        "OpenCode commands invoke the first-class `autodev` CLI; repository-local wrappers remain compatibility shims only. "
         f"If {WINDOWS_CALLER_TARGET.as_posix()} is new or changed, commit/merge it to the target "
         "repository default branch before a Windows-required AutoDev run can dispatch GitHub Actions verification."
     )
