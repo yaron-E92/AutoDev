@@ -20,11 +20,35 @@ class SelectionGitHub:
             issue_queue.ATTENTION_LABEL,
             issue_queue.RUNNING_LABEL,
         }
+        self.label_metadata: dict[str, dict[str, str]] = {}
+        for name in self.labels:
+            color, description = issue_queue.LABEL_SPECS.get(
+                name,
+                ("ededed", ""),
+            )
+            self.label_metadata[name] = {
+                "name": name,
+                "color": color,
+                "description": description,
+            }
         self.issues: dict[int, dict[str, object]] = {}
         self.blocked_by: dict[int, list[int]] = {}
         self.open_prs: list[dict[str, str]] = []
         self.calls: list[list[str]] = []
         self.mutations: list[list[str]] = []
+
+    def _ensure_label_metadata(self, name: str) -> None:
+        if name in self.label_metadata:
+            return
+        color, description = issue_queue.LABEL_SPECS.get(
+            name,
+            ("ededed", ""),
+        )
+        self.label_metadata[name] = {
+            "name": name,
+            "color": color,
+            "description": description,
+        }
 
     def add_issue(
         self,
@@ -46,8 +70,11 @@ class SelectionGitHub:
             "labels": list(labels or []),
             "createdAt": created_at or f"2026-01-{min(number, 28):02d}T00:00:00Z",
             "milestone": {"title": milestone} if milestone else None,
+            "body": "",
         }
-        self.labels.update(labels or [])
+        for name in labels or []:
+            self.labels.add(name)
+            self._ensure_label_metadata(name)
 
     def add_pr(self, issue_number: int) -> None:
         self.open_prs.append(
@@ -71,7 +98,15 @@ class SelectionGitHub:
             "labels": [{"name": name} for name in issue["labels"]],
             "createdAt": issue["createdAt"],
             "milestone": issue["milestone"],
+            "body": issue["body"],
         }
+
+    @staticmethod
+    def _option(command: list[str], name: str, default: str = "") -> str:
+        if name not in command:
+            return default
+        index = command.index(name)
+        return command[index + 1] if index + 1 < len(command) else default
 
     def __call__(self, argv, **kwargs):
         args = list(argv)
@@ -82,17 +117,46 @@ class SelectionGitHub:
         if command[:2] == ["repo", "view"]:
             return SimpleNamespace(returncode=0, stdout=self.repo + "\n", stderr="")
         if command[:2] == ["label", "list"]:
+            payload = [
+                self.label_metadata[name]
+                for name in sorted(self.labels)
+            ]
             return SimpleNamespace(
                 returncode=0,
-                stdout=json.dumps([{"name": name} for name in sorted(self.labels)]),
+                stdout=json.dumps(payload),
                 stderr="",
             )
         if command[:2] == ["label", "create"]:
             self.mutations.append(args)
-            self.labels.add(command[2])
+            name = command[2]
+            self.labels.add(name)
+            self.label_metadata[name] = {
+                "name": name,
+                "color": self._option(command, "--color"),
+                "description": self._option(command, "--description"),
+            }
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        if command[:2] == ["label", "edit"]:
+            self.mutations.append(args)
+            name = command[2]
+            self.labels.add(name)
+            self._ensure_label_metadata(name)
+            self.label_metadata[name]["color"] = self._option(
+                command,
+                "--color",
+                self.label_metadata[name]["color"],
+            )
+            self.label_metadata[name]["description"] = self._option(
+                command,
+                "--description",
+                self.label_metadata[name]["description"],
+            )
             return SimpleNamespace(returncode=0, stdout="", stderr="")
         if command[:2] == ["issue", "list"]:
-            payload = [self._issue_json(self.issues[number]) for number in sorted(self.issues)]
+            payload = [
+                self._issue_json(self.issues[number])
+                for number in sorted(self.issues)
+            ]
             return SimpleNamespace(returncode=0, stdout=json.dumps(payload), stderr="")
         if command[:2] == ["issue", "view"]:
             number = int(command[2])
@@ -113,6 +177,8 @@ class SelectionGitHub:
                     value = command[index + 1]
                     if value not in labels:
                         labels.append(value)
+                    self.labels.add(value)
+                    self._ensure_label_metadata(value)
                     index += 2
                     continue
                 if token == "--remove-label":
@@ -222,15 +288,24 @@ class QueueSelectionTests(unittest.TestCase):
 
             self.assertEqual(result.issue_number, 10)
             self.assertEqual(result.source, "oldest")
-            self.assertTrue(any("#20" in item and "blocked" in item for item in result.ineligible))
-            self.assertTrue(any("#30" in item and "attention" in item for item in result.ineligible))
+            self.assertTrue(
+                any("#20" in item and "blocked" in item for item in result.ineligible)
+            )
+            self.assertTrue(
+                any("#30" in item and "attention" in item for item in result.ineligible)
+            )
 
     def test_milestone_and_label_rules_rank_only_eligible_issues(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
             fake = SelectionGitHub()
             self._ready(fake, 1, created_at="2026-01-01T00:00:00Z")
-            self._ready(fake, 2, milestone="MVP", created_at="2026-01-02T00:00:00Z")
+            self._ready(
+                fake,
+                2,
+                milestone="MVP",
+                created_at="2026-01-02T00:00:00Z",
+            )
             self._ready(
                 fake,
                 3,
@@ -317,7 +392,12 @@ class QueueSelectionTests(unittest.TestCase):
             result = queue_selection.select_next(repo, fake.repo, runner=fake)
 
             self.assertEqual(result.issue_number, 2)
-            self.assertTrue(any("#1" in item and "active AutoDev PR" in item for item in result.ineligible))
+            self.assertTrue(
+                any(
+                    "#1" in item and "active AutoDev PR" in item
+                    for item in result.ineligible
+                )
+            )
 
     def test_malformed_roadmap_fails_safely_and_actionably(self):
         with tempfile.TemporaryDirectory() as temp_dir:
