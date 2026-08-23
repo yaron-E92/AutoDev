@@ -1,0 +1,53 @@
+name: Issue 180 area reader cutover
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  cutover:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out PR branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Split area reader by responsibility
+        run: python scripts/issue_180_split_area_reader.py
+
+      - name: Compile area reader
+        run: python -m compileall -q area_reader_v2
+
+      - name: Run area-reader regression tests
+        run: >-
+          python -m unittest
+          tests.test_headroom_area_reader
+          tests.test_solution_filter_preference
+          tests.test_command_group_recommendations
+          tests.test_context_optimization
+          tests.test_provider_agnostic
+          tests.test_run_real_issue
+          tests.test_run_resume
+          tests.test_model_roles
+
+      - name: Commit verified area-reader cutover when needed
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add area_reader_v2/runner_core.py area_reader_v2/area_reader_*.py
+          if git diff --cached --quiet; then
+            echo "Area-reader cutover already applied."
+            exit 0
+          fi
+          git diff --cached --check
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m 'refactor: split area reader by responsibility'
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
