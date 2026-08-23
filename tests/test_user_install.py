@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import os
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -41,7 +42,8 @@ class UserInstallTests(unittest.TestCase):
             self.assertEqual(first.bin_dir, second.bin_dir)
             self.assertIn("automation.autodev_cli", second_text)
             self.assertIn(str(REPO_ROOT), second_text)
-            self.assertTrue((bin_dir / "autodev").stat().st_mode & 0o111)
+            if os.name != "nt":
+                self.assertTrue((bin_dir / "autodev").stat().st_mode & 0o111)
             self.assertTrue(user_install.install_state_path(home=home).is_file())
 
     def test_windows_user_install_generates_cmd_launcher(self):
@@ -99,7 +101,7 @@ class UserInstallTests(unittest.TestCase):
             self.assertEqual(once, twice)
             self.assertEqual(twice.count(user_install.PROFILE_BEGIN), 1)
             self.assertIn("export EXISTING=value", twice)
-            self.assertIn(str(bin_dir), twice)
+            self.assertIn(str(bin_dir.resolve()), twice)
 
             user_install.uninstall_user(home=home)
             after = profile.read_text(encoding="utf-8")
@@ -129,7 +131,7 @@ class UserInstallTests(unittest.TestCase):
 
             self.assertEqual(text.count(user_install.PROFILE_BEGIN), 1)
             self.assertIn("$env:PATH", text)
-            self.assertIn(str(bin_dir), text)
+            self.assertIn(str(bin_dir.resolve()), text)
             self.assertIn("$Existing = $true", text)
 
             user_install.uninstall_user(home=home)
