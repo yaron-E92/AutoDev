@@ -172,7 +172,11 @@ def main() -> None:
     if not cycles:
         print("none")
     for group in cycles:
+        members = set(group)
         print(" -> ".join(group))
+        for source in group:
+            for target in sorted(graph[source] & members):
+                print(f"  {source} -> {target}")
 
     print("\n=== Remaining >700-line module boundaries ===")
     for count, path in large:
