@@ -88,6 +88,8 @@ same-machine lock
   -> NO_READY_WORK: successful fast exit
   -> invoke the existing issue-to-PR coordinator headlessly
   -> persist scheduler outcome
+  -> refresh deterministic scheduler health
+  -> optionally notify on a material health transition
 ```
 
 Queue selection itself remains model-free. If nothing is runnable, the tick ends before the coordinator or any model route is invoked.
@@ -105,6 +107,43 @@ V1 prevents overlapping ticks for the same repository on one machine with a non-
 
 V1 does **not** implement cross-machine distributed claiming. Until that follow-up exists, configure **one autonomous scheduler owner machine per target repository**. Running autonomous schedulers for the same repository on multiple machines is unsupported even though ordinary interactive AutoDev use remains possible elsewhere.
 
+## Health
+
+Scheduler health is deterministic metadata derived from the existing queue, durable run checkpoint, privacy-grant status, and last scheduler outcome. No LLM is used to compose or interpret it.
+
+```text
+autodev scheduler health
+autodev scheduler health --json
+```
+
+The v1 health states are:
+
+```text
+READY_WORK_AVAILABLE
+RUNNING_OR_RESUMABLE
+NO_READY_WORK
+ALL_MANAGED_WORK_BLOCKED
+ATTENTION_REQUIRED
+PR_READY
+SCHEDULER_ERROR
+```
+
+Examples include:
+
+```text
+READY_WORK_AVAILABLE: 2 ready, 1 dependency-blocked, 4 unmanaged open issue(s).
+
+RUNNING_OR_RESUMABLE: Issue #42 is safely resumable from semantic.
+
+ALL_MANAGED_WORK_BLOCKED: all 6 managed open issue(s) are dependency-blocked. Top blocker #112 blocks 4 managed issue(s).
+
+ATTENTION_REQUIRED: Issue #57 requires privacy consent before autonomous model work; the privacy gate prevents model content from being sent without authorization.
+```
+
+`NO_READY_WORK` is harmless queue exhaustion, not scheduler failure. A safely resumable run is not collapsed into a terminal error, and `ReadyForReview` durable run state is surfaced as `PR_READY` rather than looking idle.
+
+The persisted health fingerprint contains only bounded scheduler metadata: repository identity, counts, issue numbers, blocker numbers/counts, durable state/stage/action identifiers, privacy-grant counts, and last scheduler outcome. It does not persist source code, model prompts, credentials, secret values, or arbitrary model-generated notification prose.
+
 ## Status
 
 ```text
@@ -112,9 +151,9 @@ autodev scheduler status
 autodev scheduler status --json
 ```
 
-Status reports the configured backend, native-backend state, cadence, dedicated worker, and the last recorded dispatcher outcome.
+Status combines native scheduler registration state with the deterministic health snapshot, last scheduler outcome, queue counts, active/resumable issue where applicable, and notification configuration.
 
-Common outcomes include:
+Common dispatcher outcomes include:
 
 ```text
 NO_READY_WORK
@@ -126,6 +165,42 @@ RUN_HEALTH_BLOCKED
 
 `NO_READY_WORK`, `OVERLAP_SUPPRESSED`, and `ATTENTION_REQUIRED` are expected successful scheduler outcomes. They do not mean an implementation crashed.
 
+## Notifications
+
+Notifications are optional and default to **off**. Health persistence and `scheduler status` do not depend on notification delivery.
+
+Enable native local notifications for one installed repository:
+
+```text
+autodev scheduler notifications enable
+```
+
+Optionally allow a long reminder for unresolved actionable states:
+
+```text
+autodev scheduler notifications enable --reminder-hours 24
+```
+
+Inspect or disable the policy:
+
+```text
+autodev scheduler notifications status
+autodev scheduler notifications disable
+```
+
+Native delivery uses a local developer-visible facility when available (`notify-send` on POSIX desktops and `msg.exe` on Windows). Delivery is deliberately best-effort: a missing desktop session, unavailable notifier, or notification command failure is recorded but never changes queue state, run state, or the scheduler's primary exit code.
+
+Notification suppression is stateful:
+
+- the first benign health observation is persisted quietly;
+- an initial actionable state such as attention, scheduler error, all-managed-blocked, or PR-ready may notify once;
+- a material health fingerprint transition notifies once when notifications are enabled;
+- an unchanged empty queue does not notify on every scheduler tick;
+- unresolved `ATTENTION_REQUIRED` / `SCHEDULER_ERROR` can re-notify only after the configured reminder cooldown;
+- a failed notification attempt is still recorded, so the scheduler does not hammer the same failed notifier every tick.
+
+Notification text is generated from the same bounded deterministic health metadata. It contains no source snippets, prompts, provider credentials, or secret values.
+
 ## Run one tick manually
 
 For setup validation or diagnostics:
@@ -134,7 +209,7 @@ For setup validation or diagnostics:
 autodev scheduler run-once
 ```
 
-This uses the same registration, lock, worker, queue selection, privacy rules, and coordinator as a native scheduled invocation. It is not a second workflow implementation.
+This uses the same registration, lock, worker, queue selection, privacy rules, coordinator, health transition, and notification suppression as a native scheduled invocation. It is not a second workflow implementation.
 
 ## Uninstall
 
@@ -142,7 +217,7 @@ This uses the same registration, lock, worker, queue selection, privacy rules, a
 autodev scheduler uninstall
 ```
 
-Uninstall removes only the native registration and AutoDev scheduler metadata for that repository. Cron removal is bounded to the AutoDev-managed marker block and preserves unrelated user cron entries.
+Uninstall removes only the native registration and AutoDev scheduler metadata for that repository, including its scheduler-health and notification-policy files. Cron removal is bounded to the AutoDev-managed marker block and preserves unrelated user cron entries.
 
 The dedicated worker is intentionally left in user-local state rather than being recursively deleted during uninstall. This avoids destroying unexpected or diagnostically useful local state; it can be inspected and removed manually once no durable run or user work is needed.
 
