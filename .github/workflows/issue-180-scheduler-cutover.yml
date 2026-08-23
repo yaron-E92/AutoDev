@@ -1,22 +1,22 @@
 name: Issue 180 scheduler cutover
 
 on:
-  push:
+  pull_request:
     branches:
-      - agent/issue-180-python-modularization-clean
+      - main
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: write
 
 jobs:
   cutover:
-    if: github.event.head_commit.message != 'refactor: cut scheduler over to cohesive modules'
     runs-on: ubuntu-latest
     steps:
-      - name: Check out branch
+      - name: Check out PR branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ github.ref }}
+          ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 0
 
       - name: Apply deterministic cutover
@@ -28,13 +28,17 @@ jobs:
       - name: Run scheduler regression tests
         run: python -m unittest tests.test_scheduler tests.test_scheduler_claims
 
-      - name: Commit verified cutover
+      - name: Commit verified cutover when needed
         shell: bash
         run: |
           set -euo pipefail
+          git add automation/scheduler.py automation/scheduler_registration.py
+          if git diff --cached --quiet; then
+            echo "Scheduler cutover already applied."
+            exit 0
+          fi
+          git diff --cached --check
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add automation/scheduler.py automation/scheduler_registration.py
-          git diff --cached --check
           git commit -m 'refactor: cut scheduler over to cohesive modules'
-          git push origin HEAD:${GITHUB_REF_NAME}
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
