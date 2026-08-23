@@ -391,8 +391,10 @@ def select_next(
     dry_run: bool = False,
     runner: Callable[..., object] = subprocess.run,
     existing_run_inspector: Callable[[Path], ExistingRun] = inspect_existing_run,
+    excluded_issue_numbers: frozenset[int] | set[int] = frozenset(),
 ) -> SelectionResult:
     repo = repo.expanduser().resolve()
+    excluded = frozenset(int(item) for item in excluded_issue_numbers if int(item) > 0)
     if dry_run:
         states = issue_queue.inspect_queue(repo, github_repo, limit=limit, runner=runner)
     else:
@@ -435,13 +437,19 @@ def select_next(
     eligible = [
         state.issue
         for state in states
-        if state.reason == "ready" and state.issue.number not in active_prs
+        if state.reason == "ready"
+        and state.issue.number not in active_prs
+        and state.issue.number not in excluded
     ]
     ineligible = list(_roadmap_ineligible(states, roadmap))
     for state in states:
         if state.reason == "ready" and state.issue.number in active_prs:
             ineligible.append(
                 f"#{state.issue.number} is otherwise ready but already has an active AutoDev PR {active_prs[state.issue.number]}"
+            )
+        if state.reason == "ready" and state.issue.number in excluded:
+            ineligible.append(
+                f"#{state.issue.number} is otherwise ready but temporarily excluded by distributed claim ownership"
             )
 
     if not eligible:

@@ -49,6 +49,7 @@ Usage:
   autodev scheduler status
   autodev scheduler health
   autodev scheduler notifications enable|disable|status
+  autodev scheduler worker-id [--set NAME]
   autodev scheduler run-once
   autodev scheduler uninstall
   autodev status [existing status options]
@@ -77,6 +78,10 @@ def run(argv: list[str] | None = None) -> int:
 
         return repo_setup.run_cli(rest)
     if command == "scheduler":
+        if rest and rest[0] == "worker-id":
+            from automation import distributed_claims
+
+            return distributed_claims.run_worker_cli(rest[1:])
         from automation import scheduler_health
 
         return scheduler_health.run_cli(rest)
