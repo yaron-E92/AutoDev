@@ -41,6 +41,7 @@ class RecordingRunner:
 
 
 def make_registration(root: Path, *, backend: str = scheduler.BACKEND_CRON) -> tuple[Path, scheduler.SchedulerRegistration]:
+    root = root.expanduser().resolve()
     worker = root / "worker checkout"
     worker.mkdir(parents=True)
     (worker / ".git").mkdir()
@@ -63,7 +64,7 @@ def make_registration(root: Path, *, backend: str = scheduler.BACKEND_CRON) -> t
 class SchedulerBackendTests(unittest.TestCase):
     def test_worker_and_registration_are_user_local_not_interactive_checkout(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            home = Path(temp_dir)
+            home = Path(temp_dir).resolve()
             interactive = home / "projects" / "repo"
 
             worker = scheduler.worker_path("owner/repo", home=home)
