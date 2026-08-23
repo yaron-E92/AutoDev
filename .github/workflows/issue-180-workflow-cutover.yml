@@ -20,7 +20,9 @@ jobs:
           fetch-depth: 0
 
       - name: Split workflow stages by responsibility
-        run: python scripts/issue_180_split_workflow.py
+        run: |
+          python scripts/issue_180_split_workflow.py
+          python scripts/issue_180_patch_workflow_compat.py
 
       - name: Compile Python
         run: python -m compileall -q automation
