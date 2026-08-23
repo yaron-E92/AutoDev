@@ -1,0 +1,200 @@
+name: Issue 180 bounded giant splits
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: issue-180-giant-splits-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  split:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out PR branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Compile migration driver
+        run: python -m py_compile scripts/issue_180_split_remaining_giants.py
+
+      - name: Split semantic verification
+        run: python scripts/issue_180_split_remaining_giants.py semantic
+
+      - name: Verify semantic verification split
+        run: |
+          python -m compileall -q automation
+          python -m unittest \
+            tests.test_semantic_verifier \
+            tests.test_semantic_verifier_failures \
+            tests.test_semantic_template_collisions \
+            tests.test_semantic_repair_default \
+            tests.test_run_real_issue \
+            tests.test_run_resume
+
+      - name: Commit semantic verification split
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add \
+            automation/semantic_verifier.py \
+            automation/semantic_contract.py \
+            automation/semantic_configuration.py \
+            automation/semantic_schema.py \
+            automation/semantic_text.py \
+            automation/semantic_prompts.py \
+            automation/semantic_evidence.py \
+            automation/semantic_storage.py \
+            automation/semantic_artifacts.py \
+            automation/semantic_invocation.py \
+            automation/semantic_cli.py
+          if git diff --cached --quiet; then
+            echo "Semantic verification already split."
+          else
+            git diff --cached --check
+            git config user.name github-actions[bot]
+            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+            git commit -m 'refactor: split semantic verification responsibilities'
+            git push origin HEAD:${{ github.event.pull_request.head.ref }}
+          fi
+
+      - name: Split evaluation harness
+        run: python scripts/issue_180_split_remaining_giants.py evaluation
+
+      - name: Verify evaluation split
+        run: |
+          python -m compileall -q automation
+          python -m unittest \
+            tests.test_eval_harness \
+            tests.test_eval_worktree
+
+      - name: Commit evaluation split
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add \
+            automation/eval_harness_core.py \
+            automation/evaluation_contract.py \
+            automation/evaluation_profiles.py \
+            automation/evaluation_scoring.py \
+            automation/evaluation_execution.py \
+            automation/evaluation_reporting.py \
+            automation/evaluation_cli.py
+          if git diff --cached --quiet; then
+            echo "Evaluation harness already split."
+          else
+            git diff --cached --check
+            git config user.name github-actions[bot]
+            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+            git commit -m 'refactor: split evaluation harness responsibilities'
+            git push origin HEAD:${{ github.event.pull_request.head.ref }}
+          fi
+
+      - name: Split privacy grants
+        run: python scripts/issue_180_split_remaining_giants.py privacy-grants
+
+      - name: Verify privacy grants split
+        run: |
+          python -m compileall -q automation
+          python -m unittest \
+            tests.test_privacy_grants \
+            tests.test_privacy \
+            tests.test_privacy_consent \
+            tests.test_opencode_interactive_consent \
+            tests.test_opencode_privacy_role_entrypoint
+
+      - name: Commit privacy grants split
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add \
+            automation/privacy_grants.py \
+            automation/privacy_grant_contract.py \
+            automation/privacy_grant_store.py \
+            automation/privacy_grant_matching.py \
+            automation/privacy_grant_commands.py \
+            automation/privacy_grant_hooks.py \
+            automation/privacy_grant_cli.py
+          if git diff --cached --quiet; then
+            echo "Privacy grants already split."
+          else
+            git diff --cached --check
+            git config user.name github-actions[bot]
+            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+            git commit -m 'refactor: split privacy grant responsibilities'
+            git push origin HEAD:${{ github.event.pull_request.head.ref }}
+          fi
+
+      - name: Split distributed claims
+        run: python scripts/issue_180_split_remaining_giants.py claims
+
+      - name: Verify distributed claims split
+        run: |
+          python -m compileall -q automation
+          python -m unittest \
+            tests.test_distributed_claims \
+            tests.test_queue_claim_selection \
+            tests.test_scheduler_claims
+
+      - name: Commit distributed claims split
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add \
+            automation/distributed_claims.py \
+            automation/claim_contract.py \
+            automation/claim_identity.py \
+            automation/claim_process.py \
+            automation/claim_repository.py \
+            automation/claim_recovery.py \
+            automation/claim_lease.py \
+            automation/claim_cli.py
+          if git diff --cached --quiet; then
+            echo "Distributed claims already split."
+          else
+            git diff --cached --check
+            git config user.name github-actions[bot]
+            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+            git commit -m 'refactor: split distributed claim responsibilities'
+            git push origin HEAD:${{ github.event.pull_request.head.ref }}
+          fi
+
+      - name: Split scheduler health
+        run: python scripts/issue_180_split_remaining_giants.py scheduler-health
+
+      - name: Verify scheduler health split
+        run: |
+          python -m compileall -q automation
+          python -m unittest \
+            tests.test_scheduler_health \
+            tests.test_scheduler
+
+      - name: Commit scheduler health split
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add \
+            automation/scheduler_health.py \
+            automation/scheduler_health_contract.py \
+            automation/scheduler_health_storage.py \
+            automation/scheduler_health_probes.py \
+            automation/scheduler_health_notifications.py \
+            automation/scheduler_health_lifecycle.py \
+            automation/scheduler_health_cli.py
+          if git diff --cached --quiet; then
+            echo "Scheduler health already split."
+          else
+            git diff --cached --check
+            git config user.name github-actions[bot]
+            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+            git commit -m 'refactor: split scheduler health responsibilities'
+            git push origin HEAD:${{ github.event.pull_request.head.ref }}
+          fi
