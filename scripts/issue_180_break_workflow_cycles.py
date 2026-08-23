@@ -35,13 +35,19 @@ def patch_workflow() -> None:
     for before, after in replacements.items():
         text = text.replace(before, after)
 
+    # Resume-budget semantics now belong to repair_budget_policy; remove the
+    # compatibility implementation from the workflow facade instead of patching
+    # policy behavior at import/runtime.
+    start = text.find("def _resume_semantic_budget(")
+    end = text.find("def _create_api_commit(", start)
+    if start >= 0 and end > start:
+        text = text[:start] + text[end:]
+
     old_assignment = "execute_stage = _execute_stage\nmark_blocked = _mark_blocked\nFAILURE_REPAIR_BUDGET_EXHAUSTED = _budget_contract.FAILURE_REPAIR_BUDGET_EXHAUSTED\n"
-    new_assignment = '''_WORKFLOW_EXECUTOR = _execute_stage\n_POLICY_HOOKS_INSTALLED = False\n\n\ndef _ensure_policy_hooks() -> None:\n    global _POLICY_HOOKS_INSTALLED, _WORKFLOW_EXECUTOR\n    if _POLICY_HOOKS_INSTALLED:\n        return\n    from automation import repair_budget_manifest\n    from automation import windows_workflow_hooks\n\n    _budget_policy._resume_budget = _resume_semantic_budget\n    repair_budget_manifest.install_run_manifest_hooks()\n    _WORKFLOW_EXECUTOR = windows_workflow_hooks.build_execute_stage(\n        sys.modules[__name__],\n        _execute_stage,\n    )\n    _POLICY_HOOKS_INSTALLED = True\n\n\ndef execute_stage(\n    name: str,\n    repo: Path,\n    *,\n    arguments: str = "",\n    autodev_root: Path = AUTODEV_ROOT,\n    attempt: int = 0,\n    reason: str = "",\n    runner=subprocess.run,\n    which=shutil.which,\n) -> tuple[int, dict[str, object]]:\n    _ensure_policy_hooks()\n    return _WORKFLOW_EXECUTOR(\n        name,\n        repo,\n        arguments=arguments,\n        autodev_root=autodev_root,\n        attempt=attempt,\n        reason=reason,\n        runner=runner,\n        which=which,\n    )\n\n\nmark_blocked = _mark_blocked\nFAILURE_REPAIR_BUDGET_EXHAUSTED = _budget_contract.FAILURE_REPAIR_BUDGET_EXHAUSTED\n'''
+    new_assignment = '''_WORKFLOW_EXECUTOR = _execute_stage\n_POLICY_HOOKS_INSTALLED = False\n\n\ndef _ensure_policy_hooks() -> None:\n    global _POLICY_HOOKS_INSTALLED, _WORKFLOW_EXECUTOR\n    if _POLICY_HOOKS_INSTALLED:\n        return\n    from automation import repair_budget_manifest\n    from automation import windows_workflow_hooks\n\n    repair_budget_manifest.install_run_manifest_hooks()\n    _WORKFLOW_EXECUTOR = windows_workflow_hooks.build_execute_stage(\n        sys.modules[__name__],\n        _execute_stage,\n    )\n    _POLICY_HOOKS_INSTALLED = True\n\n\ndef execute_stage(\n    name: str,\n    repo: Path,\n    *,\n    arguments: str = "",\n    autodev_root: Path = AUTODEV_ROOT,\n    attempt: int = 0,\n    reason: str = "",\n    runner=subprocess.run,\n    which=shutil.which,\n) -> tuple[int, dict[str, object]]:\n    _ensure_policy_hooks()\n    return _WORKFLOW_EXECUTOR(\n        name,\n        repo,\n        arguments=arguments,\n        autodev_root=autodev_root,\n        attempt=attempt,\n        reason=reason,\n        runner=runner,\n        which=which,\n    )\n\n\nmark_blocked = _mark_blocked\nFAILURE_REPAIR_BUDGET_EXHAUSTED = _budget_contract.FAILURE_REPAIR_BUDGET_EXHAUSTED\n'''
     if old_assignment in text:
         text = text.replace(old_assignment, new_assignment, 1)
 
-    # Remove the old eager hook installation explicitly. These lines may no longer
-    # be contiguous after the responsibility-module substitutions above.
     text = text.replace(
         "_semantic_budget._resume_budget = _resume_semantic_budget  # type: ignore[attr-defined]\n",
         "",
@@ -55,6 +61,8 @@ def patch_workflow() -> None:
         raise SystemExit("workflow_stages still eagerly imports windows_workflow_hooks")
     if "_semantic_budget." in text or "_windows_workflow_hooks." in text:
         raise SystemExit("workflow_stages still references removed eager hook aliases")
+    if "def _resume_semantic_budget(" in text:
+        raise SystemExit("workflow_stages still owns semantic resume-budget policy")
     if "def _ensure_policy_hooks()" not in text:
         raise SystemExit("workflow_stages lazy policy hook dispatcher was not installed")
     WORKFLOW.write_text(text, encoding="utf-8")
