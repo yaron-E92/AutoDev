@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Callable, TextIO
 
 from automation import (
+    distributed_claims,
     issue_queue,
     opencode_entrypoint,
     privacy,
@@ -93,6 +94,9 @@ class DispatchResult:
     issue_number: int = 0
     coordinator_exit_code: int | None = None
     coordinator_state: str = ""
+    claim_state: str = ""
+    claim_worker_id: str = ""
+    claim_run_id: str = ""
     detail: str = ""
 
     def to_json(self) -> dict[str, object]:
@@ -136,8 +140,6 @@ def _task_id(github_repo: str) -> str:
     owner, name = _repo_parts(github_repo)
     raw = f"{owner}-{name}".casefold()
     slug = re.sub(r"[^a-z0-9_.-]+", "-", raw).strip("-.") or "repo"
-    # GitHub owner/repository is already globally unique, but cap native task
-    # names so long repository names remain valid across scheduler backends.
     return "autodev-" + slug[:80]
 
 
@@ -264,6 +266,7 @@ def _validate_source_policy(repo: Path) -> None:
         raise SchedulerError(
             "repository queue policy disables autonomous_execution; enable it before installing a scheduler"
         )
+    distributed_claims.load_claim_policy(repo)
     queue_selection.load_roadmap(repo)
     privacy.load_policy(repo)
 
@@ -548,8 +551,6 @@ def _remove_cron_block(text: str, task_id: str) -> str:
 
 def _cron_command(registration: SchedulerRegistration, registration_file: Path) -> str:
     command = shlex.join(_dispatch_command(registration, registration_file))
-    # cron treats an unescaped percent as a newline before handing the command to
-    # the shell, even inside shell quotes.
     command = command.replace("%", "\\%")
     path_value = os.environ.get("PATH", "").strip()
     prefix = f"PATH={shlex.quote(path_value)} " if path_value else ""
@@ -644,8 +645,6 @@ def _uninstall_backend(
             argv = ["crontab", "-"]
             _require_ok(_run_command(argv, runner=runner, input_text=updated), argv)
         elif current:
-            # Preserve an intentionally empty crontab rather than using `crontab -r`,
-            # which could race with unrelated user cron management.
             argv = ["crontab", "-"]
             _require_ok(_run_command(argv, runner=runner, input_text=""), argv)
         return
@@ -730,6 +729,7 @@ def install_scheduler(
         home=home,
         runner=runner,
     )
+    distributed_claims.worker_identity(home=home)
     registration = SchedulerRegistration(
         github_repository=resolved,
         source_repository=str(source),
@@ -898,8 +898,6 @@ def _prepare_worker(
     _git(worker, fetch, runner=runner)
     existing = queue_selection.inspect_existing_run(worker)
     if existing.state != "NONE":
-        # A resumable run may intentionally contain the coordinator's checkpointed
-        # patch. The existing run manifest remains authoritative for validating it.
         return existing
     dirty = _git_status(worker, runner=runner)
     if dirty:
@@ -976,13 +974,58 @@ def _invoke_headless(
             os.environ["AUTODEV_INTERACTIVE_CONSENT"] = previous_interactive
 
 
+def _claim_terminal_state(coordinator_state: str) -> bool:
+    normalized = coordinator_state.casefold().replace("_", "").replace("-", "")
+    return normalized in {
+        "readyforreview",
+        "prready",
+        "attentionrequired",
+        "attention",
+        "blocked",
+        "failed",
+        "terminalfailed",
+    }
+
+
+def _dispatch_state(coordinator_state: str) -> str:
+    normalized = coordinator_state.casefold().replace("_", "").replace("-", "")
+    if normalized in {"readyforreview", "prready"}:
+        return "PR_READY"
+    if normalized in {"attentionrequired", "attention"}:
+        return "ATTENTION_REQUIRED"
+    if normalized in {"blocked", "failed", "terminalfailed"}:
+        return "RUN_HEALTH_BLOCKED"
+    return "DISPATCHED"
+
+
+def _capacity_result(
+    registration: SchedulerRegistration,
+    *,
+    started_at: str,
+    path: Path,
+    occupied: int,
+    maximum: int,
+    stdout: TextIO,
+) -> int:
+    result = DispatchResult(
+        state="NO_CAPACITY",
+        github_repository=registration.github_repository,
+        detail=f"distributed claim capacity is full ({occupied}/{maximum})",
+    )
+    _record_last_run(path, registration, result, started_at=started_at)
+    print(json.dumps(result.to_json(), sort_keys=True), file=stdout)
+    return 0
+
+
 def run_once(
     registration_file: Path,
     *,
+    home: Path | None = None,
     runner: Callable[..., object] = subprocess.run,
     coordinator: Callable[[list[str]], int] = opencode_entrypoint.run,
     stdout: TextIO = sys.stdout,
     stderr: TextIO = sys.stderr,
+    claiming_enabled: bool = True,
 ) -> int:
     path = registration_file.expanduser().resolve()
     registration = _load_registration(path)
@@ -1001,12 +1044,68 @@ def run_once(
             return 0
 
         worker = Path(registration.worker_repository).expanduser().resolve()
-        _prepare_worker(registration, runner=runner)
-        selection = queue_selection.select_next(
-            worker,
-            registration.github_repository,
-            runner=runner,
-        )
+        prepared_existing = _prepare_worker(registration, runner=runner)
+        claim_policy = distributed_claims.ClaimPolicy()
+        worker_id = ""
+        excluded: set[int] = set()
+        if claiming_enabled:
+            claim_policy = distributed_claims.load_claim_policy(worker)
+            worker_id = distributed_claims.worker_identity(home=home).worker_id
+            distributed_claims.reconcile_stale_claims(
+                worker,
+                registration.github_repository,
+                runner=runner,
+            )
+            shared_claims = distributed_claims.list_claims(worker, runner=runner)
+            if prepared_existing.state == "NONE":
+                excluded.update(item.issue_number for item in shared_claims)
+                if len(shared_claims) >= claim_policy.max_concurrent_issues:
+                    return _capacity_result(
+                        registration,
+                        started_at=started_at,
+                        path=path,
+                        occupied=len(shared_claims),
+                        maximum=claim_policy.max_concurrent_issues,
+                        stdout=stdout,
+                    )
+
+        selection: queue_selection.SelectionResult
+        claim: distributed_claims.Claim | None = None
+        claim_state = ""
+        while True:
+            selection = queue_selection.select_next(
+                worker,
+                registration.github_repository,
+                runner=runner,
+                excluded_issue_numbers=excluded,
+            )
+            if selection.state != "SELECTED" or not claiming_enabled:
+                break
+            attempt = distributed_claims.acquire_claim(
+                worker,
+                registration.github_repository,
+                selection.issue_number,
+                worker_id,
+                f"origin/{registration.default_branch}",
+                policy=claim_policy,
+                runner=runner,
+            )
+            if attempt.claim is not None and attempt.state in {"ACQUIRED", "OWNED"}:
+                claim = attempt.claim
+                claim_state = attempt.state
+                break
+            excluded.add(selection.issue_number)
+            shared_claims = distributed_claims.list_claims(worker, runner=runner)
+            if len(shared_claims) >= claim_policy.max_concurrent_issues:
+                return _capacity_result(
+                    registration,
+                    started_at=started_at,
+                    path=path,
+                    occupied=len(shared_claims),
+                    maximum=claim_policy.max_concurrent_issues,
+                    stdout=stdout,
+                )
+
         if selection.state == "NO_READY_WORK":
             result = DispatchResult(
                 state="NO_READY_WORK",
@@ -1039,6 +1138,33 @@ def run_once(
             _record_last_run(path, registration, result, started_at=started_at)
             print(json.dumps(result.to_json(), sort_keys=True), file=stderr)
             return 2
+
+        if claiming_enabled and selection.state == "RESUME_EXISTING":
+            attempt = distributed_claims.acquire_claim(
+                worker,
+                registration.github_repository,
+                selection.issue_number,
+                worker_id,
+                f"origin/{registration.default_branch}",
+                policy=claim_policy,
+                runner=runner,
+            )
+            if attempt.claim is None or attempt.state not in {"ACQUIRED", "OWNED"}:
+                owner = attempt.owner.worker_id if attempt.owner is not None else "another worker"
+                result = DispatchResult(
+                    state="CLAIM_CONFLICT",
+                    github_repository=registration.github_repository,
+                    selection_state=selection.state,
+                    issue_number=selection.issue_number,
+                    claim_state=attempt.state,
+                    detail=f"local durable run cannot resume because issue is claimed by {owner}",
+                )
+                _record_last_run(path, registration, result, started_at=started_at)
+                print(json.dumps(result.to_json(), sort_keys=True), file=stderr)
+                return 2
+            claim = attempt.claim
+            claim_state = attempt.state
+
         if selection.state == "RESUME_EXISTING":
             coordinate_argv = ["coordinate", "--repo", str(worker), "--resume"]
         elif selection.state == "SELECTED":
@@ -1052,22 +1178,73 @@ def run_once(
         else:
             raise SchedulerError(f"unsupported queue selection state: {selection.state}")
 
-        code = _invoke_headless(coordinate_argv, coordinator=coordinator)
+        if claim is None:
+            code = _invoke_headless(coordinate_argv, coordinator=coordinator)
+            latest_claim = None
+            claim_lost = False
+        else:
+            with distributed_claims.HeartbeatLease(worker, claim, runner=runner) as lease:
+                code = _invoke_headless(coordinate_argv, coordinator=coordinator)
+            latest_claim = lease.latest_claim()
+            claim_lost = lease.lost
+
         coordinator_state = _coordinator_state(worker)
+        if claim_lost:
+            result = DispatchResult(
+                state="CLAIM_CONFLICT",
+                github_repository=registration.github_repository,
+                selection_state=selection.state,
+                issue_number=selection.issue_number,
+                coordinator_exit_code=code,
+                coordinator_state=coordinator_state,
+                claim_state="LOST",
+                claim_worker_id=worker_id,
+                claim_run_id=latest_claim.run_id if latest_claim else "",
+                detail="distributed claim ownership changed while the coordinator was active",
+            )
+            _record_last_run(path, registration, result, started_at=started_at)
+            print(json.dumps(result.to_json(), sort_keys=True), file=stderr)
+            return 2
+
+        dispatch_state = _dispatch_state(coordinator_state)
+        release_error = False
+        if latest_claim is not None and _claim_terminal_state(coordinator_state):
+            release_error = not distributed_claims.release_claim(
+                worker,
+                latest_claim,
+                runner=runner,
+            )
+
+        if release_error:
+            result = DispatchResult(
+                state="CLAIM_RELEASE_FAILED",
+                github_repository=registration.github_repository,
+                selection_state=selection.state,
+                issue_number=selection.issue_number,
+                coordinator_exit_code=code,
+                coordinator_state=coordinator_state,
+                claim_state="RELEASE_FAILED",
+                claim_worker_id=worker_id,
+                claim_run_id=latest_claim.run_id if latest_claim else "",
+                detail="terminal coordinator state was reached but distributed claim release lost its compare-and-swap",
+            )
+            _record_last_run(path, registration, result, started_at=started_at)
+            print(json.dumps(result.to_json(), sort_keys=True), file=stderr)
+            return 2
+
         result = DispatchResult(
-            state=(
-                "ATTENTION_REQUIRED"
-                if coordinator_state.casefold() == "attentionrequired"
-                else "DISPATCHED"
-            ),
+            state=dispatch_state,
             github_repository=registration.github_repository,
             selection_state=selection.state,
             issue_number=selection.issue_number,
             coordinator_exit_code=code,
             coordinator_state=coordinator_state,
+            claim_state=("RELEASED" if latest_claim is not None and _claim_terminal_state(coordinator_state) else claim_state),
+            claim_worker_id=worker_id if latest_claim is not None else "",
+            claim_run_id=latest_claim.run_id if latest_claim is not None else "",
             detail=(
                 "coordinator returned a successful non-runnable attention state"
-                if coordinator_state.casefold() == "attentionrequired"
+                if dispatch_state == "ATTENTION_REQUIRED"
                 else "existing AutoDev coordinator completed this scheduler dispatch"
             ),
         )
@@ -1095,12 +1272,18 @@ def doctor_state(
     worker = Path(registration.worker_repository).expanduser()
     if not worker.is_dir() or not (worker / ".git").exists():
         return "error", f"scheduler worker is missing: {worker}"
+    try:
+        identity = distributed_claims.worker_identity(home=home)
+        policy = distributed_claims.load_claim_policy(worker)
+    except distributed_claims.ClaimError as exc:
+        return "error", f"distributed claim configuration is invalid: {exc}"
     backend = _backend_state(registration, home=home, runner=runner)
     if backend != "active":
         return "error", f"scheduler backend {registration.backend} is {backend}"
     return (
         "ok",
-        f"{registration.backend} active every {registration.cadence_minutes} minute(s); worker={worker}",
+        f"{registration.backend} active every {registration.cadence_minutes} minute(s); "
+        f"worker={worker}; worker-id={identity.worker_id}; max-concurrency={policy.max_concurrent_issues}",
     )
 
 
@@ -1230,6 +1413,7 @@ def run_cli(
             path = registration_path(resolved, home=home)
         return run_once(
             path,
+            home=home,
             runner=runner,
             coordinator=coordinator,
             stdout=stdout,
@@ -1237,6 +1421,7 @@ def run_cli(
         )
     except (
         SchedulerError,
+        distributed_claims.ClaimError,
         issue_queue.QueueError,
         queue_selection.RoadmapError,
         privacy.PrivacyError,
