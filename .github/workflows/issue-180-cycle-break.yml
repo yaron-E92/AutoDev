@@ -1,0 +1,102 @@
+name: Issue 180 workflow cycle break
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: issue-180-cycle-break-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  cycle-break:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out PR branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Break workflow import cycles
+        run: python scripts/issue_180_break_workflow_cycles.py
+
+      - name: Compile workflow modules
+        run: python -m compileall -q automation
+
+      - name: Verify workflow policy and runtime behavior
+        run: |
+          python -m unittest \
+            tests.test_workflow_stages \
+            tests.test_workflow_stage_wrappers \
+            tests.test_windows_verification \
+            tests.test_windows_semantic_order \
+            tests.test_semantic_repair_budget \
+            tests.test_semantic_repair_default \
+            tests.test_run_resume \
+            tests.test_opencode_integration \
+            tests.test_role_runtime \
+            tests.test_role_runtime_compat
+
+      - name: Verify top-level import graph is acyclic
+        run: |
+          python - <<'PY'
+          import ast
+          from pathlib import Path
+
+          files = [
+              path for path in Path('.').rglob('*.py')
+              if 'tests' not in path.parts and '.git' not in path.parts and '__pycache__' not in path.parts
+          ]
+          names = {'.'.join(path.with_suffix('').parts[:-1] if path.stem == '__init__' else path.with_suffix('').parts) for path in files}
+          graph = {name: set() for name in names}
+          by_name = {'.'.join(path.with_suffix('').parts[:-1] if path.stem == '__init__' else path.with_suffix('').parts): path for path in files}
+          for name, path in by_name.items():
+              tree = ast.parse(path.read_text(encoding='utf-8'))
+              for node in tree.body:
+                  if isinstance(node, ast.Import):
+                      for alias in node.names:
+                          if alias.name in names and alias.name != name:
+                              graph[name].add(alias.name)
+                  elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                      if node.module in names and node.module != name:
+                          graph[name].add(node.module)
+                      for alias in node.names:
+                          candidate = f'{node.module}.{alias.name}'
+                          if candidate in names and candidate != name:
+                              graph[name].add(candidate)
+          visiting, visited = set(), set()
+          def visit(name, trail):
+              if name in visited:
+                  return
+              if name in visiting:
+                  raise SystemExit('top-level import cycle: ' + ' -> '.join([*trail, name]))
+              visiting.add(name)
+              for dep in sorted(graph[name]):
+                  visit(dep, [*trail, name])
+              visiting.remove(name)
+              visited.add(name)
+          for name in sorted(graph):
+              visit(name, [])
+          print('top-level import graph: acyclic')
+          PY
+
+      - name: Commit verified cycle break
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add automation/workflow_stages.py automation/windows_workflow_hooks.py
+          if git diff --cached --quiet; then
+            echo "Workflow cycle break already applied."
+          else
+            git diff --cached --check
+            git config user.name github-actions[bot]
+            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+            git commit -m 'refactor: make workflow policy hooks lazy and acyclic'
+            git push origin HEAD:${{ github.event.pull_request.head.ref }}
+          fi
