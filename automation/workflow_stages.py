@@ -175,72 +175,6 @@ def _workspace_path_in_scope(repo: Path, relative: str) -> bool:
     except workspace_scope.WorkspaceScopeError as exc:
         raise WorkflowStageError(str(exc)) from exc
 
-def _resume_semantic_budget(
-    existing: dict[str, object],
-    *,
-    attempt: int,
-    fixed_default: int,
-) -> dict[str, object]:
-    """Resume a persisted budget without mistaking inherited defaults for consent.
-
-    OpenCode normally injects MAX_SEMANTIC_REPAIR_ATTEMPTS into every run. An
-    unchanged inherited value is therefore not evidence that the user raised a
-    previously exhausted adaptive budget. Persist the value observed when the
-    budget was created and only treat a later strictly larger value as an
-    explicit monotonic increase.
-    """
-
-    budget = copy.deepcopy(existing)
-    previous = int(budget.get("effective_limit", 0) or 0)
-    effective = max(previous, attempt)
-
-    observed = int(
-        budget.get(
-            "fixed_limit_observed",
-            budget.get("configured_limit", fixed_default),
-        )
-        or 0
-    )
-    current_fixed = _budget_policy._nonnegative_int(  # type: ignore[attr-defined]
-        _budget_contract.FIXED_LIMIT_ENV,
-        observed,
-    )
-    budget.setdefault("fixed_limit_observed", observed)
-    if current_fixed > observed:
-        budget["fixed_limit_observed"] = current_fixed
-        if current_fixed > effective:
-            effective = current_fixed
-            budget["manual_limit_increase"] = current_fixed
-
-    if str(budget.get("policy", "")) == "adaptive":
-        old_cap = int(
-            budget.get("max_attempts", _budget_contract.DEFAULT_ADAPTIVE_MAX) or 0
-        )
-        new_cap = _budget_policy._nonnegative_int(  # type: ignore[attr-defined]
-            _budget_contract.ADAPTIVE_MAX_ENV,
-            old_cap,
-        )
-        if new_cap > old_cap:
-            raw_attempts = int(budget.get("raw_attempts", 0) or 0)
-            minimum = int(
-                budget.get("min_attempts", _budget_contract.DEFAULT_ADAPTIVE_MIN)
-                or 0
-            )
-            recomputed = min(new_cap, max(minimum, raw_attempts))
-            if recomputed > effective:
-                effective = recomputed
-            budget["max_attempts"] = new_cap
-            budget["adaptive_cap_increased_from"] = old_cap
-
-    budget["effective_limit"] = effective
-    budget["attempts_consumed"] = attempt
-    if (
-        budget.get("policy") == "adaptive"
-        and attempt > int(budget.get("max_attempts", effective) or effective)
-    ):
-        budget["cap_exceeded_by_consumed_attempts"] = True
-    return budget
-
 def _create_api_commit(
     repo: Path,
     state: dict[str, object],
@@ -453,7 +387,6 @@ def _ensure_policy_hooks() -> None:
     from automation import repair_budget_manifest
     from automation import windows_workflow_hooks
 
-    _budget_policy._resume_budget = _resume_semantic_budget
     repair_budget_manifest.install_run_manifest_hooks()
     _WORKFLOW_EXECUTOR = windows_workflow_hooks.build_execute_stage(
         sys.modules[__name__],
