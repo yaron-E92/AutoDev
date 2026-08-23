@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import ast
-from collections import defaultdict
 from pathlib import Path
 
 
@@ -31,14 +30,36 @@ def module_name(path: Path) -> str:
     return ".".join(parts)
 
 
+def top_level_names(tree: ast.Module) -> dict[str, ast.AST]:
+    names: dict[str, ast.AST] = {}
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names[node.name] = node
+        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for target in targets:
+                if isinstance(target, ast.Name):
+                    names[target.id] = node
+    return names
+
+
+def local_references(node: ast.AST, known: set[str]) -> set[str]:
+    return {
+        item.id
+        for item in ast.walk(node)
+        if isinstance(item, ast.Name)
+        and isinstance(item.ctx, ast.Load)
+        and item.id in known
+    }
+
+
 def import_dependencies(tree: ast.Module, known: set[str]) -> set[str]:
     deps: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                name = alias.name
-                if name in known:
-                    deps.add(name)
+                if alias.name in known:
+                    deps.add(alias.name)
         elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
             if node.module in known:
                 deps.add(node.module)
@@ -97,6 +118,17 @@ def function_spans(tree: ast.Module) -> list[tuple[int, str, int, int]]:
     return sorted(spans, reverse=True)
 
 
+def print_boundaries(path: Path, tree: ast.Module) -> None:
+    definitions = top_level_names(tree)
+    known = set(definitions)
+    print(f"\n--- {path} responsibility boundaries ---")
+    for name, node in sorted(definitions.items(), key=lambda item: getattr(item[1], "lineno", 0)):
+        start = int(getattr(node, "lineno", 0))
+        end = int(getattr(node, "end_lineno", start))
+        refs = ",".join(sorted(local_references(node, known) - {name}))
+        print(f"{start:4d}-{end:4d} {name} -> {refs}")
+
+
 def main() -> None:
     files = production_python_files()
     parsed: dict[Path, ast.Module] = {}
@@ -141,6 +173,11 @@ def main() -> None:
         print("none")
     for group in cycles:
         print(" -> ".join(group))
+
+    print("\n=== Remaining >700-line module boundaries ===")
+    for count, path in large:
+        if count > 700:
+            print_boundaries(path, parsed[path])
 
 
 if __name__ == "__main__":
