@@ -45,6 +45,10 @@ Usage:
   autodev repo install [--no-opencode]
   autodev repo ensure-labels
   autodev repo doctor [--fix] [--json]
+  autodev scheduler install [--backend auto|systemd-user|cron|windows-task]
+  autodev scheduler status
+  autodev scheduler run-once
+  autodev scheduler uninstall
   autodev status [existing status options]
   autodev coordinate [coordinator options]
   autodev resume [coordinator options]
@@ -71,11 +75,9 @@ def run(argv: list[str] | None = None) -> int:
 
         return repo_setup.run_cli(rest)
     if command == "scheduler":
-        print(
-            "AutoDev scheduler support is not installed yet; implement/install scheduler support before using this command.",
-            file=sys.stderr,
-        )
-        return 2
+        from automation import scheduler
+
+        return scheduler.run_cli(rest)
 
     _enable_interactive_consent_for_direct_cli(explicit=explicit_interactive)
     if command == "resume":
