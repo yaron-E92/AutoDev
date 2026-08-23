@@ -1,0 +1,171 @@
+from __future__ import annotations
+
+import argparse
+import base64
+import hashlib
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Callable
+from automation.semantic_verifier import (
+    SemanticVerifierError,
+    extract_acceptance_criteria,
+    parse_semantic_output,
+    prepare_semantic_repair_prompt,
+    render_template,
+)
+from automation.workflow_commands import (
+    _decoded_text,
+    gh,
+)
+from automation.workflow_contract import (
+    WorkflowStageError,
+)
+from automation.workflow_storage import (
+    read_json,
+    read_text,
+    write_state,
+    write_text,
+)
+
+def resolve_profiles(
+    labels: list[str],
+    profiles_path: Path,
+    *,
+    explicit_profiles: str,
+    explicit_local_check: str,
+    explicit_stack_context: str,
+    autodev_root: Path,
+) -> tuple[str, str, str]:
+    config = read_json(profiles_path)
+    if not isinstance(config, dict):
+        config = {}
+    if not config and not explicit_local_check.strip():
+        raise WorkflowStageError(
+            f"verification profile configuration is missing or invalid: {profiles_path}; set LOCAL_CHECK explicitly"
+        )
+    definitions = config.get("profiles", {})
+    definitions = definitions if isinstance(definitions, dict) else {}
+    selected = [value for value in re.split(r"[,;\s]+", explicit_profiles.casefold()) if value]
+    if not selected:
+        for key, value in definitions.items():
+            if not isinstance(value, dict):
+                continue
+            profile_labels = [str(item) for item in value.get("labels", [])]
+            if any(label in labels for label in profile_labels):
+                selected.append(str(key))
+    if not selected:
+        selected = [str(config.get("defaultProfile", "auto") or "auto")]
+    selected = list(dict.fromkeys(selected))
+    if "auto" in selected and len(selected) > 1:
+        selected = [item for item in selected if item != "auto"]
+
+    verify_profiles: list[str] = []
+    contexts: list[str] = []
+    for profile_name in selected:
+        value = definitions.get(profile_name, {}) if profile_name != "auto" else {}
+        value = value if isinstance(value, dict) else {}
+        verify_profiles.append(str(value.get("verifyProfile", profile_name)))
+        context = str(value.get("stackContext", "")).strip()
+        if context:
+            contexts.append(context)
+    profiles_csv = ",".join(dict.fromkeys(verify_profiles))
+    if explicit_local_check.strip():
+        local_check = explicit_local_check.strip()
+    else:
+        template = str(config.get("verifyCommandTemplate", "")).strip()
+        if not template:
+            raise WorkflowStageError(
+                f"verification profile {profiles_path} has no verifyCommandTemplate; set LOCAL_CHECK explicitly"
+            )
+        codex_tools = os.environ.get("CODEX_TOOLS_DIR", str(Path.home() / "codex-tools"))
+        local_check = (
+            template.replace("{{ProfilesCsv}}", profiles_csv)
+            .replace("{{AutomationRoot}}", str(autodev_root))
+            .replace("{{CodexToolsDir}}", codex_tools)
+        )
+    stack_context = explicit_stack_context.strip() or "\n".join(contexts)
+    if not stack_context:
+        stack_context = (
+            "No specific area profile was selected. Use repository AGENTS.md, README, project files, "
+            "solution/package files, and CI configuration as the source of truth. Prefer the smallest safe scope."
+        )
+    return profiles_csv, local_check, stack_context
+
+def render_implementer_prompt(repo: Path, current: Path, state: dict[str, object], autodev_root: Path) -> None:
+    plan = read_text(current / "plan.md")
+    if not plan.strip():
+        raise WorkflowStageError("cannot render implementer prompt because plan.md is missing")
+    template = read_text(autodev_root / "promptTemplates" / "implementer.md")
+    prompt = render_template(
+        template,
+        {
+            "IssueText": read_text(current / "issue.md") or str(state.get("IssueText", "")),
+            "Plan": plan,
+            "LocalCheck": str(state.get("LocalCheck", "")),
+            "StackContext": str(state.get("StackContext", "")),
+        },
+    )
+    write_text(current / "implementer.md", prompt)
+    state["Status"] = "ImplementerPromptRendered"
+    write_state(current, state)
+
+def render_ci_repair(current: Path, state: dict[str, object], autodev_root: Path) -> None:
+    prompt = render_template(
+        read_text(autodev_root / "promptTemplates" / "ci-repair.md"),
+        {
+            "IssueText": read_text(current / "issue.md") or str(state.get("IssueText", "")),
+            "Plan": read_text(current / "plan.md"),
+            "CiSummary": read_text(current / "ci-summary.json"),
+            "LocalCheck": str(state.get("LocalCheck", "")),
+            "StackContext": str(state.get("StackContext", "")),
+        },
+    )
+    write_text(current / "ci-repair.md", prompt)
+
+def render_legacy_verifier(
+    repo: Path,
+    current: Path,
+    state: dict[str, object],
+    autodev_root: Path,
+    *,
+    runner: Callable[..., object] = subprocess.run,
+) -> None:
+    repo_full = str(state.get("RepoFullName", ""))
+    pr_number = int(state.get("PrNumber", 0) or 0)
+    completed = gh(repo, ["pr", "diff", str(pr_number), "--repo", repo_full], runner=runner, check=False)
+    diff = _decoded_text(getattr(completed, "stdout", ""))
+    prompt = render_template(
+        read_text(autodev_root / "promptTemplates" / "verifier.md"),
+        {
+            "IssueText": read_text(current / "issue.md") or str(state.get("IssueText", "")),
+            "Plan": read_text(current / "plan.md"),
+            "Diff": diff,
+            # The shared verifier template uses the presence of these literals to
+            # select its legacy PASS/FAIL contract. Identity substitutions keep
+            # them literal under the collision-safe one-pass renderer.
+            "AcceptanceCriteria": "{{AcceptanceCriteria}}",
+            "SynthesizedHandoff": "{{SynthesizedHandoff}}",
+            "ChangedFiles": "{{ChangedFiles}}",
+            "DeterministicEvidence": "{{DeterministicEvidence}}",
+            "CrossFileRegressionEvidence": "{{CrossFileRegressionEvidence}}",
+            "UncertaintyNotes": "{{UncertaintyNotes}}",
+            "LocalCheck": str(state.get("LocalCheck", "")),
+            "StackContext": str(state.get("StackContext", "")),
+        },
+    )
+    write_text(current / "verifier.md", prompt)
+
+def commit_message(current: Path, state: dict[str, object]) -> str:
+    lines = read_text(current / "commit-message.txt").splitlines()
+    if lines and lines[0].strip():
+        return lines[0].strip()[:200]
+    number = int(state.get("IssueNumber", 0) or 0)
+    title = str(state.get("IssueTitle", "")).strip()
+    return f"Implement issue-{number}: {title}" if title else f"Implement issue-{number} via AutoDev"
