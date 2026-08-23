@@ -24,7 +24,11 @@ jobs:
           fetch-depth: 0
 
       - name: Compile migration driver
-        run: python -m py_compile scripts/issue_180_split_runtime_support.py scripts/issue_180_queue_compat.py
+        run: >-
+          python -m py_compile
+          scripts/issue_180_split_runtime_support.py
+          scripts/issue_180_queue_compat.py
+          scripts/issue_180_provider_compat.py
 
       - name: Split semantic repair budgeting
         run: python scripts/issue_180_split_runtime_support.py repair-budget
@@ -100,7 +104,9 @@ jobs:
           fi
 
       - name: Split model providers
-        run: python scripts/issue_180_split_runtime_support.py providers
+        run: |
+          python scripts/issue_180_split_runtime_support.py providers
+          python scripts/issue_180_provider_compat.py
 
       - name: Verify model provider split
         run: |
