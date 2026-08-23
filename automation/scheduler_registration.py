@@ -22,6 +22,7 @@ from automation.scheduler_process import (
 )
 from automation.scheduler_types import (
     BACKEND_AUTO,
+    DEFAULT_CADENCE_MINUTES,
     MAX_CADENCE_MINUTES,
     MIN_CADENCE_MINUTES,
     SCHEDULER_SCHEMA,
@@ -220,7 +221,7 @@ def install_scheduler(
     *,
     github_repo: str = "",
     backend: str = BACKEND_AUTO,
-    cadence_minutes: int,
+    cadence_minutes: int = DEFAULT_CADENCE_MINUTES,
     launcher: str = "",
     home: Path | None = None,
     platform_name: str | None = None,
