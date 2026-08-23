@@ -1,0 +1,63 @@
+name: Issue 180 workflow cutover
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  cutover:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out PR branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Split workflow stages by responsibility
+        run: python scripts/issue_180_split_workflow.py
+
+      - name: Compile Python
+        run: python -m compileall -q automation
+
+      - name: Run workflow regression tests
+        run: >-
+          python -m unittest
+          tests.test_workflow_stages
+          tests.test_semantic_repair_default
+          tests.test_semantic_repair_budget
+          tests.test_ci_outcomes
+          tests.test_windows_semantic_order
+          tests.test_execution_classification_hooks
+
+      - name: Commit verified workflow cutover when needed
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add \
+            automation/workflow_stages.py \
+            automation/workflow_stages_core.py \
+            automation/workflow_contract.py \
+            automation/workflow_storage.py \
+            automation/workflow_commands.py \
+            automation/workflow_workspace.py \
+            automation/workflow_prompts.py \
+            automation/workflow_diagnostics.py \
+            automation/workflow_github.py \
+            automation/workflow_preparation.py \
+            automation/workflow_verification.py \
+            automation/workflow_dispatch.py
+          if git diff --cached --quiet; then
+            echo "Workflow cutover already applied."
+            exit 0
+          fi
+          git diff --cached --check
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m 'refactor: split workflow engine by responsibility'
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
