@@ -13,27 +13,67 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Map largest Python modules
+      - name: Map large-module dependencies
         shell: bash
         run: |
           python - <<'PY'
           import ast
           from pathlib import Path
 
-          paths = [
-              Path('automation/workflow_stages_core.py'),
-              Path('automation/run_real_issue.py'),
-              Path('automation/run_real_issue_core.py'),
-              Path('automation/scheduler.py'),
-              Path('automation/opencode_adapter.py'),
-              Path('automation/eval_harness_core.py'),
-              Path('area_reader_v2/runner_core.py'),
-          ]
-          for path in paths:
+          targets = {
+              Path('automation/workflow_stages_core.py'): {
+                  'ensure_prepared_issue', 'validate_prepared_worktree', 'resolve_profiles', '_preflight',
+                  'render_implementer_prompt', 'run_local_check', 'pr_and_ci', 'source_identity',
+                  'create_api_commit', 'ensure_pr', 'wait_for_required_checks', '_query_pr_checks',
+                  '_ci_state', '_persist_ci_proof', '_pr_head_sha', 'render_ci_repair',
+                  'render_legacy_verifier', 'validate_ready_proof', 'mark_ready', 'mark_blocked',
+                  'workspace_changes', '_baseline_snapshot', 'workspace_snapshot',
+                  'write_workspace_snapshot', 'ignored_workspace_path', 'stage_payload',
+                  'record_stage_failure', 'repository_modified', 'configured_attempt_limit',
+                  'configured_nonnegative_float', 'commit_message', 'safe_slug', 'gh', 'git', 'gh_json',
+                  '_run_captured', '_decoded_text', '_gh_environment', '_command_reason',
+                  '_command_failure_classification', '_exception_classification', '_require_accepted_role',
+                  '_repeat_failure_payload', '_stage_input_fingerprint', '_record_stage_invocation',
+                  '_record_stage_timing', '_record_shipment_diagnostics', '_diagnostics',
+                  '_write_diagnostics', '_file_sha256', '_json_evidence', '_porcelain_paths',
+                  'concise', 'read_state', 'write_state', 'read_json', 'read_text', 'write_json', 'write_text',
+              },
+              Path('automation/run_real_issue.py'): {
+                  '_extract_resume_options', '_inject_resume_arguments', '_argument_value',
+                  '_build_role_snapshots', '_reconcile_semantic_settings', '_update_resume_target_options',
+                  '_provider_config_path', '_validate_next_stage_provider', '_validate_resume_repository',
+                  '_pending_uncheckpointed_patch', '_patch_matches_resume_worktree', '_patch_paths',
+                  '_is_expected_autodev_commit', 'run_implementation_loop',
+                  '_run_uncheckpointed_implementation_loop', 'apply_patch_file', '_checkpoint_patch_applied',
+                  '_checkpoint_deterministic', '_pending_repair_patch', '_patch_is_recorded_as_applied',
+                  '_next_fix_attempt', '_resumed_verification', 'run_semantic_verification_gate',
+                  '_deterministic_matches_current_patch', '_clear_completed_stages',
+                  '_run_final_semantic_attempt', '_checkpoint_semantic', '_invoke_semantic_attempt',
+                  'create_draft_pr', '_find_existing_pr', '_record_pr_checkpoint', 'build_pr_body',
+              },
+          }
+
+          for path, wanted in targets.items():
               text = path.read_text(encoding='utf-8')
               tree = ast.parse(text)
-              print(f'\n=== {path} lines={text.count(chr(10))+1} bytes={len(text.encode())} ===')
+              top_names = {
+                  node.name for node in tree.body
+                  if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+              }
+              top_names |= {
+                  target.id for node in tree.body if isinstance(node, (ast.Assign, ast.AnnAssign))
+                  for target in ([*node.targets] if isinstance(node, ast.Assign) else [node.target])
+                  if isinstance(target, ast.Name)
+              }
+              print(f'\n=== GLOBAL DEPENDENCIES {path} ===')
               for node in tree.body:
-                  if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                      print(f'{node.lineno:5}-{getattr(node, "end_lineno", node.lineno):5} {type(node).__name__:16} {node.name}')
+                  if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) or node.name not in wanted:
+                      continue
+                  local = set()
+                  for child in ast.walk(node):
+                      if isinstance(child, ast.arg): local.add(child.arg)
+                      elif isinstance(child, ast.Name) and isinstance(child.ctx, (ast.Store, ast.Param)): local.add(child.id)
+                  loaded = {child.id for child in ast.walk(node) if isinstance(child, ast.Name) and isinstance(child.ctx, ast.Load)}
+                  deps = sorted((loaded - local) & top_names)
+                  print(f'{node.name}: {", ".join(deps)}')
           PY
