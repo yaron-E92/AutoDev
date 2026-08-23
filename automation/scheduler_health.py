@@ -222,6 +222,13 @@ def _blocker_counts(states: list[issue_queue.QueueState]) -> dict[str, int]:
     return {str(number): count for number, count in ordered}
 
 
+def _first_issue_number(states: list[issue_queue.QueueState], reason: str) -> int:
+    return min(
+        (state.issue.number for state in states if state.reason == reason),
+        default=0,
+    )
+
+
 def _fingerprint_source(
     *,
     state: str,
@@ -312,6 +319,14 @@ def compute_health(
         attention_kind = "repository-policy"
     else:
         state = "NO_READY_WORK"
+
+    if not issue_number:
+        if state == "ATTENTION_REQUIRED" and attention_kind == "privacy-consent":
+            issue_number = _first_issue_number(states, "ready")
+        elif state == "ATTENTION_REQUIRED":
+            issue_number = _first_issue_number(states, "attention")
+        elif state == "RUNNING_OR_RESUMABLE":
+            issue_number = _first_issue_number(states, "running")
 
     source = _fingerprint_source(
         state=state,
