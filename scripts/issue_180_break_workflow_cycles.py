@@ -40,12 +40,21 @@ def patch_workflow() -> None:
     if old_assignment in text:
         text = text.replace(old_assignment, new_assignment, 1)
 
-    old_hooks = '''_semantic_budget._resume_budget = _resume_semantic_budget  # type: ignore[attr-defined]\n_semantic_budget.install_run_manifest_hooks()\n_windows_workflow_hooks.install(sys.modules[__name__])\n'''
-    if old_hooks in text:
-        text = text.replace(old_hooks, "", 1)
+    # Remove the old eager hook installation explicitly. These lines may no longer
+    # be contiguous after the responsibility-module substitutions above.
+    text = text.replace(
+        "_semantic_budget._resume_budget = _resume_semantic_budget  # type: ignore[attr-defined]\n",
+        "",
+    )
+    text = text.replace("_semantic_budget.install_run_manifest_hooks()\n", "")
+    text = text.replace("_windows_workflow_hooks.install(sys.modules[__name__])\n", "")
 
-    if "_semantic_budget" in text or "_windows_workflow_hooks" in text:
-        raise SystemExit("workflow_stages still contains eager policy-hook dependencies")
+    if "from automation import semantic_repair_budget" in text:
+        raise SystemExit("workflow_stages still eagerly imports semantic_repair_budget")
+    if "from automation import windows_workflow_hooks" in text.split("def _ensure_policy_hooks", 1)[0]:
+        raise SystemExit("workflow_stages still eagerly imports windows_workflow_hooks")
+    if "_semantic_budget." in text or "_windows_workflow_hooks." in text:
+        raise SystemExit("workflow_stages still references removed eager hook aliases")
     if "def _ensure_policy_hooks()" not in text:
         raise SystemExit("workflow_stages lazy policy hook dispatcher was not installed")
     WORKFLOW.write_text(text, encoding="utf-8")
@@ -63,7 +72,8 @@ def patch_windows_hooks() -> None:
     new_tail = '''    return execute_stage\n\n\ndef install(core) -> None:\n    \"\"\"Compatibility installer for callers that still request mutation explicitly.\"\"\"\n\n    if getattr(core, "_autodev_windows_workflow_hooks_installed", False):\n        return\n    core.execute_stage = build_execute_stage(core, core.execute_stage)\n    core._autodev_windows_workflow_hooks_installed = True\n'''
     if old_tail in text:
         text = text.replace(old_tail, new_tail, 1)
-    if "from automation import windows_verification" in text.split("def build_execute_stage", 1)[0]:
+    before_builder = text.split("def build_execute_stage", 1)[0]
+    if "from automation import windows_verification" in before_builder:
         raise SystemExit("windows workflow hooks still import verification at module import time")
     if "def build_execute_stage" not in text:
         raise SystemExit("windows workflow hook builder was not installed")
