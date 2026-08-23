@@ -3,7 +3,7 @@ from __future__ import annotations
 import io
 import os
 import unittest
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import redirect_stdout
 from unittest.mock import patch
 
 from automation import autodev_cli
@@ -19,6 +19,8 @@ class AutoDevCliTests(unittest.TestCase):
         text = output.getvalue()
         self.assertIn("autodev install --user", text)
         self.assertIn("autodev repo doctor", text)
+        self.assertIn("autodev scheduler install", text)
+        self.assertIn("autodev scheduler run-once", text)
         self.assertIn("autodev coordinate", text)
         self.assertNotIn("python3 .opencode/autodev.py", text)
 
@@ -36,6 +38,13 @@ class AutoDevCliTests(unittest.TestCase):
 
         self.assertEqual(code, 5)
         run_cli.assert_called_once_with(["doctor", "--json"])
+
+    def test_scheduler_routes_to_scheduler_core(self):
+        with patch("automation.scheduler.run_cli", return_value=6) as run_cli:
+            code = autodev_cli.run(["scheduler", "status", "--json"])
+
+        self.assertEqual(code, 6)
+        run_cli.assert_called_once_with(["status", "--json"])
 
     def test_resume_maps_to_shared_python_coordinator(self):
         with patch.object(autodev_cli, "_enable_interactive_consent_for_direct_cli"), patch.object(
@@ -94,14 +103,6 @@ class AutoDevCliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(consent, autodev_cli.INTERACTIVE_CONSENT_VALUE)
         run_entrypoint.assert_called_once_with(["coordinate", "--arguments", "123"])
-
-    def test_scheduler_is_explicitly_unavailable_until_scheduler_issue(self):
-        error = io.StringIO()
-        with redirect_stderr(error):
-            code = autodev_cli.run(["scheduler", "status"])
-
-        self.assertEqual(code, 2)
-        self.assertIn("scheduler support is not installed yet", error.getvalue())
 
 
 if __name__ == "__main__":
