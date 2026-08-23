@@ -25,6 +25,7 @@ from automation.repair_budget_metrics import (
     change_metrics,
 )
 
+
 def validate_config(*, fixed_default: int) -> None:
     policy = _policy()
     _nonnegative_int(FIXED_LIMIT_ENV, fixed_default)
@@ -39,12 +40,12 @@ def validate_config(*, fixed_default: int) -> None:
             f"{ADAPTIVE_MIN_ENV} must be less than or equal to {ADAPTIVE_MAX_ENV}"
         )
     if base > maximum:
-        # This is allowed mathematically, but almost certainly a configuration mistake.
         raise SemanticRepairBudgetError(
             f"{ADAPTIVE_BASE_ENV} must be less than or equal to {ADAPTIVE_MAX_ENV}"
         )
     if lines <= 0:
         raise SemanticRepairBudgetError(f"{LINES_PER_ATTEMPT_ENV} must be positive")
+
 
 def resolve_budget(
     repo: Path,
@@ -100,20 +101,33 @@ def resolve_budget(
         "inputs": metrics,
     }
 
+
 def _resume_budget(
     existing: dict[str, object],
     *,
     attempt: int,
     fixed_default: int,
 ) -> dict[str, object]:
+    """Resume a persisted budget without treating inherited defaults as consent."""
+
     budget = json.loads(json.dumps(existing))
     previous = int(budget.get("effective_limit", 0) or 0)
     effective = max(previous, attempt)
 
-    explicit_fixed = _nonnegative_int(FIXED_LIMIT_ENV, fixed_default)
-    if explicit_fixed > effective:
-        effective = explicit_fixed
-        budget["manual_limit_increase"] = explicit_fixed
+    observed = int(
+        budget.get(
+            "fixed_limit_observed",
+            budget.get("configured_limit", fixed_default),
+        )
+        or 0
+    )
+    current_fixed = _nonnegative_int(FIXED_LIMIT_ENV, observed)
+    budget.setdefault("fixed_limit_observed", observed)
+    if current_fixed > observed:
+        budget["fixed_limit_observed"] = current_fixed
+        if current_fixed > effective:
+            effective = current_fixed
+            budget["manual_limit_increase"] = current_fixed
 
     if str(budget.get("policy", "")) == "adaptive":
         old_cap = int(budget.get("max_attempts", DEFAULT_ADAPTIVE_MAX) or 0)
@@ -129,15 +143,20 @@ def _resume_budget(
 
     budget["effective_limit"] = effective
     budget["attempts_consumed"] = attempt
-    if attempt > int(budget.get("max_attempts", effective) or effective) and budget.get("policy") == "adaptive":
+    if (
+        budget.get("policy") == "adaptive"
+        and attempt > int(budget.get("max_attempts", effective) or effective)
+    ):
         budget["cap_exceeded_by_consumed_attempts"] = True
     return budget
+
 
 def _policy() -> str:
     value = os.environ.get(POLICY_ENV, "fixed").strip().casefold() or "fixed"
     if value not in {"fixed", "adaptive"}:
         raise SemanticRepairBudgetError(f"{POLICY_ENV} must be fixed or adaptive")
     return value
+
 
 def _nonnegative_int(name: str, default: int) -> int:
     raw = os.environ.get(name, "").strip()
@@ -150,6 +169,7 @@ def _nonnegative_int(name: str, default: int) -> int:
     if value < 0:
         raise SemanticRepairBudgetError(f"{name} must be zero or greater")
     return value
+
 
 def _positive_int(name: str, default: int) -> int:
     value = _nonnegative_int(name, default)
