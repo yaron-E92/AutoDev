@@ -1,38 +1,52 @@
 from __future__ import annotations
 
 import ast
-import sys
 from collections import defaultdict
 from pathlib import Path
 
 
-TARGETS = [Path(value) for value in sys.argv[1:]] or [
-    Path("automation/workflow_stages_core.py"),
-    Path("automation/run_real_issue.py"),
-    Path("automation/run_real_issue_core.py"),
-    Path("area_reader_v2/runner_core.py"),
-]
+ROOT = Path(".")
+EXCLUDED_PARTS = {
+    ".git",
+    ".venv",
+    "__pycache__",
+    "build",
+    "dist",
+    "tests",
+}
 
 
-def top_level_names(tree: ast.Module) -> dict[str, ast.AST]:
-    names: dict[str, ast.AST] = {}
-    for node in tree.body:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            names[node.name] = node
-        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
-            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-            for target in targets:
-                if isinstance(target, ast.Name):
-                    names[target.id] = node
-    return names
+def production_python_files() -> list[Path]:
+    return sorted(
+        path
+        for path in ROOT.rglob("*.py")
+        if not any(part in EXCLUDED_PARTS for part in path.parts)
+    )
 
 
-def references(node: ast.AST, known: set[str]) -> set[str]:
-    return {
-        item.id
-        for item in ast.walk(node)
-        if isinstance(item, ast.Name) and isinstance(item.ctx, ast.Load) and item.id in known
-    }
+def module_name(path: Path) -> str:
+    parts = list(path.with_suffix("").parts)
+    if parts[-1] == "__init__":
+        parts.pop()
+    return ".".join(parts)
+
+
+def import_dependencies(tree: ast.Module, known: set[str]) -> set[str]:
+    deps: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                name = alias.name
+                if name in known:
+                    deps.add(name)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            if node.module in known:
+                deps.add(node.module)
+            for alias in node.names:
+                candidate = f"{node.module}.{alias.name}"
+                if candidate in known:
+                    deps.add(candidate)
+    return deps
 
 
 def strongly_connected(graph: dict[str, set[str]]) -> list[list[str]]:
@@ -72,28 +86,62 @@ def strongly_connected(graph: dict[str, set[str]]) -> list[list[str]]:
     return groups
 
 
-def inspect(path: Path) -> None:
-    text = path.read_text(encoding="utf-8")
-    tree = ast.parse(text)
-    definitions = top_level_names(tree)
-    known = set(definitions)
+def function_spans(tree: ast.Module) -> list[tuple[int, str, int, int]]:
+    spans: list[tuple[int, str, int, int]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        start = int(getattr(node, "lineno", 0))
+        end = int(getattr(node, "end_lineno", start))
+        spans.append((end - start + 1, node.name, start, end))
+    return sorted(spans, reverse=True)
+
+
+def main() -> None:
+    files = production_python_files()
+    parsed: dict[Path, ast.Module] = {}
+    line_counts: dict[Path, int] = {}
+
+    for path in files:
+        text = path.read_text(encoding="utf-8")
+        parsed[path] = ast.parse(text)
+        line_counts[path] = len(text.splitlines())
+
+    print("=== Python modules at or above 450 lines ===")
+    large = sorted(
+        ((count, path) for path, count in line_counts.items() if count >= 450),
+        reverse=True,
+    )
+    if not large:
+        print("none")
+    for count, path in large:
+        marker = " >700" if count > 700 else ""
+        print(f"{count:5d}{marker:5s} {path}")
+
+    print("\n=== Functions at or above 100 lines ===")
+    long_functions: list[tuple[int, Path, str, int, int]] = []
+    for path, tree in parsed.items():
+        for length, name, start, end in function_spans(tree):
+            if length >= 100:
+                long_functions.append((length, path, name, start, end))
+    if not long_functions:
+        print("none")
+    for length, path, name, start, end in sorted(long_functions, reverse=True):
+        print(f"{length:4d} {path}:{start}-{end} {name}")
+
+    names = {module_name(path) for path in files}
+    by_name = {module_name(path): path for path in files}
     graph = {
-        name: references(node, known) - {name}
-        for name, node in definitions.items()
+        name: import_dependencies(parsed[path], names) - {name}
+        for name, path in by_name.items()
     }
-    print(f"\n===== {path} ({len(text.splitlines())} lines) =====")
-    for name, node in sorted(definitions.items(), key=lambda item: getattr(item[1], "lineno", 0)):
-        start = getattr(node, "lineno", 0)
-        end = getattr(node, "end_lineno", start)
-        deps = ",".join(sorted(graph[name]))
-        print(f"DEF {start:4d}-{end:4d} {name} -> {deps}")
     cycles = [group for group in strongly_connected(graph) if len(group) > 1]
-    print("CYCLES")
+    print("\n=== Absolute local-import cycles ===")
     if not cycles:
-        print("  none")
+        print("none")
     for group in cycles:
-        print("  " + ", ".join(group))
+        print(" -> ".join(group))
 
 
-for target in TARGETS:
-    inspect(target)
+if __name__ == "__main__":
+    main()
