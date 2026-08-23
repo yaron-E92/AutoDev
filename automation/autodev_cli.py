@@ -47,6 +47,8 @@ Usage:
   autodev repo doctor [--fix] [--json]
   autodev scheduler install [--backend auto|systemd-user|cron|windows-task]
   autodev scheduler status
+  autodev scheduler health
+  autodev scheduler notifications enable|disable|status
   autodev scheduler run-once
   autodev scheduler uninstall
   autodev status [existing status options]
@@ -75,9 +77,9 @@ def run(argv: list[str] | None = None) -> int:
 
         return repo_setup.run_cli(rest)
     if command == "scheduler":
-        from automation import scheduler
+        from automation import scheduler_health
 
-        return scheduler.run_cli(rest)
+        return scheduler_health.run_cli(rest)
 
     _enable_interactive_consent_for_direct_cli(explicit=explicit_interactive)
     if command == "resume":
