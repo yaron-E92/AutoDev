@@ -90,6 +90,12 @@ def compute(
         )
 
 
+def registration_file(root: Path) -> Path:
+    path = root / "registration.json"
+    path.write_text("{}", encoding="utf-8")
+    return path
+
+
 class SchedulerHealthComputationTests(unittest.TestCase):
     def test_ready_work_and_empty_queue_are_not_scheduler_failures(self):
         ready = compute([qstate(1, "ready")])
@@ -151,6 +157,7 @@ class SchedulerHealthComputationTests(unittest.TestCase):
 
         self.assertEqual(snapshot.state, "ATTENTION_REQUIRED")
         self.assertEqual(snapshot.attention_kind, "privacy-consent")
+        self.assertEqual(snapshot.issue_number, 57)
         self.assertEqual(snapshot.privacy_grants["expired"], 1)
         self.assertIn("privacy consent", scheduler_health.render_health(snapshot))
         coordinator.assert_not_called()
@@ -160,17 +167,13 @@ class SchedulerHealthComputationTests(unittest.TestCase):
 
         self.assertEqual(snapshot.state, "ATTENTION_REQUIRED")
         self.assertEqual(snapshot.attention_kind, "manual-or-queue-attention")
+        self.assertEqual(snapshot.issue_number, 176)
 
 
 class SchedulerHealthNotificationTests(unittest.TestCase):
-    def _registration_file(self, root: Path) -> Path:
-        path = root / "registration.json"
-        path.write_text("{}", encoding="utf-8")
-        return path
-
     def test_transition_into_empty_queue_notifies_once_then_stays_quiet(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            registration = self._registration_file(Path(temp_dir))
+            registration = registration_file(Path(temp_dir))
             policy = scheduler_health.NotificationPolicy(
                 backend=scheduler_health.NOTIFICATION_NATIVE
             )
@@ -209,7 +212,7 @@ class SchedulerHealthNotificationTests(unittest.TestCase):
 
     def test_transition_back_to_ready_updates_fingerprint_and_notifies(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            registration = self._registration_file(Path(temp_dir))
+            registration = registration_file(Path(temp_dir))
             policy = scheduler_health.NotificationPolicy(
                 backend=scheduler_health.NOTIFICATION_NATIVE
             )
@@ -242,7 +245,7 @@ class SchedulerHealthNotificationTests(unittest.TestCase):
 
     def test_attention_cooldown_can_renotify_without_tick_spam(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            registration = self._registration_file(Path(temp_dir))
+            registration = registration_file(Path(temp_dir))
             policy = scheduler_health.NotificationPolicy(
                 backend=scheduler_health.NOTIFICATION_NATIVE,
                 reminder_hours=24,
@@ -280,7 +283,7 @@ class SchedulerHealthNotificationTests(unittest.TestCase):
 
     def test_notification_failure_does_not_corrupt_health_or_repeat_each_tick(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            registration = self._registration_file(Path(temp_dir))
+            registration = registration_file(Path(temp_dir))
             policy = scheduler_health.NotificationPolicy(
                 backend=scheduler_health.NOTIFICATION_NATIVE
             )
@@ -356,7 +359,7 @@ class SchedulerHealthCliTests(unittest.TestCase):
 
     def test_notification_policy_is_explicit_opt_in_and_secret_free(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            registration = self._registration_file(Path(temp_dir))
+            registration = registration_file(Path(temp_dir))
             self.assertEqual(
                 scheduler_health.load_notification_policy(registration).backend,
                 scheduler_health.NOTIFICATION_OFF,
