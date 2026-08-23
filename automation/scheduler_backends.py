@@ -6,9 +6,6 @@ import subprocess
 from pathlib import Path
 from typing import Callable
 
-from automation.scheduler_process import (
-    _read_crontab if False else _run_command,
-)
 from automation.scheduler_process import _require_ok, _returncode, _run_command, _stderr, _stdout
 from automation.scheduler_types import (
     BACKEND_AUTO,
