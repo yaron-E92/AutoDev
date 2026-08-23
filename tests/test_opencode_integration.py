@@ -535,7 +535,9 @@ class OpenCodeIntegrationTests(unittest.TestCase):
         self.assertNotIn("issue-to-pr-cycle.ps1", adapter)
         self.assertNotIn("issue-to-pr-cycle.ps1", runtime)
         self.assertNotIn("pwsh", portable)
-        self.assertIn("automation.opencode_runtime", portable)
+        self.assertIn('shutil.which("autodev")', portable)
+        self.assertIn("automation.autodev_cli", portable)
+        self.assertNotIn("automation.opencode_runtime", portable)
         self.assertIn("opencode_adapter", runtime)
 
     def test_existing_workflow_entrypoints_do_not_depend_on_opencode_adapter(self):

@@ -350,11 +350,13 @@ class OpenCodeRuntimeTests(unittest.TestCase):
         self.assertEqual(diagnostics["routing"], "not-requested")
         self.assertEqual(diagnostics["proxy_status"], "not-checked")
 
-    def test_portable_wrapper_invokes_hardened_runtime(self):
+    def test_portable_wrapper_routes_through_first_class_cli(self):
         wrapper = (
             Path(__file__).resolve().parents[1] / "integrations" / "opencode" / "autodev.py"
         ).read_text(encoding="utf-8")
-        self.assertIn('"automation.opencode_runtime"', wrapper)
+        self.assertIn('shutil.which("autodev")', wrapper)
+        self.assertIn('"automation.autodev_cli"', wrapper)
+        self.assertNotIn('"automation.opencode_runtime"', wrapper)
         self.assertNotIn('"automation.opencode_adapter",\n            *_arguments_with_current_issue', wrapper)
 
 
