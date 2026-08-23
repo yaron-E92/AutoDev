@@ -3,16 +3,12 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from automation import windows_verification
+def build_execute_stage(core, original_execute_stage):
+    """Return a Windows-aware workflow executor without mutating the facade."""
 
+    from automation import windows_verification
 
-def install(core) -> None:
-    """Layer GitHub-hosted Windows verification onto the shared workflow API."""
-
-    if getattr(core, "_autodev_windows_workflow_hooks_installed", False):
-        return
     windows_verification.install_manifest_hooks()
-    original_execute_stage = core.execute_stage
 
     def _windows_pr_and_ci(
         repo: Path,
@@ -223,5 +219,13 @@ def install(core) -> None:
 
         return code, payload
 
-    core.execute_stage = execute_stage
+    return execute_stage
+
+
+def install(core) -> None:
+    """Compatibility installer for callers that still request mutation explicitly."""
+
+    if getattr(core, "_autodev_windows_workflow_hooks_installed", False):
+        return
+    core.execute_stage = build_execute_stage(core, core.execute_stage)
     core._autodev_windows_workflow_hooks_installed = True

@@ -10,9 +10,11 @@ import subprocess
 import sys
 from pathlib import Path
 
-from automation import semantic_repair_budget as _semantic_budget
+from automation import repair_budget_contract as _budget_contract
+from automation import repair_budget_failure as _budget_failure
+from automation import repair_budget_policy as _budget_policy
+from automation import repair_budget_storage as _budget_storage
 from automation import workspace_scope
-from automation import windows_workflow_hooks as _windows_workflow_hooks
 from automation import workflow_commands as _workflow_commands
 from automation import workflow_contract as _workflow_contract
 from automation import workflow_diagnostics as _workflow_diagnostics
@@ -199,8 +201,8 @@ def _resume_semantic_budget(
         )
         or 0
     )
-    current_fixed = _semantic_budget._nonnegative_int(  # type: ignore[attr-defined]
-        _semantic_budget.FIXED_LIMIT_ENV,
+    current_fixed = _budget_policy._nonnegative_int(  # type: ignore[attr-defined]
+        _budget_contract.FIXED_LIMIT_ENV,
         observed,
     )
     budget.setdefault("fixed_limit_observed", observed)
@@ -212,16 +214,16 @@ def _resume_semantic_budget(
 
     if str(budget.get("policy", "")) == "adaptive":
         old_cap = int(
-            budget.get("max_attempts", _semantic_budget.DEFAULT_ADAPTIVE_MAX) or 0
+            budget.get("max_attempts", _budget_contract.DEFAULT_ADAPTIVE_MAX) or 0
         )
-        new_cap = _semantic_budget._nonnegative_int(  # type: ignore[attr-defined]
-            _semantic_budget.ADAPTIVE_MAX_ENV,
+        new_cap = _budget_policy._nonnegative_int(  # type: ignore[attr-defined]
+            _budget_contract.ADAPTIVE_MAX_ENV,
             old_cap,
         )
         if new_cap > old_cap:
             raw_attempts = int(budget.get("raw_attempts", 0) or 0)
             minimum = int(
-                budget.get("min_attempts", _semantic_budget.DEFAULT_ADAPTIVE_MIN)
+                budget.get("min_attempts", _budget_contract.DEFAULT_ADAPTIVE_MIN)
                 or 0
             )
             recomputed = min(new_cap, max(minimum, raw_attempts))
@@ -287,10 +289,10 @@ def _execute_stage(
     repo = repo.expanduser().resolve()
     if name == "preflight":
         try:
-            _semantic_budget.validate_config(
+            _budget_policy.validate_config(
                 fixed_default=DEFAULT_MAX_SEMANTIC_REPAIR_ATTEMPTS
             )
-        except _semantic_budget.SemanticRepairBudgetError as exc:
+        except _budget_contract.SemanticRepairBudgetError as exc:
             raise WorkflowStageError(str(exc)) from exc
 
     if name != "semantic":
@@ -308,18 +310,18 @@ def _execute_stage(
     current = repo / CURRENT_DIR
     state = read_state(current)
     try:
-        budget = _semantic_budget.resolve_budget(
+        budget = _budget_policy.resolve_budget(
             repo,
             state,
             attempt=attempt,
             fixed_default=DEFAULT_MAX_SEMANTIC_REPAIR_ATTEMPTS,
             runner=runner,
         )
-    except _semantic_budget.SemanticRepairBudgetError as exc:
+    except _budget_contract.SemanticRepairBudgetError as exc:
         raise WorkflowStageError(str(exc)) from exc
 
     if "fixed_limit_observed" not in budget:
-        raw_observed = os.environ.get(_semantic_budget.FIXED_LIMIT_ENV, "").strip()
+        raw_observed = os.environ.get(_budget_contract.FIXED_LIMIT_ENV, "").strip()
         try:
             observed = (
                 int(raw_observed)
@@ -328,13 +330,13 @@ def _execute_stage(
             )
         except ValueError as exc:
             raise WorkflowStageError(
-                f"{_semantic_budget.FIXED_LIMIT_ENV} must be an integer"
+                f"{_budget_contract.FIXED_LIMIT_ENV} must be an integer"
             ) from exc
         budget["fixed_limit_observed"] = observed
-    _semantic_budget.persist_budget(repo, state, budget)
+    _budget_storage.persist_budget(repo, state, budget)
 
-    previous_limit = os.environ.get(_semantic_budget.FIXED_LIMIT_ENV)
-    os.environ[_semantic_budget.FIXED_LIMIT_ENV] = str(
+    previous_limit = os.environ.get(_budget_contract.FIXED_LIMIT_ENV)
+    os.environ[_budget_contract.FIXED_LIMIT_ENV] = str(
         int(budget.get("effective_limit", 0) or 0)
     )
     try:
@@ -350,9 +352,9 @@ def _execute_stage(
         )
     finally:
         if previous_limit is None:
-            os.environ.pop(_semantic_budget.FIXED_LIMIT_ENV, None)
+            os.environ.pop(_budget_contract.FIXED_LIMIT_ENV, None)
         else:
-            os.environ[_semantic_budget.FIXED_LIMIT_ENV] = previous_limit
+            os.environ[_budget_contract.FIXED_LIMIT_ENV] = previous_limit
 
     payload["semantic_repair_budget"] = budget
     payload["semantic_repair_attempt"] = attempt
@@ -390,7 +392,7 @@ def _execute_stage(
                 + "\n",
             )
         state = read_state(current)
-        details = _semantic_budget.failure_details(
+        details = _budget_failure.failure_details(
             result,
             budget,
             attempt=attempt,
@@ -400,9 +402,9 @@ def _execute_stage(
         )
         payload.update(
             {
-                "reason": _semantic_budget.concise_failure_reason(details),
-                "failure_classification": _semantic_budget.FAILURE_REPAIR_BUDGET_EXHAUSTED,
-                "root_failure_classification": _semantic_budget.ROOT_FAILURE_CLASSIFICATION,
+                "reason": _budget_failure.concise_failure_reason(details),
+                "failure_classification": _budget_contract.FAILURE_REPAIR_BUDGET_EXHAUSTED,
+                "root_failure_classification": _budget_contract.ROOT_FAILURE_CLASSIFICATION,
                 "failure_fingerprint": str(details.get("failure_fingerprint", "")),
                 "repair_brief": str(details.get("repair_brief", "")),
                 "semantic_requirements": details.get("requirements", []),
@@ -412,11 +414,11 @@ def _execute_stage(
                 "verified_source_identity": str(details.get("verified_source_identity", "")),
             }
         )
-        _semantic_budget.persist_failure(repo, state, details)
+        _budget_storage.persist_failure(repo, state, details)
         return code, payload
 
     state = read_state(current)
-    _semantic_budget.clear_failure_state(repo, state)
+    _budget_storage.clear_failure_state(repo, state)
     return code, payload
 
 def _mark_blocked(
@@ -428,7 +430,7 @@ def _mark_blocked(
 ) -> None:
     details = state.get("LastSemanticFailureDetails", {})
     rich_reason = (
-        _semantic_budget.human_failure_summary(details, reason)
+        _budget_failure.human_failure_summary(details, reason)
         if isinstance(details, dict) and details
         else reason
     )
@@ -440,9 +442,52 @@ workspace_snapshot = _workspace_snapshot
 workspace_file_paths = _workspace_file_paths
 workspace_path_in_scope = _workspace_path_in_scope
 create_api_commit = _create_api_commit
-execute_stage = _execute_stage
+_WORKFLOW_EXECUTOR = _execute_stage
+_POLICY_HOOKS_INSTALLED = False
+
+
+def _ensure_policy_hooks() -> None:
+    global _POLICY_HOOKS_INSTALLED, _WORKFLOW_EXECUTOR
+    if _POLICY_HOOKS_INSTALLED:
+        return
+    from automation import repair_budget_manifest
+    from automation import windows_workflow_hooks
+
+    _budget_policy._resume_budget = _resume_semantic_budget
+    repair_budget_manifest.install_run_manifest_hooks()
+    _WORKFLOW_EXECUTOR = windows_workflow_hooks.build_execute_stage(
+        sys.modules[__name__],
+        _execute_stage,
+    )
+    _POLICY_HOOKS_INSTALLED = True
+
+
+def execute_stage(
+    name: str,
+    repo: Path,
+    *,
+    arguments: str = "",
+    autodev_root: Path = AUTODEV_ROOT,
+    attempt: int = 0,
+    reason: str = "",
+    runner=subprocess.run,
+    which=shutil.which,
+) -> tuple[int, dict[str, object]]:
+    _ensure_policy_hooks()
+    return _WORKFLOW_EXECUTOR(
+        name,
+        repo,
+        arguments=arguments,
+        autodev_root=autodev_root,
+        attempt=attempt,
+        reason=reason,
+        runner=runner,
+        which=which,
+    )
+
+
 mark_blocked = _mark_blocked
-FAILURE_REPAIR_BUDGET_EXHAUSTED = _semantic_budget.FAILURE_REPAIR_BUDGET_EXHAUSTED
+FAILURE_REPAIR_BUDGET_EXHAUSTED = _budget_contract.FAILURE_REPAIR_BUDGET_EXHAUSTED
 
 # The pre-refactor module was deliberately monkeypatch-friendly: tests and a few
 # extension hooks replace attributes on automation.workflow_stages. Keep that
@@ -506,9 +551,6 @@ _workflow_github.create_api_commit = create_api_commit
 _workflow_verification.create_api_commit = create_api_commit
 _workflow_github.mark_blocked = mark_blocked
 _workflow_dispatch.mark_blocked = mark_blocked
-_semantic_budget._resume_budget = _resume_semantic_budget  # type: ignore[attr-defined]
-_semantic_budget.install_run_manifest_hooks()
-_windows_workflow_hooks.install(sys.modules[__name__])
 
 
 def run(argv: list[str] | None = None) -> int:
