@@ -1,0 +1,70 @@
+name: Set native issue dependencies 180-185
+
+on:
+  push:
+    branches:
+      - chore/set-native-issue-dependencies-180-185
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  set-dependencies:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Add and verify native issue dependencies
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo="$GITHUB_REPOSITORY"
+          api_version="2026-03-10"
+
+          add_dependency() {
+            local blocked="$1"
+            local blocker="$2"
+
+            if gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: $api_version" \
+              "repos/$repo/issues/$blocked/dependencies/blocked_by?per_page=100" \
+              --jq '.[].number' | grep -Fxq "$blocker"; then
+              echo "#$blocked is already blocked by #$blocker"
+              return
+            fi
+
+            local blocker_id
+            blocker_id="$(gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: $api_version" \
+              "repos/$repo/issues/$blocker" \
+              --jq '.id')"
+
+            gh api \
+              --method POST \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: $api_version" \
+              "repos/$repo/issues/$blocked/dependencies/blocked_by" \
+              -F "issue_id=$blocker_id" \
+              >/dev/null
+
+            echo "Added native dependency: #$blocked blocked by #$blocker"
+          }
+
+          add_dependency 181 180
+          add_dependency 182 181
+          add_dependency 183 182
+          add_dependency 184 183
+          add_dependency 185 183
+
+          for pair in "181 180" "182 181" "183 182" "184 183" "185 183"; do
+            read -r blocked blocker <<< "$pair"
+            gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: $api_version" \
+              "repos/$repo/issues/$blocked/dependencies/blocked_by?per_page=100" \
+              --jq '.[].number' | grep -Fxq "$blocker"
+            echo "Verified native dependency: #$blocked blocked by #$blocker"
+          done
