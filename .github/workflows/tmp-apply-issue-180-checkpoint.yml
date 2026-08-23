@@ -1,11 +1,11 @@
 name: Apply issue 180 checkpoint
 
 on:
-  push:
+  pull_request:
     branches:
-      - agent/issue-180-python-modularization
-    paths:
-      - .autodev-checkpoint-xz/chunk14
+      - main
+    types:
+      - reopened
 
 permissions:
   contents: write
@@ -21,7 +21,7 @@ jobs:
       - name: Reconstruct and apply checkpoint
         shell: bash
         env:
-          EXPECTED_STAGING_HEAD: ${{ github.sha }}
+          EXPECTED_STAGING_HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
           cat .autodev-checkpoint-xz/chunk* | base64 -d | xz -d > /tmp/checkpoint.patch
