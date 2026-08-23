@@ -20,6 +20,8 @@ class AutoDevCliTests(unittest.TestCase):
         self.assertIn("autodev install --user", text)
         self.assertIn("autodev repo doctor", text)
         self.assertIn("autodev scheduler install", text)
+        self.assertIn("autodev scheduler health", text)
+        self.assertIn("autodev scheduler notifications", text)
         self.assertIn("autodev scheduler run-once", text)
         self.assertIn("autodev coordinate", text)
         self.assertNotIn("python3 .opencode/autodev.py", text)
@@ -39,8 +41,8 @@ class AutoDevCliTests(unittest.TestCase):
         self.assertEqual(code, 5)
         run_cli.assert_called_once_with(["doctor", "--json"])
 
-    def test_scheduler_routes_to_scheduler_core(self):
-        with patch("automation.scheduler.run_cli", return_value=6) as run_cli:
+    def test_scheduler_routes_through_health_wrapper(self):
+        with patch("automation.scheduler_health.run_cli", return_value=6) as run_cli:
             code = autodev_cli.run(["scheduler", "status", "--json"])
 
         self.assertEqual(code, 6)
