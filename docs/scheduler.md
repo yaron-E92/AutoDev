@@ -82,17 +82,21 @@ A scheduled tick follows this boundary:
 ```text
 same-machine lock
   -> validate/update dedicated worker
+  -> reconcile stale distributed claims
   -> reconcile queue and inspect durable run
-  -> resume existing run first, when applicable
+  -> resume an owned/acquirable existing run first, when applicable
   -> otherwise select the next eligible issue
-  -> NO_READY_WORK: successful fast exit
-  -> invoke the existing issue-to-PR coordinator headlessly
+  -> atomically claim the issue in shared repository state
+  -> if claim race is lost, exclude that issue and select again
+  -> NO_READY_WORK / NO_CAPACITY: successful fast exit
+  -> heartbeat the claim while the existing issue-to-PR coordinator runs headlessly
+  -> release claim at terminal/PR-ready/attention outcomes
   -> persist scheduler outcome
   -> refresh deterministic scheduler health
   -> optionally notify on a material health transition
 ```
 
-Queue selection itself remains model-free. If nothing is runnable, the tick ends before the coordinator or any model route is invoked.
+Queue selection and distributed claiming are model-free. If nothing is runnable, or all configured repository capacity is already owned, the tick ends before the coordinator or any model route is invoked.
 
 The existing coordinator remains authoritative for manual/external classification and privacy. In particular:
 
@@ -101,11 +105,61 @@ The existing coordinator remains authoritative for manual/external classificatio
 - missing, expired, invalidated, or forbidden consent stops before repository/prompt content is sent to that route;
 - a headless scheduler tick can consume an existing valid grant but cannot create, widen, or renew consent.
 
-## Overlap and ownership
+## Distributed worker identity and claims
 
-V1 prevents overlapping ticks for the same repository on one machine with a non-blocking user-local file lock. A second native tick exits successfully without starting another issue.
+A scheduler installation has a stable user-local AutoDev worker identity. By default it is a generated opaque identifier rather than a hostname or filesystem path:
 
-V1 does **not** implement cross-machine distributed claiming. Until that follow-up exists, configure **one autonomous scheduler owner machine per target repository**. Running autonomous schedulers for the same repository on multiple machines is unsupported even though ordinary interactive AutoDev use remains possible elsewhere.
+```text
+autodev scheduler worker-id
+```
+
+You may give a machine a meaningful stable name:
+
+```text
+autodev scheduler worker-id --set mega-beast
+autodev scheduler worker-id --set laptop
+```
+
+Worker IDs must be unique among machines that autonomously service the same repositories. They are persisted in `~/.autodev/worker.json`; `AUTODEV_WORKER_ID` can override the persisted value for controlled environments.
+
+Cross-machine ownership is represented by dedicated remote Git refs:
+
+```text
+refs/heads/autodev/claims/issue-<number>
+```
+
+The ref points to a metadata-only claim commit. Its bounded payload contains repository identity, issue number, worker ID, generated run/claim IDs, acquisition/heartbeat timestamps, and lease duration. It does **not** contain source code, prompts, credentials, local checkout paths, or secret values.
+
+Claim creation, heartbeat, release, and stale replacement use Git `--force-with-lease` against the exact expected ref state. Consequently two workers racing for one issue cannot both successfully publish ownership: one compare-and-swap wins, the loser treats that issue as temporarily ineligible and may deterministically select another ready issue when repository capacity permits.
+
+The local scheduler file lock still suppresses duplicate ticks on one machine. The remote claim ref supplies the cross-machine ownership boundary.
+
+## Repository concurrency and leases
+
+Existing `.autodev/queue.json` files remain valid. Optional distributed-worker settings are:
+
+```json
+{
+  "version": 1,
+  "autonomous_execution": true,
+  "max_concurrent_issues": 2,
+  "claim_lease_minutes": 120
+}
+```
+
+`max_concurrent_issues` is bounded to 1–16 and defaults to `1`, preserving the original single-active-issue behavior unless the repository explicitly opts into parallel autonomous issues.
+
+`claim_lease_minutes` is bounded to 15–1440 minutes and defaults to `120`. While a coordinator is active, AutoDev refreshes the published heartbeat periodically. A transient heartbeat command/network failure does not immediately surrender ownership; another worker may recover the claim only after the last successfully published heartbeat actually expires.
+
+A repository can therefore be serviced by multiple independent scheduler machines while still choosing a repository-wide concurrency limit smaller than the number of machines.
+
+## Stale-claim recovery
+
+An expired timestamp alone is not permission to duplicate work. Before deleting a stale claim AutoDev checks recovery evidence such as existing AutoDev issue branches and open AutoDev PRs. Evidence that useful work may already exist protects the stale claim from blind takeover and surfaces it for inspection/recovery instead.
+
+For claims with no such evidence, stale recovery uses compare-and-swap deletion. If the original worker renews or replaces the claim after another worker's stale read, that deletion loses its lease comparison and the renewed owner wins. AutoDev also restores the durable `autodev:running` marker if a stale-cleanup label transition races with a renewed claim.
+
+A resumable local checkpoint may continue only when this worker owns or can safely acquire the matching distributed claim. If another worker currently owns it, the scheduler returns `CLAIM_CONFLICT` instead of running the same issue twice.
 
 ## Health
 
@@ -151,19 +205,23 @@ autodev scheduler status
 autodev scheduler status --json
 ```
 
-Status combines native scheduler registration state with the deterministic health snapshot, last scheduler outcome, queue counts, active/resumable issue where applicable, and notification configuration.
+Status combines native scheduler registration state with the deterministic health snapshot, last scheduler outcome, queue counts, active/resumable issue where applicable, and notification configuration. `autodev repo doctor` also reports the stable worker identity and configured repository concurrency for an installed scheduler.
 
 Common dispatcher outcomes include:
 
 ```text
 NO_READY_WORK
+NO_CAPACITY
 OVERLAP_SUPPRESSED
 ATTENTION_REQUIRED
+PR_READY
 DISPATCHED
+CLAIM_CONFLICT
+CLAIM_RELEASE_FAILED
 RUN_HEALTH_BLOCKED
 ```
 
-`NO_READY_WORK`, `OVERLAP_SUPPRESSED`, and `ATTENTION_REQUIRED` are expected successful scheduler outcomes. They do not mean an implementation crashed.
+`NO_READY_WORK`, `NO_CAPACITY`, `OVERLAP_SUPPRESSED`, and `ATTENTION_REQUIRED` are expected scheduler outcomes. Claim conflicts/release failures are surfaced because continuing after ownership ambiguity would violate the one-worker-per-issue invariant.
 
 ## Notifications
 
@@ -209,7 +267,7 @@ For setup validation or diagnostics:
 autodev scheduler run-once
 ```
 
-This uses the same registration, lock, worker, queue selection, privacy rules, coordinator, health transition, and notification suppression as a native scheduled invocation. It is not a second workflow implementation.
+This uses the same registration, local lock, distributed claim, worker, queue selection, privacy rules, coordinator, health transition, and notification suppression as a native scheduled invocation. It is not a second workflow implementation.
 
 ## Uninstall
 
@@ -220,6 +278,8 @@ autodev scheduler uninstall
 Uninstall removes only the native registration and AutoDev scheduler metadata for that repository, including its scheduler-health and notification-policy files. Cron removal is bounded to the AutoDev-managed marker block and preserves unrelated user cron entries.
 
 The dedicated worker is intentionally left in user-local state rather than being recursively deleted during uninstall. This avoids destroying unexpected or diagnostically useful local state; it can be inspected and removed manually once no durable run or user work is needed.
+
+Distributed claim refs are run ownership, not installation metadata. Uninstall therefore does not blindly delete shared claims; an active or stale claim must be resolved through normal terminal release or stale-recovery rules.
 
 ## Paths with spaces
 
