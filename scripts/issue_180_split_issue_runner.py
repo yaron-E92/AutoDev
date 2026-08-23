@@ -103,8 +103,16 @@ def node_names(node: ast.AST) -> set[str]:
     return set()
 
 
+def node_start_line(node: ast.AST) -> int:
+    start = int(getattr(node, "lineno", 1))
+    decorators = getattr(node, "decorator_list", ())
+    if decorators:
+        start = min(start, *(int(decorator.lineno) for decorator in decorators))
+    return start
+
+
 def segment(lines: list[str], node: ast.AST) -> str:
-    start = int(getattr(node, "lineno", 1)) - 1
+    start = node_start_line(node) - 1
     end = int(getattr(node, "end_lineno", start + 1))
     return "".join(lines[start:end]).rstrip() + "\n"
 
@@ -145,7 +153,10 @@ def assert_acyclic(deps: dict[str, set[str]]) -> None:
         visit(module, [])
 
 
-def split(path: Path, groups: dict[str, set[str]]) -> tuple[dict[str, list[str]], dict[str, set[str]]]:
+def split(
+    path: Path,
+    groups: dict[str, set[str]],
+) -> tuple[dict[str, list[str]], dict[str, set[str]], str]:
     text = path.read_text(encoding="utf-8")
     lines = text.splitlines(keepends=True)
     tree = ast.parse(text)
@@ -195,7 +206,7 @@ def split(path: Path, groups: dict[str, set[str]]) -> tuple[dict[str, list[str]]
         target.write_text("".join(parts).rstrip() + "\n", encoding="utf-8")
         exports[module] = sorted(set(exported))
         print(f"wrote {target} ({len(target.read_text(encoding='utf-8').splitlines())} lines)")
-    return exports, deps
+    return exports, deps, common
 
 
 def facade_imports(exports: dict[str, list[str]]) -> str:
@@ -208,36 +219,36 @@ def facade_imports(exports: dict[str, list[str]]) -> str:
 
 def compat_block(module_aliases: list[str]) -> str:
     modules = ",\n    ".join(module_aliases)
-    return f'''_COMPAT_MODULES = (\n    {modules},\n)\n\n\ndef _sync_compat_overrides() -> None:\n    facade = globals()\n    for module in _COMPAT_MODULES:\n        namespace = module.__dict__\n        for name in tuple(namespace):\n            if name.startswith("__") or name not in facade:\n                continue\n            namespace[name] = facade[name]\n\n\ndef _compat_entrypoint(target):\n    @functools.wraps(target)\n    def invoke(*args, **kwargs):\n        _sync_compat_overrides()\n        return target(*args, **kwargs)\n    return invoke\n\n\ndef _install_compat_entrypoints() -> None:\n    facade = globals()\n    wrapped: set[str] = set()\n    for module in _COMPAT_MODULES:\n        for name in tuple(module.__dict__):\n            if name in wrapped or name.startswith("__") or name not in facade:\n                continue\n            value = facade[name]\n            if inspect.isfunction(value) and value.__module__.startswith("automation."):\n                facade[name] = _compat_entrypoint(value)\n                wrapped.add(name)\n\n\n_install_compat_entrypoints()\n'''
+    return f'''_COMPAT_MODULES = (\n    {modules},\n)\n_COMPAT_MISSING = object()\n_COMPAT_ORIGINALS = {{\n    module: {{\n        name: value\n        for name, value in module.__dict__.items()\n        if name in globals() and not name.startswith("__")\n    }}\n    for module in _COMPAT_MODULES\n}}\n_COMPAT_BASELINE: dict[str, object] = {{}}\n\n\ndef _sync_compat_overrides() -> None:\n    facade = globals()\n    for module, originals in _COMPAT_ORIGINALS.items():\n        namespace = module.__dict__\n        for name, original in originals.items():\n            current = facade.get(name, _COMPAT_MISSING)\n            if current is _COMPAT_MISSING:\n                continue\n            baseline = _COMPAT_BASELINE.get(name, _COMPAT_MISSING)\n            namespace[name] = original if current is baseline else current\n\n\ndef _compat_entrypoint(target):\n    @functools.wraps(target)\n    def invoke(*args, **kwargs):\n        _sync_compat_overrides()\n        return target(*args, **kwargs)\n    return invoke\n\n\ndef _install_compat_entrypoints() -> None:\n    facade = globals()\n    wrapped: set[str] = set()\n    for module in _COMPAT_MODULES:\n        for name in tuple(module.__dict__):\n            if name in wrapped or name.startswith("__") or name not in facade:\n                continue\n            value = facade[name]\n            if inspect.isfunction(value) and value.__module__.startswith("automation."):\n                facade[name] = _compat_entrypoint(value)\n                wrapped.add(name)\n\n\n_install_compat_entrypoints()\n_COMPAT_BASELINE.update(globals())\n'''
 
 
-def write_core_facade(exports: dict[str, list[str]]) -> None:
+def write_core_facade(exports: dict[str, list[str]], common_imports: str) -> None:
     aliases = [f"_m{i}" for i in range(len(exports))]
     module_imports = "\n".join(
         f"from automation import {module} as {alias}"
         for alias, module in zip(aliases, exports)
     )
-    text = f'''from __future__ import annotations\n\nimport functools\nimport inspect\n\n{module_imports}\n\n{facade_imports(exports)}\n{compat_block(aliases)}\n\nif __name__ == "__main__":\n    raise SystemExit(main())\n'''
+    text = f'''from __future__ import annotations\n\nimport functools\nimport inspect\n\n{common_imports}\n{module_imports}\n\n{facade_imports(exports)}\n{compat_block(aliases)}\n\nif __name__ == "__main__":\n    raise SystemExit(main())\n'''
     CORE.write_text(text, encoding="utf-8")
     print(f"wrote {CORE} ({len(text.splitlines())} lines)")
 
 
-def write_public_facade(exports: dict[str, list[str]]) -> None:
+def write_public_facade(exports: dict[str, list[str]], common_imports: str) -> None:
     aliases = [f"_overlay_{i}" for i in range(len(exports))]
     module_imports = "\n".join(
         f"from automation import {module} as {alias}"
         for alias, module in zip(aliases, exports)
     )
-    text = f'''from __future__ import annotations\n\nimport functools\nimport inspect\n\nfrom automation import run_real_issue_core as _core\nfrom automation.run_real_issue_core import *  # noqa: F401,F403\n{module_imports}\n\n{facade_imports(exports)}\n{compat_block(["_core", *aliases])}\n\nif __name__ == "__main__":\n    raise SystemExit(main())\n'''
+    text = f'''from __future__ import annotations\n\nimport functools\nimport inspect\n\n{common_imports}\n{module_imports}\n\n{facade_imports(exports)}\n{compat_block(["_core", *aliases])}\n\nif __name__ == "__main__":\n    raise SystemExit(main())\n'''
     PUBLIC.write_text(text, encoding="utf-8")
     print(f"wrote {PUBLIC} ({len(text.splitlines())} lines)")
 
 
 def main() -> None:
-    core_exports, _ = split(CORE, CORE_GROUPS)
-    write_core_facade(core_exports)
-    overlay_exports, _ = split(PUBLIC, OVERLAY_GROUPS)
-    write_public_facade(overlay_exports)
+    core_exports, _, core_imports = split(CORE, CORE_GROUPS)
+    write_core_facade(core_exports, core_imports)
+    overlay_exports, _, public_imports = split(PUBLIC, OVERLAY_GROUPS)
+    write_public_facade(overlay_exports, public_imports)
 
 
 if __name__ == "__main__":
