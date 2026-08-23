@@ -7,7 +7,26 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Callable
 
-from automation import issue_queue, opencode_resume, run_manifest, workflow_stages
+from automation import opencode_resume, run_manifest, workflow_stages
+from automation.queue_contract import DEFAULT_LIMIT, QueueError, QueueIssue, QueueState
+from automation.queue_github import _json_result, _run_gh
+from automation.queue_workflow import inspect_queue, reconcile_queue
+
+
+class _IssueQueueCompat:
+    """Legacy monkeypatch surface backed by the new queue layers, not the facade module."""
+
+    DEFAULT_LIMIT = DEFAULT_LIMIT
+    QueueError = QueueError
+    QueueIssue = QueueIssue
+    QueueState = QueueState
+    _run_gh = staticmethod(_run_gh)
+    _json_result = staticmethod(_json_result)
+    inspect_queue = staticmethod(inspect_queue)
+    reconcile_queue = staticmethod(reconcile_queue)
+
+
+issue_queue = _IssueQueueCompat()
 
 
 ROADMAP_PATH = Path(".autodev") / "roadmap.yaml"
@@ -63,7 +82,7 @@ class SelectionResult:
         return value
 
 
-class RoadmapError(issue_queue.QueueError):
+class RoadmapError(QueueError):
     pass
 
 
@@ -315,7 +334,7 @@ def active_autodev_prs(
             "--state",
             "open",
             "--limit",
-            str(issue_queue.DEFAULT_LIMIT),
+            str(DEFAULT_LIMIT),
             "--json",
             "headRefName,url",
         ],
@@ -323,7 +342,7 @@ def active_autodev_prs(
     )
     raw = issue_queue._json_result(result, context="gh pr list")  # type: ignore[attr-defined]
     if not isinstance(raw, list):
-        raise issue_queue.QueueError("gh pr list did not return an array")
+        raise QueueError("gh pr list did not return an array")
     active: dict[int, str] = {}
     for item in raw:
         if not isinstance(item, dict):
@@ -335,11 +354,11 @@ def active_autodev_prs(
     return active
 
 
-def _oldest_key(issue: issue_queue.QueueIssue) -> tuple[bool, str, int]:
+def _oldest_key(issue: QueueIssue) -> tuple[bool, str, int]:
     return (not bool(issue.created_at), issue.created_at, issue.number)
 
 
-def _rule_matches(rule: RoadmapRule, issue: issue_queue.QueueIssue) -> bool:
+def _rule_matches(rule: RoadmapRule, issue: QueueIssue) -> bool:
     if rule.kind == "issue":
         return issue.number == rule.value
     if rule.kind == "milestone":
@@ -349,7 +368,7 @@ def _rule_matches(rule: RoadmapRule, issue: issue_queue.QueueIssue) -> bool:
 
 def _roadmap_rank(
     roadmap: Roadmap,
-    issue: issue_queue.QueueIssue,
+    issue: QueueIssue,
 ) -> tuple[int, int, tuple[bool, str, int], str]:
     issue_rules = [
         rule for rule in roadmap.priority if rule.kind == "issue" and _rule_matches(rule, issue)
@@ -368,7 +387,7 @@ def _roadmap_rank(
     return (2, len(roadmap.priority), _oldest_key(issue), "oldest")
 
 
-def _roadmap_ineligible(states: list[issue_queue.QueueState], roadmap: Roadmap) -> tuple[str, ...]:
+def _roadmap_ineligible(states: list[QueueState], roadmap: Roadmap) -> tuple[str, ...]:
     messages: list[str] = []
     for rule in roadmap.priority:
         for state in states:
@@ -387,7 +406,7 @@ def select_next(
     repo: Path,
     github_repo: str,
     *,
-    limit: int = issue_queue.DEFAULT_LIMIT,
+    limit: int = DEFAULT_LIMIT,
     dry_run: bool = False,
     runner: Callable[..., object] = subprocess.run,
     existing_run_inspector: Callable[[Path], ExistingRun] = inspect_existing_run,
