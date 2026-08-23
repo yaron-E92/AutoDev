@@ -20,7 +20,9 @@ jobs:
           fetch-depth: 0
 
       - name: Split issue runner by responsibility
-        run: python scripts/issue_180_split_issue_runner.py
+        run: |
+          python scripts/issue_180_split_issue_runner.py
+          python scripts/issue_180_patch_runner_compat.py
 
       - name: Compile Python
         run: python -m compileall -q automation
