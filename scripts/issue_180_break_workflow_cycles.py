@@ -35,9 +35,6 @@ def patch_workflow() -> None:
     for before, after in replacements.items():
         text = text.replace(before, after)
 
-    # Resume-budget semantics now belong to repair_budget_policy; remove the
-    # compatibility implementation from the workflow facade instead of patching
-    # policy behavior at import/runtime.
     start = text.find("def _resume_semantic_budget(")
     end = text.find("def _create_api_commit(", start)
     if start >= 0 and end > start:
@@ -54,6 +51,7 @@ def patch_workflow() -> None:
     )
     text = text.replace("_semantic_budget.install_run_manifest_hooks()\n", "")
     text = text.replace("_windows_workflow_hooks.install(sys.modules[__name__])\n", "")
+    text = text.replace("    _budget_policy._resume_budget = _resume_semantic_budget\n", "")
 
     if "from automation import semantic_repair_budget" in text:
         raise SystemExit("workflow_stages still eagerly imports semantic_repair_budget")
@@ -63,6 +61,8 @@ def patch_workflow() -> None:
         raise SystemExit("workflow_stages still references removed eager hook aliases")
     if "def _resume_semantic_budget(" in text:
         raise SystemExit("workflow_stages still owns semantic resume-budget policy")
+    if "_resume_semantic_budget" in text:
+        raise SystemExit("workflow_stages still references semantic resume-budget compatibility code")
     if "def _ensure_policy_hooks()" not in text:
         raise SystemExit("workflow_stages lazy policy hook dispatcher was not installed")
     WORKFLOW.write_text(text, encoding="utf-8")
