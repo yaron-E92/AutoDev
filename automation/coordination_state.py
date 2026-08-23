@@ -5,13 +5,13 @@ import shlex
 from pathlib import Path
 from typing import TypeVar
 
-from automation import opencode_adapter, workflow_stages
-
 
 CoordinatorError = TypeVar("CoordinatorError", bound=Exception)
 
 
 def issue_number(repo: Path, arguments: str = "") -> int:
+    from automation import workflow_stages
+
     try:
         state = workflow_stages.read_state(repo / workflow_stages.CURRENT_DIR)
     except (OSError, ValueError, workflow_stages.WorkflowStageError):
@@ -24,6 +24,8 @@ def issue_number(repo: Path, arguments: str = "") -> int:
 
 
 def role_acceptance(repo: Path, role: str) -> dict[str, object]:
+    from automation import workflow_stages
+
     current = repo / workflow_stages.CURRENT_DIR
     try:
         state = workflow_stages.read_state(current)
@@ -65,13 +67,20 @@ def role_acceptance(repo: Path, role: str) -> dict[str, object]:
 
 
 def role_output_path(repo: Path, role: str) -> Path | None:
+    from automation import opencode_adapter, workflow_stages
+
     relative = str(opencode_adapter.role_contracts().get(role, {}).get("output_artifact", ""))
     if relative.startswith(".autodev-run/current/"):
         return repo / workflow_stages.CURRENT_DIR / Path(relative).name
     return None
 
 
-def invalidated_roles(arguments: str, *, roles: tuple[str, ...], error_type: type[CoordinatorError]) -> set[str]:
+def invalidated_roles(
+    arguments: str,
+    *,
+    roles: tuple[str, ...],
+    error_type: type[CoordinatorError],
+) -> set[str]:
     tokens = shlex.split(arguments or "")
     values: set[str] = set()
     for index, token in enumerate(tokens):
