@@ -1,0 +1,32 @@
+name: Apply issue 180 checkpoint
+
+on:
+  push:
+    branches:
+      - agent/issue-180-python-modularization
+    paths:
+      - .autodev-checkpoint/chunk09
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: agent/issue-180-python-modularization
+      - name: Reconstruct and apply checkpoint
+        shell: bash
+        env:
+          EXPECTED_STAGING_HEAD: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          cat .autodev-checkpoint/chunk* | base64 -d | gunzip > /tmp/checkpoint.patch
+          git config user.name "OpenAI"
+          git config user.email "noreply@openai.com"
+          git reset --hard d19c2ce6207c8a8dbe42d6105670fab25d0ed8b3
+          git am /tmp/checkpoint.patch
+          git push --force-with-lease=refs/heads/agent/issue-180-python-modularization:${EXPECTED_STAGING_HEAD} origin HEAD:refs/heads/agent/issue-180-python-modularization
