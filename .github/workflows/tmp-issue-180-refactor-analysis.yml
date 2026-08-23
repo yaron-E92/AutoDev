@@ -1,0 +1,39 @@
+name: Issue 180 refactor analysis
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  map-python-modules:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Map largest Python modules
+        shell: bash
+        run: |
+          python - <<'PY'
+          import ast
+          from pathlib import Path
+
+          paths = [
+              Path('automation/workflow_stages_core.py'),
+              Path('automation/run_real_issue.py'),
+              Path('automation/run_real_issue_core.py'),
+              Path('automation/scheduler.py'),
+              Path('automation/opencode_adapter.py'),
+              Path('automation/eval_harness_core.py'),
+              Path('area_reader_v2/runner_core.py'),
+          ]
+          for path in paths:
+              text = path.read_text(encoding='utf-8')
+              tree = ast.parse(text)
+              print(f'\n=== {path} lines={text.count(chr(10))+1} bytes={len(text.encode())} ===')
+              for node in tree.body:
+                  if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                      print(f'{node.lineno:5}-{getattr(node, "end_lineno", node.lineno):5} {type(node).__name__:16} {node.name}')
+          PY
