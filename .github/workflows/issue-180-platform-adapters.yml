@@ -1,0 +1,106 @@
+name: Issue 180 platform adapter splits
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: issue-180-platform-adapters-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  split:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out PR branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Compile migration driver
+        run: python -m py_compile scripts/issue_180_split_platform_adapters.py
+
+      - name: Split Windows verification
+        run: python scripts/issue_180_split_platform_adapters.py windows
+
+      - name: Verify Windows verification split
+        run: |
+          python -m compileall -q automation
+          python -m unittest \
+            tests.test_windows_verification \
+            tests.test_windows_semantic_order \
+            tests.test_windows_nuget_source \
+            tests.test_opencode_integration \
+            tests.test_run_resume
+
+      - name: Commit Windows verification split
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add \
+            automation/windows_verification.py \
+            automation/windows_verification_contract.py \
+            automation/windows_verification_storage.py \
+            automation/windows_verification_process.py \
+            automation/windows_verification_actions.py \
+            automation/windows_verification_config.py \
+            automation/windows_verification_manifest.py \
+            automation/windows_verification_obligations.py \
+            automation/windows_verification_failure.py \
+            automation/windows_verification_execution.py \
+            automation/windows_verification_hooks.py
+          if git diff --cached --quiet; then
+            echo "Windows verification already split."
+          else
+            git diff --cached --check
+            git config user.name github-actions[bot]
+            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+            git commit -m 'refactor: split Windows verification responsibilities'
+            git push origin HEAD:${{ github.event.pull_request.head.ref }}
+          fi
+
+      - name: Split OpenCode adapter
+        run: python scripts/issue_180_split_platform_adapters.py adapter
+
+      - name: Verify OpenCode adapter split
+        run: |
+          python -m compileall -q automation
+          python -m unittest \
+            tests.test_opencode_integration \
+            tests.test_opencode_agent_modes \
+            tests.test_opencode_bridge \
+            tests.test_opencode_role_boundary_contracts \
+            tests.test_opencode_resume \
+            tests.test_opencode_runtime \
+            tests.test_opencode_coordinator
+
+      - name: Commit OpenCode adapter split
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add \
+            automation/opencode_adapter.py \
+            automation/opencode_adapter_contract.py \
+            automation/opencode_adapter_assets.py \
+            automation/opencode_adapter_models.py \
+            automation/opencode_adapter_storage.py \
+            automation/opencode_adapter_handoff.py \
+            automation/opencode_adapter_protocol.py \
+            automation/opencode_adapter_roles.py \
+            automation/opencode_adapter_workflow.py \
+            automation/opencode_adapter_cli.py
+          if git diff --cached --quiet; then
+            echo "OpenCode adapter already split."
+          else
+            git diff --cached --check
+            git config user.name github-actions[bot]
+            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+            git commit -m 'refactor: split OpenCode adapter responsibilities'
+            git push origin HEAD:${{ github.event.pull_request.head.ref }}
+          fi
