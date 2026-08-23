@@ -5,7 +5,7 @@ on:
     branches:
       - agent/issue-180-python-modularization
     paths:
-      - .autodev-checkpoint/chunk24
+      - .autodev-checkpoint-xz/chunk14
 
 permissions:
   contents: write
@@ -24,7 +24,7 @@ jobs:
           EXPECTED_STAGING_HEAD: ${{ github.sha }}
         run: |
           set -euo pipefail
-          cat .autodev-checkpoint/chunk* | base64 -d | gunzip > /tmp/checkpoint.patch
+          cat .autodev-checkpoint-xz/chunk* | base64 -d | xz -d > /tmp/checkpoint.patch
           git config user.name "OpenAI"
           git config user.email "noreply@openai.com"
           git reset --hard d19c2ce6207c8a8dbe42d6105670fab25d0ed8b3
