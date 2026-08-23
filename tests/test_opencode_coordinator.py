@@ -238,12 +238,14 @@ class OpenCodePythonCoordinatorTests(unittest.TestCase):
             self.assertIn("doom_loop: deny", frontmatter)
             self.assertIn("external_directory: deny", frontmatter)
 
-    def test_portable_bridge_routes_coordinate_to_python_coordinator(self):
+    def test_portable_bridge_routes_through_first_class_cli(self):
         text = (OPEN_CODE_ROOT / "autodev.py").read_text(encoding="utf-8")
         self.assertIn('COORDINATE_COMMAND = "coordinate"', text)
-        self.assertIn('module = "automation.opencode_coordinator"', text)
+        self.assertIn('shutil.which("autodev")', text)
+        self.assertIn('"automation.autodev_cli"', text)
+        self.assertNotIn('module = "automation.opencode_coordinator"', text)
 
-    def test_python_coordinator_installer_renders_launcher_into_canonical_commands(self):
+    def test_python_coordinator_installer_renders_first_class_cli_into_canonical_commands(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             target = Path(temp_dir)
             launcher = "/opt/Python With Space/python3"
@@ -258,7 +260,9 @@ class OpenCodePythonCoordinatorTests(unittest.TestCase):
             for text in (issue_command, resume_command):
                 self.assertIn("agent: build", text)
                 self.assertNotIn(opencode_install.PYTHON_SHELL_PLACEHOLDER, text)
-                self.assertIn("'/opt/Python With Space/python3' .opencode/autodev.py coordinate", text)
+                self.assertIn("autodev coordinate", text)
+                self.assertNotIn(".opencode/autodev.py coordinate", text)
+                self.assertNotIn(launcher, text)
                 self.assertNotIn("agent: autodev-coordinator", text)
             self.assertIn('--resume --arguments "$ARGUMENTS"', resume_command)
 
