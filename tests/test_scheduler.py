@@ -188,6 +188,7 @@ class SchedulerDispatchTests(unittest.TestCase):
                     registration_file,
                     coordinator=coordinator,
                     stdout=output,
+                    claiming_enabled=False,
                 )
 
             self.assertEqual(code, 0)
@@ -232,6 +233,7 @@ class SchedulerDispatchTests(unittest.TestCase):
                     registration_file,
                     coordinator=coordinator,
                     stdout=output,
+                    claiming_enabled=False,
                 )
 
             self.assertEqual(code, 0)
@@ -276,6 +278,7 @@ class SchedulerDispatchTests(unittest.TestCase):
                     registration_file,
                     coordinator=coordinator,
                     stdout=output,
+                    claiming_enabled=False,
                 )
 
             self.assertEqual(code, 0)
@@ -314,7 +317,11 @@ class SchedulerDispatchTests(unittest.TestCase):
                 scheduler.opencode_entrypoint,
                 "run",
             ) as coordinator:
-                code = scheduler.run_once(registration_file, stdout=output)
+                code = scheduler.run_once(
+                    registration_file,
+                    stdout=output,
+                    claiming_enabled=False,
+                )
 
             self.assertEqual(code, 0)
             select_next.assert_called_once()
@@ -372,7 +379,11 @@ class SchedulerDispatchTests(unittest.TestCase):
                 scheduler.opencode_entrypoint,
                 "run",
             ) as coordinator:
-                code = scheduler.run_once(registration_file, stdout=output)
+                code = scheduler.run_once(
+                    registration_file,
+                    stdout=output,
+                    claiming_enabled=False,
+                )
 
             self.assertEqual(code, 0)
             prepare.assert_not_called()
