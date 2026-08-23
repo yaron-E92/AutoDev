@@ -4,9 +4,6 @@ on:
   push:
     branches:
       - chore/set-native-issue-dependencies-180-185
-  pull_request:
-    branches:
-      - main
 
 permissions:
   contents: read
@@ -71,3 +68,7 @@ jobs:
               --jq '.[].number' | grep -Fxq "$blocker"
             echo "Verified native dependency: #$blocked blocked by #$blocker"
           done
+
+          gh issue comment 186 \
+            --repo "$repo" \
+            --body $'Native GitHub issue dependencies verified successfully:\n\n- #181 blocked by #180\n- #182 blocked by #181\n- #183 blocked by #182\n- #184 blocked by #183\n- #185 blocked by #183'
