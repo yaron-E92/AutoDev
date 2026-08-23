@@ -22,6 +22,7 @@ class AutoDevCliTests(unittest.TestCase):
         self.assertIn("autodev scheduler install", text)
         self.assertIn("autodev scheduler health", text)
         self.assertIn("autodev scheduler notifications", text)
+        self.assertIn("autodev scheduler worker-id", text)
         self.assertIn("autodev scheduler run-once", text)
         self.assertIn("autodev coordinate", text)
         self.assertNotIn("python3 .opencode/autodev.py", text)
@@ -47,6 +48,13 @@ class AutoDevCliTests(unittest.TestCase):
 
         self.assertEqual(code, 6)
         run_cli.assert_called_once_with(["status", "--json"])
+
+    def test_scheduler_worker_identity_routes_to_claim_core(self):
+        with patch("automation.distributed_claims.run_worker_cli", return_value=4) as run_cli:
+            code = autodev_cli.run(["scheduler", "worker-id", "--set", "mega-beast"])
+
+        self.assertEqual(code, 4)
+        run_cli.assert_called_once_with(["--set", "mega-beast"])
 
     def test_resume_maps_to_shared_python_coordinator(self):
         with patch.object(autodev_cli, "_enable_interactive_consent_for_direct_cli"), patch.object(
