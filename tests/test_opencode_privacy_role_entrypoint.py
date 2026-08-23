@@ -33,7 +33,8 @@ class OpenCodePrivacyRoleEntrypointTests(unittest.TestCase):
                     encoding="utf-8"
                 )
                 self.assertIn("agent: build", text)
-                self.assertIn(f".opencode/autodev.py role --role {role}", text)
+                self.assertIn(f"autodev role --role {role}", text)
+                self.assertNotIn(".opencode/autodev.py role", text)
                 self.assertNotIn(opencode_install.PYTHON_SHELL_PLACEHOLDER, text)
                 self.assertIn("display-only", text)
 
