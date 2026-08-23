@@ -244,7 +244,21 @@ def write_public_facade(exports: dict[str, list[str]], common_imports: str) -> N
     print(f"wrote {PUBLIC} ({len(text.splitlines())} lines)")
 
 
+def already_split() -> bool:
+    required = [
+        Path("automation/issue_runner_contract.py"),
+        Path("automation/issue_runner_legacy.py"),
+        Path("automation/issue_run_entrypoint.py"),
+    ]
+    if not all(path.exists() for path in required):
+        return False
+    return "_COMPAT_ORIGINALS" in CORE.read_text(encoding="utf-8") and "_COMPAT_ORIGINALS" in PUBLIC.read_text(encoding="utf-8")
+
+
 def main() -> None:
+    if already_split():
+        print("issue runner is already split; preserving committed modular sources")
+        return
     core_exports, _, core_imports = split(CORE, CORE_GROUPS)
     write_core_facade(core_exports, core_imports)
     overlay_exports, _, public_imports = split(PUBLIC, OVERLAY_GROUPS)
