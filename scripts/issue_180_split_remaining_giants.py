@@ -246,7 +246,7 @@ def assert_acyclic(deps: dict[str, set[str]]) -> None:
 
 def compatibility_block(aliases: list[str]) -> str:
     modules = ",\n    ".join(aliases)
-    return f'''_COMPAT_MODULES = (\n    {modules},\n)\n_COMPAT_MISSING = object()\n_COMPAT_ORIGINALS = {{\n    module: {{name: value for name, value in module.__dict__.items() if name in globals() and not name.startswith("__")} }\n    for module in _COMPAT_MODULES\n}}\n_COMPAT_BASELINE: dict[str, object] = {{}}\n\n\ndef _sync_compat_overrides() -> None:\n    facade = globals()\n    for module, originals in _COMPAT_ORIGINALS.items():\n        namespace = module.__dict__\n        for name, original in originals.items():\n            current = facade.get(name, _COMPAT_MISSING)\n            if current is _COMPAT_MISSING:\n                continue\n            baseline = _COMPAT_BASELINE.get(name, _COMPAT_MISSING)\n            namespace[name] = original if current is baseline else current\n\n\ndef _compat_entrypoint(target):\n    @functools.wraps(target)\n    def invoke(*args, **kwargs):\n        _sync_compat_overrides()\n        return target(*args, **kwargs)\n    return invoke\n\n\ndef _install_compat_entrypoints() -> None:\n    facade = globals()\n    wrapped: set[str] = set()\n    for module in _COMPAT_MODULES:\n        for name in tuple(module.__dict__):\n            if name in wrapped or name.startswith("__") or name not in facade:\n                continue\n            value = facade[name]\n            if inspect.isfunction(value) and value.__module__.startswith("automation."):\n                facade[name] = _compat_entrypoint(value)\n                wrapped.add(name)\n\n\n_install_compat_entrypoints()\n_COMPAT_BASELINE.update(globals())\n'''
+    return f'''_COMPAT_MODULES = (\n    {modules},\n)\n_COMPAT_MISSING = object()\n_COMPAT_ORIGINALS = dict(\n    (\n        module,\n        dict(\n            (name, value)\n            for name, value in module.__dict__.items()\n            if name in globals() and not name.startswith("__")\n        ),\n    )\n    for module in _COMPAT_MODULES\n)\n_COMPAT_BASELINE: dict[str, object] = {{}}\n\n\ndef _sync_compat_overrides() -> None:\n    facade = globals()\n    for module, originals in _COMPAT_ORIGINALS.items():\n        namespace = module.__dict__\n        for name, original in originals.items():\n            current = facade.get(name, _COMPAT_MISSING)\n            if current is _COMPAT_MISSING:\n                continue\n            baseline = _COMPAT_BASELINE.get(name, _COMPAT_MISSING)\n            namespace[name] = original if current is baseline else current\n\n\ndef _compat_entrypoint(target):\n    @functools.wraps(target)\n    def invoke(*args, **kwargs):\n        _sync_compat_overrides()\n        return target(*args, **kwargs)\n    return invoke\n\n\ndef _install_compat_entrypoints() -> None:\n    facade = globals()\n    wrapped: set[str] = set()\n    for module in _COMPAT_MODULES:\n        for name in tuple(module.__dict__):\n            if name in wrapped or name.startswith("__") or name not in facade:\n                continue\n            value = facade[name]\n            if inspect.isfunction(value) and value.__module__.startswith("automation."):\n                facade[name] = _compat_entrypoint(value)\n                wrapped.add(name)\n\n\n_install_compat_entrypoints()\n_COMPAT_BASELINE.update(globals())\n'''
 
 
 def split(spec: SplitSpec) -> None:
@@ -282,7 +282,7 @@ def split(spec: SplitSpec) -> None:
         assert module is not None
         nodes[module].append(node)
         seen.update(names)
-        for dep in loaded_names([node]) & known - names:
+        for dep in (loaded_names([node]) & known) - names:
             dep_module = owner[dep]
             if dep_module != module:
                 cross[module][dep_module].add(dep)
@@ -315,7 +315,11 @@ def split(spec: SplitSpec) -> None:
         for module, names in exports.items()
     )
     facade = f'''from __future__ import annotations\n\nimport functools\nimport inspect\n\n{original_imports(lines, tree)}\n{module_import_lines}\n\n{export_import_lines}\n\n{compatibility_block(aliases)}\n'''
-    if any(isinstance(node, ast.If) and any(isinstance(item, ast.Name) and item.id == "__name__" for item in ast.walk(node)) for node in tree.body):
+    if any(
+        isinstance(node, ast.If)
+        and any(isinstance(item, ast.Name) and item.id == "__name__" for item in ast.walk(node))
+        for node in tree.body
+    ):
         entry = "main" if "main" in owner else "run_cli" if "run_cli" in owner else "run"
         facade += f'\nif __name__ == "__main__":\n    raise SystemExit({entry}())\n'
     source.write_text(facade.rstrip() + "\n", encoding="utf-8")
