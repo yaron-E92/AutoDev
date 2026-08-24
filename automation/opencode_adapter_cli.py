@@ -91,24 +91,6 @@ def build_parser() -> argparse.ArgumentParser:
 def run(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        if args.command == "install":
-            from automation import opencode_install
-
-            print(
-                "DEPRECATED: `python -m automation.opencode_adapter install` is a compatibility shim; "
-                "use `python -m automation.opencode_install` instead.",
-                file=sys.stderr,
-            )
-            return opencode_install.run(
-                [
-                    "--target-repo",
-                    args.target_repo,
-                    "--autodev-root",
-                    args.autodev_root,
-                    "--python",
-                    args.python,
-                ]
-            )
         if args.command == "models":
             mappings = resolve_opencode_model_mappings(Path(args.repo))
             print(render_model_mappings(mappings))
