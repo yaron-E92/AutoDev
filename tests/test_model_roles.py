@@ -3,7 +3,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from area_reader import workflow as area_runner
 from automation.provider_contract import ModelConfig, ProviderError
 from automation.provider_mock import MockProvider
 from automation.model_roles import ModelInvocationError, invoke_model, resolve_role_configs
@@ -160,29 +159,6 @@ class ModelRoleTests(unittest.TestCase):
 
         self.assertTrue(effective.endswith(contract))
         self.assertLess(effective.index("Role-specific prompt policy"), effective.index("Issue:"))
-
-    def test_area_runner_records_reader_synthesizer_planner_order(self):
-        configs = {
-            role: ModelConfig(provider="mock", model=role)
-            for role in ("reader", "synthesizer", "planner")
-        }
-        original_factory = area_runner.create_provider
-        original_policies = area_runner._ACTIVE_POLICIES
-        with tempfile.TemporaryDirectory() as temp_dir:
-            area_runner._ACTIVE_CONFIGS = {**configs, "implementer": None, "fixer": None, "verifier": None}
-            area_runner._ACTIVE_POLICIES = resolve_prompt_policies({})
-            area_runner._ACTIVE_OUT = Path(temp_dir)
-            try:
-                area_runner.create_provider = lambda config: MockProvider([config.model])
-                area_runner.call_provider(None, "reader", "area", 1)
-                area_runner.call_provider(None, "reader", "synthesis", 1, model_override="legacy-alias")
-                area_runner.call_provider(None, "coder", "plan", 1)
-            finally:
-                area_runner.create_provider = original_factory
-                area_runner._ACTIVE_POLICIES = original_policies
-            records = json.loads((Path(temp_dir) / "model-invocations.json").read_text(encoding="utf-8"))
-        self.assertEqual([record["role"] for record in records], ["reader", "synthesizer", "planner"])
-        self.assertEqual([record["prompt_policy_mode"] for record in records], ["off", "lite", "lite"])
 
 
     def test_provider_metadata_records_policy_source_and_modes(self):

@@ -6,9 +6,7 @@ from area_reader.recommendations import (
     ALL_COMMAND_GROUPS,
     recommend_command_groups,
 )
-from area_reader import cli as area_reader_cli
 from area_reader import prompts as area_reader_prompts
-from area_reader import provider as area_reader_provider
 from area_reader import repository as area_reader_repository
 from area_reader import verification as area_reader_verification
 
@@ -327,27 +325,6 @@ class CommandGroupRecommendationTests(unittest.TestCase):
         self.assertTrue(area_reader_repository.area_for_file("packages/api-client/src/generated.ts", "api-client"))
         self.assertTrue(area_reader_repository.area_for_file("apps/api/openapi.json", "api-client"))
 
-    def test_model_only_command_provider_uses_ollama_run(self):
-        args = area_reader_cli.parse_args(
-            [
-                "--repo",
-                ".",
-                "--issue",
-                "Issue",
-                "--out",
-                "out",
-                "--reader",
-                "reader-model",
-                "--coder",
-                "coder-model",
-            ]
-        )
-
-        reader = area_reader_provider.model_config_from_args(args, "reader")
-        coder = area_reader_provider.model_config_from_args(args, "coder")
-
-        self.assertEqual(reader.command, "ollama run reader-model")
-        self.assertEqual(coder.command, "ollama run coder-model")
 
 if __name__ == "__main__":
     unittest.main()

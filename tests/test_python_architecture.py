@@ -15,7 +15,6 @@ REPRESENTATIVE_MODULES = (
     "automation.scheduler_registration",
     "automation.workflow_dispatch",
     "automation.semantic_invocation",
-    "automation.semantic_cli",
     "automation.privacy_grant_hooks",
     "automation.claim_lease",
     "automation.scheduler_health_lifecycle",
@@ -27,7 +26,6 @@ REPRESENTATIVE_MODULES = (
     "automation.opencode_adapter_workflow",
     "automation.coordination_state",
     "automation.role_coordinator_flow",
-    "area_reader.pipeline",
 )
 REMOVED_PATHS = (
     "automation/run_real_issue.py",
@@ -57,6 +55,13 @@ REMOVED_PATHS = (
     "windows/scripts/codex-prepare-next-ready-issue.ps1",
     "windows/scripts/ensure-codex-labels.ps1",
     "area_reader_v2",
+    "area_reader/cli.py",
+    "area_reader/execution.py",
+    "area_reader/pipeline.py",
+    "area_reader/provider.py",
+    "area_reader/storage.py",
+    "area_reader/workflow.py",
+    "automation/semantic_cli.py",
 )
 MAINTAINED_DOCS = (
     "CONTRIBUTING.md",
