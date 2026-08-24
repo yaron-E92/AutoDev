@@ -27,7 +27,9 @@ jobs:
             'resolve_model_config|load_provider_config|create_provider' \
             'resolve_role_configs|resolve_profile_roles|ROLE_FALLBACKS' \
             'invoke_model|ModelInvocationError|append_invocation_metadata|safe_role_metadata' \
-            'model_config_from_values|ModelProvider|HeadroomProvider|resolve_headroom_values'; do
+            'model_config_from_values|ModelProvider|HeadroomProvider|resolve_headroom_values' \
+            'semantic_invocation|invoke_semantic_verifier' \
+            'model_roles|provider_command|provider_http|provider_headroom|provider_mock'; do
             echo "=== $pattern ==="
             git grep -n -E "$pattern" -- automation area_reader integrations promptTemplates tests docs README.md CONTRIBUTING.md 2>/dev/null || true
           done
