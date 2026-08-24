@@ -14,6 +14,12 @@ The runtime cannot decide which workflow stage runs next and cannot make artifac
 
 `opencode` is the default runtime. It launches the installed AutoDev role agents and reads their effective model mapping from `opencode.json` / `opencode.jsonc`.
 
+Inspect the effective OpenCode role/model mapping with:
+
+```text
+autodev models
+```
+
 ## Selecting a runtime
 
 Precedence is:
@@ -27,8 +33,10 @@ Precedence is:
 Example:
 
 ```text
-autodev coordinate --arguments 123 --runtime opencode
+autodev issue-to-pr 123 --runtime opencode
 ```
+
+`autodev coordinate --arguments 123 --runtime opencode` is the equivalent advanced/integration spelling.
 
 An unknown explicitly selected runtime fails before model work. AutoDev does not silently fall back to another runtime.
 
