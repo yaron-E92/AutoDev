@@ -105,6 +105,46 @@ def patch_execution(package: Path) -> None:
     path.write_text(text, encoding="utf-8")
 
 
+def patch_consumers() -> None:
+    adapter = ROOT / "automation/opencode_adapter.py"
+    text = adapter.read_text(encoding="utf-8")
+    text = text.replace("from area_reader import runner_core as area_reader_core\n", "")
+    text = text.replace("from area_reader import workflow as area_reader_core\n", "")
+    adapter.write_text(text, encoding="utf-8")
+
+    handoff = ROOT / "automation/opencode_adapter_handoff.py"
+    text = handoff.read_text(encoding="utf-8")
+    old_imports = (
+        "from area_reader import runner_core as area_reader_core\n"
+        if "from area_reader import runner_core as area_reader_core\n" in text
+        else "from area_reader import workflow as area_reader_core\n"
+    )
+    new_imports = '''from area_reader import context as area_reader_context\nfrom area_reader import prompts as area_reader_prompts\nfrom area_reader import repository as area_reader_repository\nfrom area_reader import routing as area_reader_routing\nfrom area_reader import verification as area_reader_verification\n'''
+    text = text.replace(old_imports, new_imports)
+    replacements = {
+        "area_reader_core.collect_repo_files": "area_reader_repository.collect_repo_files",
+        "area_reader_core.build_repo_map": "area_reader_repository.build_repo_map",
+        "area_reader_core.detect_repo_facts": "area_reader_repository.detect_repo_facts",
+        "area_reader_core.route_areas": "area_reader_routing.route_areas",
+        "area_reader_core.build_verification_command_groups": "area_reader_verification.build_verification_command_groups",
+        "area_reader_core.recommended_command_groups": "area_reader_verification.recommended_command_groups",
+        "area_reader_core.apply_recommended_command_groups": "area_reader_verification.apply_recommended_command_groups",
+        "area_reader_core.read_file_for_bundle": "area_reader_context.read_file_for_bundle",
+        "area_reader_core.build_area_reader_prompt": "area_reader_prompts.build_area_reader_prompt",
+        "area_reader_core.build_synthesis_prompt": "area_reader_prompts.build_synthesis_prompt",
+    }
+    for before, after in replacements.items():
+        text = text.replace(before, after)
+    if "area_reader_core" in text or "runner_core" in text:
+        raise SystemExit("OpenCode handoff still depends on area-reader compatibility facade")
+    handoff.write_text(text, encoding="utf-8")
+
+    architecture = ROOT / "tests/test_python_architecture.py"
+    text = architecture.read_text(encoding="utf-8")
+    text = text.replace('    ROOT / "area_reader" / "runner_core.py",\n', "")
+    architecture.write_text(text, encoding="utf-8")
+
+
 def ignored(path: Path) -> bool:
     resolved = path.resolve()
     return resolved in {SCRIPT, TEMP_WORKFLOW}
@@ -139,6 +179,7 @@ def main() -> None:
     patch_workflow(package)
     patch_pipeline(package)
     patch_execution(package)
+    patch_consumers()
 
     old_refs = []
     for path in ROOT.rglob("*"):
