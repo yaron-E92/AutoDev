@@ -68,7 +68,7 @@ class HeadroomTests(unittest.TestCase):
 
 
     def test_semantic_compression_preserves_issue_acceptance_criteria_and_json_schema(self):
-        template = (REPO_ROOT / "promptTemplates" / "verifier.md").read_text(encoding="utf-8")
+        template = (REPO_ROOT / "promptTemplates" / "semantic-verifier.md").read_text(encoding="utf-8")
         prompt = build_semantic_prompt(
             issue_text="# Issue\n\n## Acceptance criteria\n- EXACT CRITERION",
             synthesized_handoff="supporting handoff",
