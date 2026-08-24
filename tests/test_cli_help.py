@@ -99,7 +99,7 @@ class CliHelpTests(unittest.TestCase):
         next_help = self.render(["queue", "next", "--help"])[1]
 
         self.assertIn("Inspect, grant, and revoke", privacy)
-        self.assertIn("does not weaken repository policy", privacy)
+        self.assertIn("do not weaken repository policy", privacy)
         self.assertIn("interactive terminal", consent)
         self.assertIn("Headless/scheduled runs", consent)
         self.assertIn("without model calls", queue)
