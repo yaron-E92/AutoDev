@@ -179,9 +179,9 @@ def compressible_ranges(prompt: str, role: str) -> list[tuple[int, int]]:
     elif role == "fixer":
         if (
             "Semantic-only repair evidence:" in prompt
-            and "{{RepairBrief}}" not in prompt
-            and "{{ChangedFiles}}" not in prompt
-            and "{{Diff}}" not in prompt
+            and "{~{RepairBrief}~}" not in prompt
+            and "{~{ChangedFiles}~}" not in prompt
+            and "{~{Diff}~}" not in prompt
         ):
             pairs = [
                 ("Implementation plan:\n", "\n\nVerifier result:"),
@@ -209,14 +209,15 @@ def compressible_ranges(prompt: str, role: str) -> list[tuple[int, int]]:
             pairs = [("Area-reader routed areas:\n", "\n\nAutomation context:")]
         elif "You are the coder model in an area-based local LLM benchmark." in prompt:
             pairs = [("Synthesized handoff:\n", None)]
-    elif role == "verifier" and "Semantic JSON contract:" in prompt:
+    elif role == "verifier" and "Output contract:" in prompt:
         pairs = [
-            ("Implementation plan:\n", "\n\nCurrent implementation diff or summary:"),
-            ("Current implementation diff or summary:\n", "\n\nSemantic-only evidence:"),
-            ("Synthesized repository handoff:\n", "\n\nChanged files:"),
-            ("Changed files:\n", "\n\nDeterministic verification evidence:"),
-            ("Deterministic verification evidence:\n", "\n\nRelevant uncertainty or skipped-check notes:"),
-            ("Relevant uncertainty or skipped-check notes:\n", "\n\nSemantic JSON contract:"),
+            ("Synthesized repository handoff:\n", "\n\nImplementation plan:"),
+            ("Implementation plan:\n", "\n\nChanged files:"),
+            ("Changed files:\n", "\n\nCurrent diff:"),
+            ("Current diff:\n", "\n\nDeterministic verification evidence:"),
+            ("Deterministic verification evidence:\n", "\n\nCross-file regression evidence:"),
+            ("Cross-file regression evidence:\n", "\n\nRelevant uncertainty or skipped-check notes:"),
+            ("Relevant uncertainty or skipped-check notes:\n", "\n\nOutput contract:"),
         ]
     return _find_ranges(prompt, pairs)
 

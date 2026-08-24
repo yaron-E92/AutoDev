@@ -84,9 +84,9 @@ def resolve_profiles(
             )
         codex_tools = os.environ.get("CODEX_TOOLS_DIR", str(Path.home() / "codex-tools"))
         local_check = (
-            template.replace("{{ProfilesCsv}}", profiles_csv)
-            .replace("{{AutomationRoot}}", str(autodev_root))
-            .replace("{{CodexToolsDir}}", codex_tools)
+            template.replace("{~{ProfilesCsv}~}", profiles_csv)
+            .replace("{~{AutomationRoot}~}", str(autodev_root))
+            .replace("{~{CodexToolsDir}~}", codex_tools)
         )
     stack_context = explicit_stack_context.strip() or "\n".join(contexts)
     if not stack_context:

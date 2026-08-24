@@ -64,6 +64,7 @@ REMOVED_PATHS = (
     "area_reader/workflow.py",
     "automation/semantic_cli.py",
     "automation/prompt_runner.py",
+    "automation/model_roles.py",
 )
 MAINTAINED_DOCS = (
     "CONTRIBUTING.md",
