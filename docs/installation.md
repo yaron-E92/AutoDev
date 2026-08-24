@@ -1,57 +1,80 @@
 # Install and configure AutoDev
 
-AutoDev's public command is `autodev`. OpenCode is an optional frontend over the same Python workflow core; it is not the owner of AutoDev's repository configuration.
+AutoDev's public command is `autodev`. User installation, target-repository setup, and contributor development are separate workflows.
 
-The CLI is intended to be self-discoverable: `autodev --help` shows the normal workflows, and `autodev <command> --help` shows command-specific options, defaults, examples, aliases, and privacy notes where model work may occur.
+The CLI is intended to be self-discoverable: `autodev --help` shows normal workflows, and `autodev <command> --help` shows command-specific options, defaults, examples, aliases, and privacy notes where model work may occur.
 
 ## User installation
 
-From an AutoDev checkout, bootstrap the user-local launcher once:
+### Current release-bundle installation
 
-```text
-python -m automation.autodev_cli install --user
-```
+Until the native Windows/Linux installers tracked by #184 and #185 are available, the supported end-user distribution is a published GitHub Release bundle. A normal user does not need to clone the AutoDev repository.
 
-On POSIX systems the default launcher directory is `~/.local/bin`. On Windows it is the user-local `AutoDev/bin` directory under `LOCALAPPDATA` when available. If that directory is not already on `PATH`, either add it yourself or explicitly allow the installer to add one bounded, reversible profile block:
+Download the assets for one release:
+
+- Linux/other POSIX hosts: `autodev-vX.Y.Z-common.zip`;
+- Windows: `autodev-vX.Y.Z-common.zip` plus `autodev-vX.Y.Z-windows.zip` from the same release;
+- `autodev-release-manifest.json` and `SHA256SUMS` for verification.
+
+Verify the downloaded assets as described in [`releases.md`](releases.md), then extract them into one **permanent** AutoDev directory. On Windows, overlay the common and Windows archives into that same directory.
+
+The current launcher records the extracted AutoDev root, so do not delete or move that directory while the launcher is installed.
+
+From the extracted release directory, perform the one-time bootstrap:
 
 ```text
 python -m automation.autodev_cli install --user --add-to-path
 ```
 
-After opening a new shell, normal usage is:
+This bootstrap requires a supported Python interpreter because the current pre-native-package release is still Python-backed. It creates a single user-local `autodev` launcher. After opening a new shell, normal operation uses the installed CLI rather than internal Python module invocations:
 
 ```text
 autodev --help
+autodev doctor
 autodev issue-to-pr 123
 autodev status
 autodev resume
-autodev doctor
 autodev privacy status
 autodev queue status
 autodev queue next
 ```
 
-`autodev issue-to-pr ISSUE` is the canonical user-facing spelling for working a specific issue. The lower-level `autodev coordinate --arguments ISSUE` spelling remains available for integrations and advanced coordinator use.
+`autodev issue-to-pr ISSUE` is the canonical user-facing spelling for working a specific issue. `autodev coordinate --arguments ISSUE` remains available only as the advanced/integration spelling over the same coordinator.
 
-The installer creates one launcher, not one alias/function per subcommand. Re-running installation is idempotent.
+### Launcher location and PATH
 
-To remove the user launcher and only the profile block that AutoDev created:
+On POSIX systems the default launcher directory is `~/.local/bin`. On Windows it is the user-local `AutoDev/bin` directory under `LOCALAPPDATA` when available.
+
+`--add-to-path` allows AutoDev to add one bounded, reversible profile block. If you prefer to manage `PATH` yourself, bootstrap without that flag and add the reported launcher directory manually.
+
+Re-running launcher installation from the same permanent release directory is idempotent:
+
+```text
+autodev install --user
+```
+
+The installer creates one launcher, not one alias/function per subcommand.
+
+### Uninstall the launcher
+
+Remove the user launcher and only the PATH profile block AutoDev recorded:
 
 ```text
 autodev install --user --uninstall
 ```
 
-Uninstalling the launcher does not delete target-repository files, `.autodev-run` history, GitHub issues, privacy audit history, or unrelated OpenCode configuration.
+Uninstalling the launcher does not delete target-repository `.autodev/` configuration, `.autodev-run/` history, GitHub issues, privacy audit history, scheduler workers, or unrelated OpenCode configuration. After uninstalling the launcher and any scheduler registrations, the extracted product directory can be removed separately if it is no longer needed.
 
 ## Configure a target repository
 
-From the repository root:
+Once `autodev` is installed, move to a repository that AutoDev should manage and run:
 
 ```text
 autodev repo install
+autodev doctor
 ```
 
-This idempotently creates missing AutoDev-owned repository policy, validates existing policy before GitHub mutations, ensures the canonical queue labels, and installs the optional OpenCode frontend by default. It never opts arbitrary issues into `autodev:managed`.
+Repository setup idempotently creates missing AutoDev-owned policy, validates existing policy before GitHub mutations, ensures the canonical queue labels, and installs the optional OpenCode frontend by default. It never opts arbitrary issues into `autodev:managed` and it never installs an autonomous scheduler implicitly.
 
 For a repository that deliberately does not use OpenCode:
 
@@ -120,22 +143,24 @@ Commands that can invoke configured model providers enforce the repository priva
 
 ## Scheduler readiness
 
-`autodev scheduler ...` manages unattended execution. Installing AutoDev or running `autodev repo install` does **not** silently register a scheduler. Scheduler installation remains an explicit per-repository opt-in:
+Installing AutoDev or running `autodev repo install` does **not** register background work. Autonomous scheduling remains an explicit per-repository opt-in:
 
 ```text
 autodev scheduler install
 autodev scheduler status
 ```
 
-Use `autodev scheduler --help` for backend choices, cadence defaults, health, notifications, worker identity, one-shot execution, and uninstall commands.
+Use `autodev scheduler --help` for backend choices, cadence defaults, health, notifications, worker identity, one-shot execution, and uninstall commands. See [`scheduler.md`](scheduler.md).
 
 ## Contributor development
 
-Source-development checks are intentionally distinct from the public operational CLI. Contributors validate an AutoDev checkout with:
+Contributors may work directly from a repository checkout. That is intentionally distinct from the end-user release-bundle installation above.
+
+Validate a source checkout with:
 
 ```text
 python -m compileall -q automation area_reader tests
 python -m unittest discover -s tests -v
 ```
 
-Contributor-only helpers are not advertised as end-user `autodev` commands. See `CONTRIBUTING.md` for the repository's development and architecture guardrails.
+Contributor-only helpers are not advertised as end-user `autodev` commands. See [`../CONTRIBUTING.md`](../CONTRIBUTING.md) for development and architecture guardrails.
