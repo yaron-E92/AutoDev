@@ -166,7 +166,7 @@ def _write_plan_template(current: Path) -> None:
     )
 
 def _plan_text(current: Path) -> str:
-    return _read_text(current / "plan.md") or _read_text(current / "coder-plan.md")
+    return _read_text(current / "plan.md")
 
 def _bounded_result(path: Path) -> str:
     value = sanitize_model_output(_read_text(path))
@@ -232,7 +232,6 @@ def build_planner_prompt_from_area_reader(
     workspace_snapshot = _read_json(current / "workspace-snapshot.json")
     routed_areas = _read_json(current / "routed-areas.json")
     synthesized_handoff = sanitize_model_output(_read_text(current / "synthesized-handoff.md"))
-    coder_plan = sanitize_model_output(_read_text(current / "coder-plan.md"))
     recommendations = _read_json(current / "recommended-command-groups.json")
     relevant_files = _area_reader_relevant_files(current, workspace_snapshot)
     return f"""Use the issue-to-pr-automation skill.
@@ -246,9 +245,6 @@ Area-reader routed areas:
 
 Area-reader synthesized handoff:
 {synthesized_handoff or '(no synthesized handoff available)'}
-
-Area-reader coder / implementation plan:
-{coder_plan}
 
 Detected relevant files from area-reader facts:
 {json.dumps(relevant_files, indent=2, sort_keys=True)}

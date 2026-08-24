@@ -122,7 +122,7 @@ class SemanticVerifierTests(unittest.TestCase):
                 changed_files=[],
                 diff="",
                 deterministic_evidence="checks passed",
-                template="Issue: {{IssueText}}\nMissing: {{MissingRequiredEvidence}}\n",
+                template="Issue: {~{IssueText}~}\nMissing: {~{MissingRequiredEvidence}~}\n",
             )
 
         self.assertEqual(raised.exception.classification, "unresolved_semantic_placeholders")

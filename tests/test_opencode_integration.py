@@ -336,7 +336,6 @@ class OpenCodeIntegrationTests(unittest.TestCase):
                 "Bounded handoff with enough repository evidence to remain valid for planner prompt rendering.\n",
                 encoding="utf-8",
             )
-            (current / "coder-plan.md").write_text("Reader plan\n", encoding="utf-8")
             (current / "recommended-command-groups.json").write_text("{}\n", encoding="utf-8")
 
             path = opencode_adapter_roles.prepare_role("planner", repo, "65", autodev_root=REPO_ROOT)

@@ -6,7 +6,7 @@ Issue #101 was opened after representative TATATORPLAG #29 Planner and Implement
 
 ## Roles
 
-- **Planner** reads `issue.md` and `synthesized-handoff.md` by default. `coder-plan.md` is explicitly fallback-only because asking a Planner to ingest an earlier planner output is normally redundant. Facts, command groups, and the workspace snapshot are consulted only to validate a concrete path/fact.
+- **Planner** reads `issue.md` and `synthesized-handoff.md` by default. Facts, command groups, and the workspace snapshot are consulted only to validate a concrete path/fact.
 - **Implementer** reads the issue and accepted plan once, then inspects only source files needed by that plan. The synthesized handoff is optional rather than a second default copy of repository context.
 - **Fixer** receives a pointer to the single targeted repair artifact instead of a second copy of that repair text in `fixer.md`.
 - **Verifier** receives exact diff and deterministic/cross-file evidence as durable artifacts. The issue and exact evidence are required; plan and synthesis are loaded only when a concrete scope/repository ambiguity requires them.
