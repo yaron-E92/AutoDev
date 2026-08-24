@@ -37,6 +37,7 @@ jobs:
             tests.test_execution_classification_hooks \
             tests.test_opencode_integration \
             tests.test_opencode_privacy_role_entrypoint \
+            tests.test_opencode_role_runtime_privacy \
             tests.test_opencode_resume \
             tests.test_privacy_consent \
             tests.test_privacy_consent_tty \
