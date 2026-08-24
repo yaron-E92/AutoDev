@@ -27,7 +27,6 @@ REPO_CONFIG = Path(".autodev") / "repo.json"
 QUEUE_CONFIG = issue_queue.QUEUE_CONFIG
 ROADMAP_CONFIG = queue_selection.ROADMAP_PATH
 PRIVACY_CONFIG = privacy.PRIVACY_CONFIG
-LEGACY_OPENCODE_CONFIG = Path(".opencode") / "autodev.json"
 REPO_SCHEMA = 1
 ROADMAP_TEMPLATE = "version: 1\npriority: []\nfallback: oldest\n"
 DEFAULT_QUEUE = {"version": 1, "autonomous_execution": True}
@@ -44,13 +43,12 @@ class RepoInstallResult:
     github_repository: str
     created: tuple[str, ...]
     updated: tuple[str, ...]
-    removed_legacy: tuple[str, ...]
     labels_created: tuple[str, ...]
     opencode_enabled: bool
 
     def to_json(self) -> dict[str, object]:
         value = asdict(self)
-        for key in ("created", "updated", "removed_legacy", "labels_created"):
+        for key in ("created", "updated", "labels_created"):
             value[key] = list(value[key])
         return value
 
@@ -176,19 +174,6 @@ def opencode_enabled(repo: Path) -> bool:
     return bool(value) if isinstance(value, bool) else True
 
 
-def _legacy_config_is_autodev_owned(path: Path) -> bool:
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return False
-    return bool(
-        isinstance(value, dict)
-        and value.get("version") == 1
-        and set(value).issubset({"version", "autodev_root", "python"})
-        and value.get("autodev_root")
-        and value.get("python")
-    )
-
 
 def _validate_repo_policy(repo: Path) -> None:
     issue_queue.load_policy(repo)
@@ -211,14 +196,12 @@ def install_repo(
     github_repo: str = "",
     enable_opencode: bool = True,
     autodev_root: Path | None = None,
-    python_command: str = sys.executable,
     runner: Callable[..., object] = subprocess.run,
 ) -> RepoInstallResult:
     repo = _repo(repo)
     root = (autodev_root or Path(__file__).resolve().parents[1]).expanduser().resolve()
     created: list[str] = []
     updated: list[str] = []
-    removed: list[str] = []
 
     _ensure_repo_config(
         repo,
@@ -246,8 +229,6 @@ def install_repo(
     # malformed policy is never silently overwritten by install/doctor --fix.
     _validate_repo_policy(repo)
 
-    legacy = repo / LEGACY_OPENCODE_CONFIG
-    legacy_before = legacy.is_file() and _legacy_config_is_autodev_owned(legacy)
     if enable_opencode:
         before = {
             path.relative_to(repo).as_posix()
@@ -257,17 +238,10 @@ def install_repo(
         installed = opencode_install.install_assets(
             repo,
             root,
-            python_command=python_command,
         )
         for path in installed:
             relative = _record_relative(repo, path)
             (updated if relative in before else created).append(relative)
-        if legacy_before and not legacy.exists():
-            removed.append(LEGACY_OPENCODE_CONFIG.as_posix())
-    elif legacy.is_file():
-        # `--no-opencode` must not delete user data. A legacy mixed-layout config
-        # is reported by doctor and can be migrated when OpenCode is enabled.
-        pass
 
     execution_classification_hooks.install()
     resolved = _resolve_github_repo(repo, github_repo, runner=runner)
@@ -277,7 +251,6 @@ def install_repo(
         github_repository=resolved,
         created=tuple(sorted(set(created))),
         updated=tuple(sorted(set(updated))),
-        removed_legacy=tuple(sorted(set(removed))),
         labels_created=tuple(sorted(labels)),
         opencode_enabled=enable_opencode,
     )
@@ -450,28 +423,13 @@ def _check_opencode(
             )
         )
     else:
-        stale = []
-        for name in opencode_adapter_contract.AGENT_FILES:
-            text = (repo / ".opencode" / "agents" / name).read_text(encoding="utf-8")
-            if ".opencode/autodev.json" in text:
-                stale.append(name)
-        if stale:
-            checks.append(
-                DoctorCheck(
-                    "opencode-assets",
-                    "error",
-                    "legacy agent launcher configuration remains: " + ", ".join(stale),
-                    True,
-                )
+        checks.append(
+            DoctorCheck(
+                "opencode-assets",
+                "ok",
+                "OpenCode commands/agents use the canonical AutoDev launcher contract",
             )
-        else:
-            checks.append(
-                DoctorCheck(
-                    "opencode-assets",
-                    "ok",
-                    "OpenCode commands/agents use the canonical AutoDev launcher contract",
-                )
-            )
+        )
 
     opencode_cli = which("opencode")
     if not opencode_cli:
@@ -507,7 +465,6 @@ def doctor(
     fix: bool = False,
     github_repo: str = "",
     autodev_root: Path | None = None,
-    python_command: str = sys.executable,
     runner: Callable[..., object] = subprocess.run,
     which: Callable[[str], str | None] = shutil.which,
 ) -> DoctorResult:
@@ -520,7 +477,6 @@ def doctor(
             github_repo=github_repo,
             enable_opencode=desired_opencode,
             autodev_root=autodev_root,
-            python_command=python_command,
             runner=runner,
         )
         fixed = True
@@ -548,19 +504,6 @@ def doctor(
     checks.extend(_check_policy(repo))
     checks.append(_grant_check(repo))
 
-    legacy = repo / LEGACY_OPENCODE_CONFIG
-    checks.append(
-        DoctorCheck(
-            "legacy-opencode-config",
-            "error" if legacy.exists() else "ok",
-            (
-                f"legacy generic AutoDev config remains at {legacy}"
-                if legacy.exists()
-                else "generic AutoDev configuration is not stored under .opencode"
-            ),
-            legacy.exists() and _legacy_config_is_autodev_owned(legacy),
-        )
-    )
 
     try:
         resolved_repo = _resolve_github_repo(repo, github_repo, runner=runner)
@@ -606,7 +549,6 @@ def run_cli(
     install_parser.add_argument("--repo", default=".")
     install_parser.add_argument("--github-repo", default="")
     install_parser.add_argument("--no-opencode", action="store_true")
-    install_parser.add_argument("--python", default=sys.executable)
     install_parser.add_argument("--json", action="store_true")
 
     labels_parser = sub.add_parser("ensure-labels")
@@ -618,7 +560,6 @@ def run_cli(
     doctor_parser.add_argument("--repo", default=".")
     doctor_parser.add_argument("--github-repo", default="")
     doctor_parser.add_argument("--fix", action="store_true")
-    doctor_parser.add_argument("--python", default=sys.executable)
     doctor_parser.add_argument("--json", action="store_true")
 
     args = parser.parse_args(argv)
@@ -628,7 +569,6 @@ def run_cli(
                 Path(args.repo),
                 github_repo=args.github_repo,
                 enable_opencode=not args.no_opencode,
-                python_command=args.python,
                 runner=runner,
             )
             if args.json:
@@ -655,7 +595,6 @@ def run_cli(
             Path(args.repo),
             fix=bool(args.fix),
             github_repo=args.github_repo,
-            python_command=args.python,
             runner=runner,
             which=which,
         )

@@ -129,7 +129,7 @@ def _waiting_payload(repo: Path, proof: dict[str, object]) -> dict[str, object]:
             f"after {polls} poll{'s' if polls != 1 else ''}"
         ),
         artifact=current / "ci-summary.json",
-        next_action="wait for CI to finish, then run `python3 .opencode/autodev.py coordinate --resume`",
+        next_action="wait for CI to finish, then run `autodev coordinate --resume`",
     )
     payload.update(
         {

@@ -8,7 +8,6 @@ from automation import opencode_resume_checkpoint
 
 import argparse
 import json
-import os
 import sys
 from pathlib import Path
 from automation import workflow_stages
@@ -48,10 +47,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Thin OpenCode frontend for existing AutoDev role artifacts.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    install = subparsers.add_parser("install")
-    install.add_argument("--target-repo", default=".")
-    install.add_argument("--autodev-root", default=str(AUTODEV_ROOT))
-    install.add_argument("--python", default=os.environ.get("PYTHON", "python"))
 
     models = subparsers.add_parser("models")
     models.add_argument("--repo", default=".")

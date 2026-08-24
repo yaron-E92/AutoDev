@@ -50,24 +50,6 @@ def semantic_result(verdict: str, message: str = "") -> str:
 
 
 class SemanticRepairDefaultTests(unittest.TestCase):
-    def test_default_is_two(self):
-        bridge = load_bridge()
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            runner = lambda *args, **kwargs: SimpleNamespace(returncode=1, stdout="", stderr="")
-            with patch.dict(os.environ, {}, clear=True):
-                env = bridge._bridge_environment("python3", root, root, runner=runner)
-        self.assertEqual(env["MAX_SEMANTIC_REPAIR_ATTEMPTS"], "2")
-
-    def test_explicit_override_is_preserved(self):
-        bridge = load_bridge()
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            runner = lambda *args, **kwargs: SimpleNamespace(returncode=1, stdout="", stderr="")
-            with patch.dict(os.environ, {"MAX_SEMANTIC_REPAIR_ATTEMPTS": "5"}, clear=True):
-                env = bridge._bridge_environment("python3", root, root, runner=runner)
-        self.assertEqual(env["MAX_SEMANTIC_REPAIR_ATTEMPTS"], "5")
-
     def test_two_distinct_repairs_can_be_followed_by_pass(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)

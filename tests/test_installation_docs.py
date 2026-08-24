@@ -16,8 +16,6 @@ class InstallationDocumentationTests(unittest.TestCase):
         self.assertIn("autodev repo doctor", installation)
         self.assertIn("autodev queue next", installation)
         self.assertIn("autodev queue reconcile", queue)
-        self.assertNotIn("python .opencode/autodev.py queue", queue)
-        self.assertNotIn("python3 .opencode/autodev.py queue", queue)
 
     def test_installation_docs_define_ownership_and_opencode_config_authority(self):
         installation = (REPO_ROOT / "docs" / "installation.md").read_text(encoding="utf-8")

@@ -145,35 +145,6 @@ class ProviderAgnosticTests(unittest.TestCase):
             self.assertTrue(profile["roles"][role]["free_only"])
             self.assertEqual(profile["roles"][role]["api_key_env"], "OPENROUTER_API_KEY")
 
-    def test_windows_and_linux_delegate_profile_roles_to_python(self):
-        windows = (REPO_ROOT / "windows" / "scripts" / "issue-to-pr-cycle.ps1").read_text(encoding="utf-8")
-        linux = (REPO_ROOT / "linux" / "scripts" / "issue-to-pr-cycle.sh").read_text(encoding="utf-8")
-
-        for script in (windows, linux):
-            self.assertIn("provider-profile", script.casefold())
-            self.assertIn("automation.prompt_runner", script)
-            self.assertIn("automation.provider_preflight", script)
-            self.assertNotIn("must be command or ollama", script.casefold())
-        self.assertIn('Role "fixer"', windows)
-        self.assertIn("run_provider_prompt fixer", linux)
-        self.assertIn("PlannerProviderMode", windows)
-        self.assertIn("AgentProviderMode", windows)
-        self.assertIn("planner_provider_mode", linux)
-        self.assertIn("agent_provider_mode", linux)
-
-    def test_windows_and_linux_prepare_forward_the_provider_profile(self):
-        windows_prepare = (
-            REPO_ROOT / "windows" / "scripts" / "codex-prepare-next-ready-issue.ps1"
-        ).read_text(encoding="utf-8")
-        linux_prepare = (
-            REPO_ROOT / "linux" / "scripts" / "prepare-next-ready-issue.sh"
-        ).read_text(encoding="utf-8")
-
-        self.assertIn("prepare_planner_prompt.py", windows_prepare)
-        self.assertIn("ProviderProfile", windows_prepare)
-        self.assertIn("--provider-profile", linux_prepare)
-        self.assertIn("prepare_planner_prompt.py", linux_prepare)
-
 
 if __name__ == "__main__":
     unittest.main()

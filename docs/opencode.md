@@ -9,10 +9,10 @@ Normal OpenCode execution does **not** require the Windows PowerShell issue-to-P
 From an AutoDev checkout, the canonical complete install/update command is:
 
 ```text
-python -m automation.opencode_install --target-repo <TARGET_REPOSITORY>
+autodev repo install --repo <TARGET_REPOSITORY>
 ```
 
-Use `python3` instead of `python` where that is the installed command. The older `python -m automation.opencode_adapter install` command is deprecated; it remains only as a compatibility shim and delegates to `automation.opencode_install` so it cannot silently install a smaller asset set.
+Use `python3` instead of `python` where that is the installed command. The older `autodev repo install` command is deprecated; it remains only as a compatibility shim and delegates to `automation.opencode_install` so it cannot silently install a smaller asset set.
 
 Examples:
 
@@ -20,8 +20,7 @@ Examples:
 
 ```powershell
 cd C:\source\AutoDev
-python -m automation.opencode_install `
-  --target-repo C:\source\repos\TARGET_REPOSITORY
+autodev repo install --repo C:\source\repos\TARGET_REPOSITORY
 
 cd C:\source\repos\TARGET_REPOSITORY
 opencode
@@ -31,9 +30,7 @@ opencode
 
 ```bash
 cd ~/src/AutoDev
-python3 -m automation.opencode_install \
-  --target-repo ~/src/TARGET_REPOSITORY \
-  --python python3
+autodev repo install --repo ~/src/TARGET_REPOSITORY
 
 cd ~/src/TARGET_REPOSITORY
 opencode
@@ -128,7 +125,7 @@ python .opencode/autodev.py stage --name ready
 
 Use `python3` instead only where that is the available Python command. Models are not expected to invent bridge verbs or abbreviated subcommands.
 
-The bridge reads `.opencode/autodev.json`, adds the configured AutoDev checkout to `PYTHONPATH`, and invokes `automation.opencode_adapter` with the configured Python command.
+Installed OpenCode commands invoke the user-level `autodev` CLI directly; repository-local Python bridge configuration is not part of the canonical runtime.
 
 The stage API returns compact JSON outcomes:
 

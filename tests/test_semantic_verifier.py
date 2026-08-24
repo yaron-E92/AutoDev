@@ -242,20 +242,6 @@ class SemanticVerifierTests(unittest.TestCase):
 
 
 
-    def test_windows_and_linux_gate_before_pr_and_reverify_after_ci_repair(self):
-        windows = (REPO_ROOT / "windows" / "scripts" / "issue-to-pr-cycle.ps1").read_text(encoding="utf-8")
-        linux = (REPO_ROOT / "linux" / "scripts" / "issue-to-pr-cycle.sh").read_text(encoding="utf-8")
-
-        self.assertIn('VerifierFormat "semantic-json"', windows)
-        self.assertIn("automation.semantic_cli", windows)
-        self.assertLess(windows.index("Invoke-SemanticGate"), windows.index("Invoke-PrAndCiWithRepairs"))
-        self.assertIn("$semanticCode = Invoke-SemanticGate", windows)
-
-        self.assertIn("semantic-json", linux)
-        self.assertIn("automation.semantic_cli", linux)
-        self.assertLess(linux.index("semantic_gate"), linux.index("pr_and_ci_with_repairs"))
-        self.assertIn("semantic_gate || return", linux)
-
 
 if __name__ == "__main__":
     unittest.main()

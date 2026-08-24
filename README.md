@@ -2,6 +2,8 @@
 
 A local, user-level automation setup that lets the **Codex desktop app** process GitHub issues into pull requests.
 
+Planned first-class CLI capabilities also include turning rough task descriptions into structured GitHub issues. The previous standalone helper was retired during the canonical-CLI cleanup; the capability itself remains on the product roadmap and will be redesigned as an `autodev` command.
+
 The final architecture intentionally avoids the traps we hit along the way:
 
 - no nested `codex exec`

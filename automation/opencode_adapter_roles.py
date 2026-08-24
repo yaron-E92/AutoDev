@@ -125,7 +125,7 @@ def prepare_role(
         prompt += (
             "\n\nAutoDev deterministic output contract:\n"
             "Apply only this repair. Do not create workflow state, commits, branches, PRs, or issue mutations. "
-            "Run exactly `python .opencode/autodev.py accept --role fixer` when the targeted edit is complete.\n"
+            "Run exactly `autodev accept --role fixer` when the targeted edit is complete.\n"
         )
         path = current / "fixer.md"
     elif role == "verifier":

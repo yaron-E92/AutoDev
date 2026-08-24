@@ -97,59 +97,6 @@ class RepoSetupTests(unittest.TestCase):
             )
             self.assertFalse(any(call[1:3] == ["issue", "edit"] for call in fake.calls))
 
-    def test_legacy_mixed_layout_migrates_without_touching_user_content_or_active_run(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            repo = make_repo(Path(temp_dir))
-            fake = RepoSetupGitHub()
-            legacy = repo / ".opencode" / "autodev.json"
-            legacy.parent.mkdir(parents=True)
-            legacy.write_text(
-                json.dumps(
-                    {
-                        "version": 1,
-                        "autodev_root": str(REPO_ROOT),
-                        "python": "python3",
-                    }
-                ),
-                encoding="utf-8",
-            )
-            user_asset = repo / ".opencode" / "my-command.md"
-            user_asset.write_text("user-owned", encoding="utf-8")
-            opencode_config = repo / "opencode.jsonc"
-            opencode_config.write_text('{"agent":{"autodev-reader":{"model":"local/test"}}}\n', encoding="utf-8")
-            state = repo / ".autodev-run" / "current" / "state.json"
-            state.parent.mkdir(parents=True)
-            state.write_text('{"IssueNumber":42}\n', encoding="utf-8")
-
-            result = repo_setup.install_repo(
-                repo,
-                github_repo=fake.repo,
-                enable_opencode=True,
-                autodev_root=REPO_ROOT,
-                python_command="python3",
-                runner=fake,
-            )
-
-            self.assertFalse(legacy.exists())
-            self.assertIn(".opencode/autodev.json", result.removed_legacy)
-            self.assertEqual(user_asset.read_text(encoding="utf-8"), "user-owned")
-            self.assertIn("local/test", opencode_config.read_text(encoding="utf-8"))
-            self.assertEqual(json.loads(state.read_text(encoding="utf-8"))["IssueNumber"], 42)
-            self.assertTrue((repo / ".opencode" / "autodev.py").is_file())
-            self.assertTrue((repo / ".opencode" / "autodev.ps1").is_file())
-            for name in (
-                "autodev-reader.md",
-                "autodev-synthesizer.md",
-                "autodev-planner.md",
-                "autodev-implementer.md",
-                "autodev-fixer.md",
-                "autodev-verifier.md",
-                "autodev-coordinator.md",
-            ):
-                text = (repo / ".opencode" / "agents" / name).read_text(encoding="utf-8")
-                self.assertNotIn(".opencode/autodev.json", text)
-                self.assertIn("autodev", text)
-
     def test_doctor_is_healthy_for_installed_non_opencode_repo_and_reports_grants_without_secrets(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = make_repo(Path(temp_dir))

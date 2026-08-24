@@ -7,35 +7,14 @@ OPEN_CODE_ROOT = REPO_ROOT / "integrations" / "opencode"
 
 
 class OpenCodeResumeGuardrailTests(unittest.TestCase):
-    def test_resume_command_uses_installer_launcher_without_shell_fallbacks(self):
+    def test_resume_command_is_display_only_frontend_for_canonical_cli(self):
         text = (OPEN_CODE_ROOT / "commands" / "autodev-resume.md").read_text(encoding="utf-8")
-        self.assertIn("use its non-empty `python` field as the exact launcher", text)
-        self.assertIn("Do not probe `python`, `python3`", text)
-        self.assertIn("python .opencode/autodev.py resume", text)
-        self.assertIn("do not try alternate shell commands", text)
-        self.assertNotIn("use `python3` instead where required", text)
-
-    def test_resume_command_makes_bridge_boundary_authoritative(self):
-        text = (OPEN_CODE_ROOT / "commands" / "autodev-resume.md").read_text(encoding="utf-8")
-        self.assertIn("sole authority for the continuation boundary", text)
-        self.assertIn("Never infer a completed role", text)
-        self.assertIn("invent a Task ID", text)
-        self.assertIn("do not continue manually", text)
-
-    def test_resume_command_revalidates_durable_progress_after_role_tasks(self):
-        text = (OPEN_CODE_ROOT / "commands" / "autodev-resume.md").read_text(encoding="utf-8")
-        self.assertIn("After every delegated role Task", text)
-        self.assertIn("do not trust the Task UI checkmark", text)
-        self.assertIn("role-check --role <role>", text)
-        self.assertIn("JSON state `ACCEPTED`", text)
-        self.assertIn("`MISSING`, `STALE`", text)
-
-    def test_resume_command_requires_explicit_terminal_state(self):
-        text = (OPEN_CODE_ROOT / "commands" / "autodev-resume.md").read_text(encoding="utf-8")
-        self.assertIn("exactly one explicit final state", text)
-        self.assertIn("`PR_READY`, `BLOCKED`, or `FAILED`", text)
-        self.assertIn("Never merge the pull request", text)
-
+        self.assertIn('autodev coordinate --resume', text)
+        self.assertIn('--interactive-consent', text)
+        self.assertIn('display-only', text)
+        self.assertIn('owned entirely by Python', text)
+        self.assertNotIn('.opencode/autodev.py', text)
+        self.assertNotIn('.opencode/autodev.json', text)
     def test_reader_consumes_python_prepared_bundle_without_repository_discovery_tools(self):
         text = (OPEN_CODE_ROOT / "agents" / "autodev-reader.md").read_text(encoding="utf-8")
         self.assertIn('permission:\n  "*": deny', text)
