@@ -29,6 +29,7 @@ class ReleasePackagingTests(unittest.TestCase):
         self._git(repo, "config", "user.name", "AutoDev Tests")
         files = {
             "automation/example.py": "print('common')\n",
+            "docs/installation.md": "# Install AutoDev\n",
             "windows/scripts/example.ps1": "Write-Output 'windows'\n",
         }
         for relative, content in files.items():
@@ -63,6 +64,10 @@ class ReleasePackagingTests(unittest.TestCase):
                     archive.read("automation/example.py"),
                     b"print('common')\n",
                 )
+                self.assertEqual(
+                    archive.read("docs/installation.md"),
+                    b"# Install AutoDev\n",
+                )
 
     def test_manifest_lists_file_and_archive_hashes(self) -> None:
         temp, repo, commit = self._repo()
@@ -74,8 +79,13 @@ class ReleasePackagingTests(unittest.TestCase):
             self.assertEqual(manifest["commit_sha"], commit)
             self.assertEqual(set(manifest["bundles"]), {"common", "windows"})
             common_files = manifest["bundles"]["common"]["files"]
-            self.assertEqual(common_files[0]["path"], "automation/example.py")
-            self.assertEqual(len(common_files[0]["sha256"]), 64)
+            common_paths = {entry["path"] for entry in common_files}
+            self.assertIn("automation/example.py", common_paths)
+            self.assertIn("docs/installation.md", common_paths)
+            automation_entry = next(
+                entry for entry in common_files if entry["path"] == "automation/example.py"
+            )
+            self.assertEqual(len(automation_entry["sha256"]), 64)
             self.assertEqual(len(manifest["bundles"]["common"]["sha256"]), 64)
 
     def test_requested_commit_must_match_checkout(self) -> None:
