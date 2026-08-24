@@ -74,50 +74,92 @@ jobs:
       - name: Retarget facade consumers to owner modules
         run: python scripts/issue_181_remove_remaining_facades.py
 
-      - name: Retarget residual test module seams
+      - name: Retarget facade-free monkeypatch ownership
         shell: bash
         run: |
           python - <<'PY'
           from pathlib import Path
+          import re
 
-          privacy = Path('tests/test_privacy_grants.py')
-          text = privacy.read_text(encoding='utf-8')
-          text = text.replace(
-              '"automation.privacy_grants.sys.stdin"',
-              '"automation.privacy_grant_hooks.sys.stdin"',
-          )
-          marker = '    def test_privacy_consent_cli_refuses_headless_creation(self):\n'
+          def rewrite(path: str, replacements: tuple[tuple[str, str], ...]) -> None:
+              target = Path(path)
+              text = target.read_text(encoding='utf-8')
+              for old, new in replacements:
+                  text = text.replace(old, new)
+              target.write_text(text, encoding='utf-8')
+
+          rewrite('tests/test_execution_classification_hooks.py', (
+              ('execution_classification_hooks.issue_queue', 'execution_classification_hooks.queue_github'),
+              ('execution_classification_evidence.issue_queue', 'execution_classification_evidence.queue_github'),
+          ))
+
+          rewrite('tests/test_queue_claim_selection.py', (
+              ('patch.object(\n                queue_selection.issue_queue,', 'patch.object(\n                queue_selection,'),
+          ))
+
+          path = Path('tests/test_role_workflow_hooks.py')
+          text = path.read_text(encoding='utf-8')
+          if 'repair_budget_resume.' in text and 'from automation import repair_budget_resume' not in text:
+              marker = 'from __future__ import annotations\n'
+              text = text.replace(marker, marker + '\nfrom automation import repair_budget_resume\n', 1)
+          path.write_text(text, encoding='utf-8')
+
+          path = Path('tests/test_distributed_claims.py')
+          text = path.read_text(encoding='utf-8')
+          marker = '    def test_stale_reconcile_restores_running_label_when_claim_cas_loses(self):\n'
           start = text.find(marker)
-          end = text.find('\n    def ', start + len(marker))
-          if start < 0:
-              raise SystemExit('privacy CLI test marker missing')
-          if end < 0:
-              end = text.find('\n\nif __name__', start)
+          end = text.find('\n\nif __name__', start)
+          if start < 0 or end < 0:
+              raise SystemExit('distributed claim stale-reconcile test marker missing')
           section = text[start:end]
-          section = section.replace(
-              '"automation.privacy_grant_hooks.sys.stdin"',
-              '"automation.privacy_grant_cli.sys.stdin"',
-          )
+          section = section.replace('patch.object(claim_repository, "list_claims"', 'patch.object(claim_recovery, "list_claims"')
+          section = section.replace('patch.object(\n            claim_repository,\n            "_delete_with_lease"', 'patch.object(\n            claim_recovery,\n            "_delete_with_lease"')
           text = text[:start] + section + text[end:]
-          privacy.write_text(text, encoding='utf-8')
+          if 'claim_recovery.' in text and 'from automation import claim_recovery' not in text:
+              marker = 'from __future__ import annotations\n'
+              text = text.replace(marker, marker + '\nfrom automation import claim_recovery\n', 1)
+          path.write_text(text, encoding='utf-8')
 
-          scheduler = Path('tests/test_scheduler_health.py')
-          text = scheduler.read_text(encoding='utf-8')
-          for old, new in (
-              ('scheduler_health.queue_workflow.', 'queue_workflow.'),
-              ('scheduler_health.queue_github.', 'queue_github.'),
-              ('scheduler_health.queue_selection.', 'queue_selection.'),
-              ('scheduler_health.scheduler.', 'scheduler.'),
-          ):
-              text = text.replace(old, new)
-          scheduler.write_text(text, encoding='utf-8')
+          path = Path('tests/test_scheduler_claims.py')
+          text = path.read_text(encoding='utf-8')
+          owners = {
+              'load_claim_policy': 'claim_identity',
+              'worker_identity': 'claim_identity',
+              'reconcile_stale_claims': 'claim_recovery',
+              'HeartbeatLease': 'claim_lease',
+              'list_claims': 'claim_repository',
+              'acquire_claim': 'claim_lease',
+              'release_claim': 'claim_lease',
+          }
+          for symbol, owner in owners.items():
+              text = re.sub(
+                  rf'scheduler\.distributed_claims(\s*,\s*["\']{symbol}["\'])',
+                  rf'scheduler.{owner}\1',
+                  text,
+              )
+          path.write_text(text, encoding='utf-8')
 
-          provider = Path('tests/test_provider_agnostic.py')
-          text = provider.read_text(encoding='utf-8').replace(
-              'automation/model_providers.py',
-              'automation/provider_factory.py',
+          path = Path('tests/test_scheduler_health.py')
+          text = path.read_text(encoding='utf-8')
+          replacements = (
+              ('patch.object(scheduler_health.issue_queue, "inspect_queue"', 'patch.object(queue_workflow, "inspect_queue"'),
+              ('patch.object(\n        scheduler_health.issue_queue,\n        "list_issues"', 'patch.object(\n        queue_github,\n        "list_issues"'),
+              ('patch.object(\n        scheduler_health.queue_selection,', 'patch.object(\n        queue_selection,'),
+              ('patch.object(\n            scheduler_health.scheduler,', 'patch.object(\n            scheduler,'),
           )
-          provider.write_text(text, encoding='utf-8')
+          for old, new in replacements:
+              text = text.replace(old, new)
+          needed = []
+          if 'queue_workflow.' in text:
+              needed.append('queue_workflow')
+          if 'queue_github.' in text:
+              needed.append('queue_github')
+          if needed:
+              marker = 'from __future__ import annotations\n'
+              missing = [name for name in needed if not re.search(rf'from automation import[^\n]*\b{name}\b', text)]
+              if missing:
+                  text = text.replace(marker, marker + '\nfrom automation import ' + ', '.join(missing) + '\n', 1)
+          path.write_text(text, encoding='utf-8')
           PY
 
       - name: Compile maintained Python
