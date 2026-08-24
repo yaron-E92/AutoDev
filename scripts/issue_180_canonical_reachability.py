@@ -45,13 +45,16 @@ for name, path in modules.items():
 
 roots = ["automation.autodev_cli"]
 reachable: set[str] = set()
+parent: dict[str, str] = {}
 queue = deque(roots)
 while queue:
     current = queue.popleft()
     if current in reachable or current not in modules:
         continue
     reachable.add(current)
-    queue.extend(sorted(graph[current] - reachable))
+    for dependency in sorted(graph[current] - reachable):
+        parent.setdefault(dependency, current)
+        queue.append(dependency)
 
 print("=== CANONICAL ROOTS ===")
 for root in roots:
@@ -62,6 +65,42 @@ for name in sorted(reachable):
 print("=== UNREACHABLE MODULES ===")
 for name in sorted(set(modules) - reachable):
     print(name)
+
+print("=== SUSPICIOUS REACHABILITY PATHS ===")
+interesting_prefixes = (
+    "automation.opencode_coord",
+    "automation.opencode_coordinator",
+    "automation.role_coord",
+    "automation.role_coordinator",
+    "automation.run_real_issue",
+    "automation.issue_runner",
+    "automation.opencode_adapter",
+    "automation.workflow_stages_core",
+    "automation.workflow_stage_legacy",
+    "area_reader",
+)
+for name in sorted(reachable):
+    if not name.startswith(interesting_prefixes):
+        continue
+    chain = [name]
+    cursor = name
+    seen = {cursor}
+    while cursor not in roots and cursor in parent:
+        cursor = parent[cursor]
+        if cursor in seen:
+            break
+        seen.add(cursor)
+        chain.append(cursor)
+    chain.reverse()
+    print(" -> ".join(chain))
+
+print("=== DIRECT REVERSE IMPORTERS ===")
+for target in sorted(modules):
+    if not target.startswith(interesting_prefixes):
+        continue
+    importers = sorted(name for name, deps in graph.items() if target in deps)
+    if importers:
+        print(f"{target}: {', '.join(importers)}")
 
 print("=== NON-PYTHON PATH REFERENCES FROM REACHABLE MODULES ===")
 path_pattern = re.compile(r"(?:scripts|linux|windows|integrations|\.github)/[A-Za-z0-9_./@{}$()\[\]-]+")
