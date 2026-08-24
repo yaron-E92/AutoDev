@@ -11,6 +11,8 @@ python -m compileall -q automation area_reader tests
 python -m unittest discover -s tests -v
 ```
 
+These are **source-development checks**, not end-user `autodev` subcommands. The public CLI deliberately keeps contributor-only helpers out of normal command discovery; `autodev --help` points contributors back to these checks without advertising internal workflow commands.
+
 Also run the relevant platform or workflow checks for files you touched. CI covers the supported Linux/Windows Python matrix, canonical CLI smoke tests, PowerShell/Bash syntax, workflow lint and immutable external action refs, release reproducibility, version intent, repository hygiene, and exact-source Windows verification.
 
 ## Architecture rules
@@ -33,8 +35,10 @@ Python owns deterministic sequencing, durable state, resume decisions, verificat
 The canonical command for a normal issue run is:
 
 ```text
-autodev coordinate --arguments 123
+autodev issue-to-pr 123
 ```
+
+`autodev coordinate --arguments 123` remains the advanced/integration spelling over the same coordinator, but it is not the normal user-facing entrypoint.
 
 Resume with:
 
