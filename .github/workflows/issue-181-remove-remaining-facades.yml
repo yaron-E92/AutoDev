@@ -23,6 +23,29 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 0
 
+      - name: Include accidental model-provider exports in migration map
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/issue_181_remove_remaining_facades.py')
+          text = path.read_text(encoding='utf-8')
+          marker = '        "with_headroom_role": "provider_headroom",\n'
+          addition = marker + ''.join(
+              f'        "{name}": "headroom",\n'
+              for name in (
+                  'HeadroomConfig',
+                  'HeadroomError',
+                  'headroom_config_from_values',
+                  'prepare_prompt',
+                  'proxy_headers',
+              )
+          )
+          if marker not in text:
+              raise SystemExit('model-provider mapping marker missing')
+          path.write_text(text.replace(marker, addition, 1), encoding='utf-8')
+          PY
+
       - name: Retarget facade consumers to owner modules
         run: python scripts/issue_181_remove_remaining_facades.py
 
