@@ -35,4 +35,12 @@ integration_text = integration_text.replace(
     "def test_opencode_adapter_has_no_windows_workflow_backend(self):",
     "def test_opencode_workflow_adapter_has_no_windows_workflow_backend(self):",
 )
+integration_text = integration_text.replace(
+    '"automation.opencode_adapter.workflow_stages.execute_stage"',
+    '"automation.opencode_adapter_workflow.workflow_stages.execute_stage"',
+)
+integration_text = integration_text.replace(
+    '"automation.opencode_adapter.workflow_stages.ensure_prepared_issue"',
+    '"automation.opencode_adapter_protocol.workflow_stages.ensure_prepared_issue"',
+)
 integration.write_text(integration_text, encoding="utf-8")
