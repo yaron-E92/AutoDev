@@ -35,7 +35,7 @@ body = r'''
             self.assertTrue((target / ".opencode" / "commands" / "autodev-issue-to-pr.md").is_file())
             self.assertTrue((target / ".opencode" / "agents" / "autodev-coordinator.md").is_file())
 '''
-text, count = pattern.subn(body.rstrip() + "\n", text, count=1)
+text, count = pattern.subn(lambda _match: body.rstrip() + "\n", text, count=1)
 if count != 1:
     raise SystemExit("generated idempotent installer test not found")
 path.write_text(text, encoding="utf-8")
