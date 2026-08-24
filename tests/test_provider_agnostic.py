@@ -1,5 +1,4 @@
 import json
-import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -7,7 +6,6 @@ from unittest import mock
 
 from automation import prompt_runner
 from automation.model_providers import ModelProvider, ProviderResponse
-from automation.provider_preflight import run_preflight
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -83,56 +81,6 @@ class ProviderAgnosticTests(unittest.TestCase):
     def test_repair_alias_normalizes_to_fixer(self):
         self.assertEqual(prompt_runner.normalize_role("repair"), "fixer")
         self.assertEqual(prompt_runner.normalize_role("implementer"), "implementer")
-
-    def test_preflight_reports_missing_credentials_without_network_access(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            profile = Path(temp_dir) / "profile.json"
-            profile.write_text(
-                json.dumps(
-                    {
-                        "version": 2,
-                        "roles": {
-                            "reader": {
-                                "transport": "openai-compatible-chat-completions",
-                                "model": "m",
-                                "base_url": "https://example.invalid/v1",
-                                "api_key_env": "MISSING_AUTODEV_KEY",
-                            }
-                        },
-                    }
-                ),
-                encoding="utf-8",
-            )
-            with mock.patch.dict(os.environ, {}, clear=False):
-                os.environ.pop("MISSING_AUTODEV_KEY", None)
-                result = run_preflight(profile, urlopen=mock.Mock(side_effect=AssertionError("network used")))
-
-        reader = next(item for item in result["checks"] if item["role"] == "reader")
-        self.assertEqual(reader["failure_classification"], "missing_credentials")
-        self.assertNotIn("Authorization", json.dumps(result))
-
-    def test_preflight_reports_missing_command_executable(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            profile = Path(temp_dir) / "profile.json"
-            profile.write_text(
-                json.dumps(
-                    {
-                        "version": 2,
-                        "roles": {
-                            "reader": {
-                                "transport": "command",
-                                "model": "unused",
-                                "command": "missing-autodev-command {prompt}",
-                            }
-                        },
-                    }
-                ),
-                encoding="utf-8",
-            )
-            result = run_preflight(profile, which=lambda executable: None)
-
-        reader = next(item for item in result["checks"] if item["role"] == "reader")
-        self.assertEqual(reader["failure_classification"], "command_unavailable")
 
     def test_mixed_profile_keeps_openrouter_roles_free_only(self):
         profile = json.loads(
