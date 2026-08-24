@@ -24,7 +24,9 @@ jobs:
           fetch-depth: 0
 
       - name: Remove adapter facade and legacy runner
-        run: python scripts/issue_180_remove_legacy_runner.py
+        run: |
+          python scripts/issue_180_remove_legacy_runner_patch.py
+          python scripts/issue_180_remove_legacy_runner.py
 
       - name: Compile canonical Python
         run: python -m compileall -q automation area_reader tests
