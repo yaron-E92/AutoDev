@@ -1,0 +1,49 @@
+name: Issue 181 remove legacy verifier path
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Remove duplicate legacy verifier path
+        run: python scripts/issue_181_remove_legacy_verifier.py
+
+      - name: Compile maintained Python
+        run: python -m compileall -q automation area_reader tests
+
+      - name: Run full unit suite
+        run: python -m unittest discover -s tests -v
+
+      - name: Reject duplicate verifier compatibility path
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git grep -n -E 'render_legacy_verifier|CiPassedVerifierPromptRendered|Legacy PASS/FAIL|_LEGACY_ONLY_PLACEHOLDERS|def install\(core\)' -- automation tests promptTemplates; then
+            echo 'Legacy verifier compatibility path remains.' >&2
+            exit 1
+          fi
+
+      - name: Commit verified verifier cleanup
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add -A automation tests promptTemplates
+          git reset -- scripts/issue_181_remove_legacy_verifier.py || true
+          git diff --cached --check
+          if git diff --cached --quiet; then exit 0; fi
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m 'refactor: remove duplicate legacy verifier path'
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
