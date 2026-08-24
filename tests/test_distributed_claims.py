@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import automation.claim_recovery as claim_recovery
-
 from automation import claim_contract, claim_identity, claim_lease, claim_recovery, claim_repository
 
 import json
@@ -344,7 +342,7 @@ class DistributedClaimPolicyTests(unittest.TestCase):
             )
             self.assertEqual(identity.worker_id, "mega-beast")
 
-    def test_queue_claim_policy_is_bounded_and_backwards_compatible(self):
+    def test_queue_claim_policy_defaults_when_optional_fields_are_omitted(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
             (repo / ".autodev").mkdir()
@@ -369,9 +367,9 @@ class DistributedClaimPolicyTests(unittest.TestCase):
                 json.dumps({"version": 1, "autonomous_execution": True}),
                 encoding="utf-8",
             )
-            legacy = claim_identity.load_claim_policy(repo)
-            self.assertEqual(legacy.max_concurrent_issues, 1)
-            self.assertEqual(legacy.lease_minutes, 120)
+            defaults = claim_identity.load_claim_policy(repo)
+            self.assertEqual(defaults.max_concurrent_issues, 1)
+            self.assertEqual(defaults.lease_minutes, 120)
 
     def test_stale_reconcile_restores_running_label_when_claim_cas_loses(self):
         stale = claim_contract.Claim(
@@ -387,7 +385,7 @@ class DistributedClaimPolicyTests(unittest.TestCase):
             sha="a" * 40,
         )
         label_calls: list[bool] = []
-        with patch.object(claim_recovery, "list_claims", return_value=(stale,)), patch.object(claim_repository, "_delete_with_lease",
+        with patch.object(claim_recovery, "list_claims", return_value=(stale,)), patch.object(claim_recovery, "_delete_with_lease",
             return_value=False,
         ), patch.object(claim_recovery, "_set_running_label",
             side_effect=lambda *_args, enabled, **_kwargs: label_calls.append(enabled) or True,
