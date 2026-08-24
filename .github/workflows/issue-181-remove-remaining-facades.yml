@@ -94,6 +94,9 @@ jobs:
           replace('tests/test_queue_claim_selection.py', (
               ('patch.object(\n                queue_selection.issue_queue,', 'patch.object(\n                queue_selection,'),
           ))
+          replace('tests/test_provider_agnostic.py', (
+              ('automation/model_providers.py', 'automation/provider_factory.py'),
+          ))
 
           path = Path('tests/test_privacy_grants.py')
           text = path.read_text(encoding='utf-8')
