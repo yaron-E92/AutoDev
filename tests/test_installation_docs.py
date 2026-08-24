@@ -25,7 +25,8 @@ class InstallationDocumentationTests(unittest.TestCase):
         self.assertIn(".opencode/", installation)
         self.assertIn("opencode.jsonc", installation)
         self.assertIn("remains authoritative", installation)
-        self.assertIn("temporary compatibility shim", installation)
+        self.assertNotIn("temporary compatibility shim", installation)
+        self.assertNotIn(".opencode/autodev.json", installation)
 
 
 if __name__ == "__main__":
