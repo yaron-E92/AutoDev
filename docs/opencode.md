@@ -42,30 +42,33 @@ autodev resume
 
 AutoDev never merges the resulting PR automatically.
 
-## Role model mapping
+## Agent model mapping
 
-Configure models through normal OpenCode configuration:
+OpenCode exposes seven AutoDev agent mappings: the coordinator frontend plus the six workflow roles. Configure any of them through normal OpenCode configuration:
 
 ```json
 {
   "agent": {
+    "autodev-coordinator": { "model": "provider/coordinator-model" },
     "autodev-reader": { "model": "provider/reader-model" },
+    "autodev-synthesizer": { "model": "provider/synthesizer-model" },
     "autodev-planner": { "model": "provider/planner-model" },
     "autodev-implementer": { "model": "provider/implementer-model" },
+    "autodev-fixer": { "model": "provider/fixer-model" },
     "autodev-verifier": { "model": "provider/verifier-model" }
   }
 }
 ```
 
-Roles may be mapped independently. Unmapped roles inherit normal OpenCode configuration. AutoDev rejects unsupported ad-hoc per-run model overrides instead of creating a competing model-routing layer.
+Mappings may be configured independently. Unmapped agents inherit according to the OpenCode/AutoDev resolution contract. The coordinator's model does not make it the owner of workflow state: Python still decides deterministic transitions and validates durable role acceptance before advancing.
 
-Use `/autodev-models` when installed or `autodev models` from the shell to inspect the effective safe role/model mapping.
+AutoDev rejects unsupported ad-hoc per-run model overrides instead of creating a competing model-routing layer. Use `/autodev-models` when installed or `autodev models` from the shell to inspect the effective safe mapping and inheritance source.
 
 ## Role boundaries
 
-Python prepares bounded role input, launches the selected runtime/agent, validates the role output/acceptance record, and only then advances. A zero exit code without a valid accepted artifact is not success.
+Python prepares bounded workflow-role input, launches the selected runtime/agent, validates the role output/acceptance record, and only then advances. A zero exit code without a valid accepted artifact is not success.
 
-Standalone OpenCode role commands remain available for deliberate intervention/debugging:
+Standalone OpenCode role commands remain available for deliberate intervention/debugging where a public frontend exists:
 
 ```text
 /autodev-read 123
@@ -75,7 +78,7 @@ Standalone OpenCode role commands remain available for deliberate intervention/d
 /autodev-verify 123
 ```
 
-They are not substitutes for the normal `issue-to-pr` coordinator when a complete autonomous run is desired.
+Synthesis is part of the coordinated workflow and does not have a separate public OpenCode command. The standalone role commands above are not substitutes for the normal `issue-to-pr` coordinator when a complete autonomous run is desired.
 
 ## Privacy
 
@@ -85,7 +88,7 @@ Persistent privacy grants are explicit, scoped, revocable, and user-local. Headl
 
 ## Prompt policy and Headroom
 
-AutoDev applies its role-specific prompt policy while preparing role context. Headroom is optional and may compress only known evidence ranges. Neither mechanism changes OpenCode's model mapping.
+AutoDev applies its role-specific prompt policy while preparing workflow-role context. Headroom is optional and may compress only known evidence ranges on provider paths where AutoDev actually owns that transport. Neither mechanism changes OpenCode's agent/model mapping.
 
 See [`model-roles.md`](model-roles.md) and [`headroom.md`](headroom.md).
 
