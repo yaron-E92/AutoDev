@@ -1,1 +1,0 @@
-temporary checkpoint marker; removed with issue #181 scaffolding
