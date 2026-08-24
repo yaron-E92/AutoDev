@@ -11,6 +11,7 @@ PUBLIC_DOCS = (
     "docs/installation.md",
     "docs/model-roles.md",
     "docs/opencode.md",
+    "docs/privacy.md",
     "docs/releases.md",
     "docs/scheduler.md",
     "docs/windows-verification.md",
@@ -65,6 +66,20 @@ class DocumentationContractTests(unittest.TestCase):
             self.assertIn(role, roles)
         self.assertIn("autodev models", roles)
         self.assertNotIn("`automation.opencode_adapter_models`", roles)
+
+    def test_privacy_guide_uses_time_bounded_revocable_grants(self) -> None:
+        privacy = self._read("docs/privacy.md")
+        for command in (
+            "autodev privacy consent",
+            "autodev privacy status",
+            "autodev privacy revoke <grant-id>",
+            "autodev privacy revoke --all",
+        ):
+            self.assertIn(command, privacy)
+        for duration in ("24h", "7d", "30d", "until-revoked"):
+            self.assertIn(duration, privacy)
+        self.assertIn("headless or scheduled run can consume a matching active grant", privacy)
+        self.assertNotIn("AUTODEV_PRIVACY_CONSENT", privacy)
 
     def test_release_guide_matches_current_packager_outputs(self) -> None:
         releases = self._read("docs/releases.md")
