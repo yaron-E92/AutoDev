@@ -55,7 +55,7 @@ jobs:
           test ! -e automation/semantic_verifier.py
           test ! -e automation/windows_verification.py
           test ! -e automation/opencode_resume.py
-          if grep -R -n -E 'automation\.(semantic_verifier|windows_verification|opencode_resume)([^A-Za-z0-9_]|$)|from automation import (semantic_verifier|windows_verification|opencode_resume)([^A-Za-z0-9_]|$)' automation tests --include='*.py'; then
+          if grep -R -n -E 'automation\.(semantic_verifier|windows_verification|opencode_resume)([^A-Za-z0-9_]|$)|from automation import (semantic_verifier|windows_verification|opencode_resume)([^A-Za-z0-9_]|$)' automation tests linux windows --include='*.py' --include='*.sh' --include='*.ps1'; then
             echo 'removed facade references remain' >&2
             exit 1
           fi
@@ -64,7 +64,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git add -A automation tests
+          git add -A automation tests linux windows
           if git diff --cached --quiet; then
             echo "Facade pruning already applied."
           else
