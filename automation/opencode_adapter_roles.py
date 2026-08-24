@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from automation import opencode_resume
-from automation import run_real_issue_core as run_core
 from automation.model_output_sanitizer import sanitize_model_output
 from automation.prompt_policies import compose_prompt, resolve_prompt_policies
 from automation.prompt_runner import (
@@ -34,6 +33,7 @@ from automation.opencode_adapter_contract import (
     role_contracts,
 )
 from automation.opencode_adapter_handoff import (
+    build_planner_prompt_from_area_reader,
     _bounded_result,
     _bounded_text,
     _fixer_source,
@@ -92,7 +92,7 @@ def prepare_role(
         path = current / "synthesizer.md"
     elif role == "planner":
         _write_plan_template(current)
-        prompt = run_core.build_planner_prompt_from_area_reader(
+        prompt = build_planner_prompt_from_area_reader(
             current,
             issue_text,
             str(state.get("LocalCheck", "")),

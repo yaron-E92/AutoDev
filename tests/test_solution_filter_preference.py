@@ -2,13 +2,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from area_reader.workflow import (
-    PREFERRED_SOLUTION_FILTER_MARKERS,
-    build_verification_command_groups,
-    collect_repo_files,
-    detect_repo_facts,
-    preferred_solution_filter,
-)
+from area_reader.settings import PREFERRED_SOLUTION_FILTER_MARKERS
+from area_reader.repository import collect_repo_files, detect_repo_facts
+from area_reader.verification import build_verification_command_groups, preferred_solution_filter
 
 
 def base_facts(**overrides):

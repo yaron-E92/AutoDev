@@ -5,7 +5,6 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from automation import (
-    opencode_adapter,
     opencode_install,
     opencode_role_entrypoint,
     opencode_role_runtime,
@@ -50,7 +49,7 @@ class OpenCodePrivacyRoleEntrypointTests(unittest.TestCase):
             "OpenCodeRoleRuntime",
             return_value=runtime,
         ), patch.object(
-            opencode_adapter,
+            opencode_role_entrypoint.opencode_adapter_roles,
             "prepare_role",
         ) as prepare, patch.object(
             role_coordinator_runtime,
@@ -98,7 +97,7 @@ class OpenCodePrivacyRoleEntrypointTests(unittest.TestCase):
             "OpenCodeRoleRuntime",
             return_value=runtime,
         ), patch.object(
-            opencode_adapter,
+            opencode_role_entrypoint.opencode_adapter_roles,
             "prepare_role",
         ), patch.object(
             role_coordinator_runtime,

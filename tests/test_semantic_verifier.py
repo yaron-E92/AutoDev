@@ -5,10 +5,9 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from automation import prompt_runner, run_real_issue
+from automation import prompt_runner
 from automation.model_providers import ModelConfig, MockProvider, ProviderError
 from automation.prompt_policies import resolve_prompt_policies
-from automation.run_manifest import create_manifest
 from automation.semantic_verifier import (
     SemanticSettings,
     SemanticVerifierError,
@@ -45,27 +44,7 @@ def semantic_result(verdict="pass", status="met", severity=None, repair_brief=""
 
 
 class SemanticVerifierTests(unittest.TestCase):
-    def setUp(self):
-        self._manifest_temp = tempfile.TemporaryDirectory()
-        root = Path(self._manifest_temp.name)
-        repo = root / "repo"
-        repo.mkdir()
-        manifest_path = root / "run-manifest.json"
-        create_manifest(
-            manifest_path,
-            repo_path=repo,
-            github_repo="owner/repo",
-            issue_number=35,
-            mode="implement",
-            base_sha="base-sha",
-            branch="autodev/issue-35-semantic-verifier",
-            role_snapshots={},
-        )
-        self._manifest_token = run_real_issue._ACTIVE_MANIFEST.set(manifest_path)
 
-    def tearDown(self):
-        run_real_issue._ACTIVE_MANIFEST.reset(self._manifest_token)
-        self._manifest_temp.cleanup()
 
     def test_extracts_detectable_acceptance_criteria(self):
         issue = """# Issue
@@ -264,190 +243,8 @@ class SemanticVerifierTests(unittest.TestCase):
             self.assertEqual(json.loads(semantic_output.read_text(encoding="utf-8"))["verdict"], "pass")
             self.assertTrue(legacy_output.read_text(encoding="utf-8").startswith("PASS"))
 
-    def test_operational_gate_uses_independent_verifier_and_writes_final_verdict(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            out_dir = Path(temp_dir)
-            (out_dir / "coder-plan.md").write_text("Plan", encoding="utf-8")
-            (out_dir / "synthesized-handoff.md").write_text("Handoff", encoding="utf-8")
-            (out_dir / "verification-result-summary.md").write_text("Checks passed", encoding="utf-8")
-            (out_dir / "recommended-command-groups.json").write_text("{}", encoding="utf-8")
-            verifier = MockProvider([semantic_result()])
-            roles = {
-                "reader": None,
-                "synthesizer": None,
-                "planner": None,
-                "implementer": ModelConfig(provider="mock", model="implementer"),
-                "fixer": ModelConfig(provider="mock", model="fixer"),
-                "verifier": ModelConfig(provider="mock", model="verifier"),
-            }
-            verification = run_real_issue.VerificationResult(
-                0,
-                0,
-                "mock",
-                "passed",
-                "",
-                out_dir / "verification" / "attempt-0.md",
-            )
-            semantic_token = run_real_issue._ACTIVE_SEMANTIC.set(SemanticSettings(True))
-            policy_token = run_real_issue._ACTIVE_POLICIES.set(resolve_prompt_policies({}))
-            originals = (run_real_issue.collect_changed_files, run_real_issue.collect_current_diff)
-            try:
-                run_real_issue.collect_changed_files = lambda repo: ["src/a.py"]
-                run_real_issue.collect_current_diff = lambda repo, files: "diff --git a/src/a.py b/src/a.py"
-                result = run_real_issue.run_semantic_verification_gate(
-                    repo=out_dir,
-                    out_dir=out_dir,
-                    issue_text="# Issue\n\n## Acceptance criteria\n- Implement behavior",
-                    verification=verification,
-                    roles=roles,
-                    fixer_provider=None,
-                    fixer_config=roles["fixer"],
-                    factory=lambda config: verifier if config.model == "verifier" else MockProvider(),
-                    stream=io.StringIO(),
-                )
-            finally:
-                run_real_issue.collect_changed_files, run_real_issue.collect_current_diff = originals
-                run_real_issue._ACTIVE_SEMANTIC.reset(semantic_token)
-                run_real_issue._ACTIVE_POLICIES.reset(policy_token)
 
-            final = json.loads((out_dir / "verification" / "final-verdict.json").read_text(encoding="utf-8"))
 
-        self.assertTrue(result.passed)
-        self.assertEqual(final["verdict"], "pass")
-        self.assertEqual(len(verifier.prompts), 1)
-
-    def test_operational_repair_uses_fixer_then_reruns_deterministic_and_semantic_checks(self):
-        repair_result = semantic_result("repair", "missing", "blocking", "Change src/a.py only.")
-        patch_response = (
-            "BEGIN_UNIFIED_DIFF\n"
-            "diff --git a/src/a.py b/src/a.py\n"
-            "--- a/src/a.py\n"
-            "+++ b/src/a.py\n"
-            "@@ -1 +1 @@\n"
-            "-old\n"
-            "+new\n"
-            "END_UNIFIED_DIFF"
-        )
-        with tempfile.TemporaryDirectory() as temp_dir:
-            out_dir = Path(temp_dir)
-            for name, value in (
-                ("coder-plan.md", "Plan"),
-                ("synthesized-handoff.md", "Handoff"),
-                ("verification-result-summary.md", "Checks passed"),
-                ("recommended-command-groups.json", "{}"),
-            ):
-                (out_dir / name).write_text(value, encoding="utf-8")
-            verifier = MockProvider([repair_result, semantic_result()])
-            fixer = MockProvider([patch_response])
-            roles = {
-                "reader": None,
-                "synthesizer": None,
-                "planner": None,
-                "implementer": ModelConfig(provider="mock", model="implementer"),
-                "fixer": ModelConfig(provider="mock", model="fixer"),
-                "verifier": ModelConfig(provider="mock", model="verifier"),
-            }
-            verification = run_real_issue.VerificationResult(
-                0, 0, "mock", "passed", "", out_dir / "verification" / "attempt-0.md"
-            )
-            semantic_token = run_real_issue._ACTIVE_SEMANTIC.set(SemanticSettings(True, 1, 1))
-            policy_token = run_real_issue._ACTIVE_POLICIES.set(resolve_prompt_policies({}))
-            originals = (
-                run_real_issue.collect_changed_files,
-                run_real_issue.collect_current_diff,
-                run_real_issue.apply_patch_file,
-                run_real_issue.run_recommended_verification,
-                run_real_issue.write_verification_result,
-                run_real_issue._checkpoint_patch_applied,
-                run_real_issue._checkpoint_deterministic,
-            )
-            deterministic_attempts = []
-            try:
-                run_real_issue.collect_changed_files = lambda repo: ["src/a.py"]
-                run_real_issue.collect_current_diff = lambda repo, files: "diff --git a/src/a.py b/src/a.py"
-                run_real_issue.apply_patch_file = lambda repo, patch, stream: None
-                run_real_issue.run_recommended_verification = lambda out, repo, attempt, stream: (
-                    deterministic_attempts.append(attempt)
-                    or run_real_issue.VerificationResult(
-                        attempt, 0, "mock", "passed", "", out / "verification" / f"attempt-{attempt}.md"
-                    )
-                )
-                run_real_issue.write_verification_result = lambda out, result: None
-                run_real_issue._checkpoint_patch_applied = lambda *args, **kwargs: None
-                run_real_issue._checkpoint_deterministic = lambda *args, **kwargs: None
-                result = run_real_issue.run_semantic_verification_gate(
-                    repo=out_dir,
-                    out_dir=out_dir,
-                    issue_text="# Issue\n\n## Acceptance criteria\n- Implement behavior",
-                    verification=verification,
-                    roles=roles,
-                    fixer_provider=fixer,
-                    fixer_config=roles["fixer"],
-                    factory=lambda config: verifier if config.model == "verifier" else fixer,
-                    stream=io.StringIO(),
-                )
-            finally:
-                (
-                    run_real_issue.collect_changed_files,
-                    run_real_issue.collect_current_diff,
-                    run_real_issue.apply_patch_file,
-                    run_real_issue.run_recommended_verification,
-                    run_real_issue.write_verification_result,
-                    run_real_issue._checkpoint_patch_applied,
-                    run_real_issue._checkpoint_deterministic,
-                ) = originals
-                run_real_issue._ACTIVE_SEMANTIC.reset(semantic_token)
-                run_real_issue._ACTIVE_POLICIES.reset(policy_token)
-
-        self.assertTrue(result.passed)
-        self.assertEqual(deterministic_attempts, [1])
-        self.assertEqual(len(fixer.prompts), 1)
-        self.assertEqual(len(verifier.prompts), 2)
-
-    def test_provider_failure_is_not_reported_as_semantic_blocked(self):
-        class FailingProvider(MockProvider):
-            def invoke(self, prompt, *, model, timeout_seconds):
-                raise ProviderError("unavailable", classification="rate_limited", status_code=429)
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            out_dir = Path(temp_dir)
-            (out_dir / "verification-result-summary.md").write_text("Checks passed", encoding="utf-8")
-            roles = {
-                "reader": None,
-                "synthesizer": None,
-                "planner": None,
-                "implementer": ModelConfig(provider="mock", model="implementer"),
-                "fixer": ModelConfig(provider="mock", model="fixer"),
-                "verifier": ModelConfig(provider="mock", model="verifier"),
-            }
-            verification = run_real_issue.VerificationResult(
-                0, 0, "mock", "passed", "", out_dir / "verification" / "attempt-0.md"
-            )
-            semantic_token = run_real_issue._ACTIVE_SEMANTIC.set(SemanticSettings(True))
-            policy_token = run_real_issue._ACTIVE_POLICIES.set(resolve_prompt_policies({}))
-            originals = (run_real_issue.collect_changed_files, run_real_issue.collect_current_diff)
-            try:
-                run_real_issue.collect_changed_files = lambda repo: []
-                run_real_issue.collect_current_diff = lambda repo, files: ""
-                with self.assertRaises(run_real_issue.ModelInvocationError) as raised:
-                    run_real_issue.run_semantic_verification_gate(
-                        repo=out_dir,
-                        out_dir=out_dir,
-                        issue_text="# Issue",
-                        verification=verification,
-                        roles=roles,
-                        fixer_provider=None,
-                        fixer_config=roles["fixer"],
-                        factory=lambda config: FailingProvider(),
-                        stream=io.StringIO(),
-                    )
-            finally:
-                run_real_issue.collect_changed_files, run_real_issue.collect_current_diff = originals
-                run_real_issue._ACTIVE_SEMANTIC.reset(semantic_token)
-                run_real_issue._ACTIVE_POLICIES.reset(policy_token)
-
-        self.assertEqual(raised.exception.record["failure_classification"], "rate_limited")
-        self.assertEqual(raised.exception.record["status_code"], 429)
 
     def test_windows_and_linux_gate_before_pr_and_reverify_after_ci_repair(self):
         windows = (REPO_ROOT / "windows" / "scripts" / "issue-to-pr-cycle.ps1").read_text(encoding="utf-8")

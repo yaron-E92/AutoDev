@@ -4,7 +4,6 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from automation import opencode_adapter
 
 
 class OpenCodeCliResolutionTests(unittest.TestCase):
@@ -16,7 +15,7 @@ class OpenCodeCliResolutionTests(unittest.TestCase):
             return SimpleNamespace(returncode=0, stdout=json.dumps({}), stderr="")
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            opencode_adapter.resolve_opencode_model_mappings(
+            opencode_adapter_models.resolve_opencode_model_mappings(
                 Path(temp_dir),
                 runner=runner,
                 which=lambda command: r"C:\\Users\\user\\AppData\\Roaming\\npm\\opencode.CMD",
@@ -29,8 +28,8 @@ class OpenCodeCliResolutionTests(unittest.TestCase):
 
     def test_missing_cli_has_specific_discovery_error(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            with self.assertRaises(opencode_adapter.OpenCodeAdapterError) as raised:
-                opencode_adapter.resolve_opencode_model_mappings(
+            with self.assertRaises(opencode_adapter_contract.OpenCodeAdapterError) as raised:
+                opencode_adapter_models.resolve_opencode_model_mappings(
                     Path(temp_dir),
                     runner=lambda *args, **kwargs: None,
                     which=lambda command: None,
@@ -43,8 +42,8 @@ class OpenCodeCliResolutionTests(unittest.TestCase):
             raise FileNotFoundError(2, "The system cannot find the file specified")
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            with self.assertRaises(opencode_adapter.OpenCodeAdapterError) as raised:
-                opencode_adapter.resolve_opencode_model_mappings(
+            with self.assertRaises(opencode_adapter_contract.OpenCodeAdapterError) as raised:
+                opencode_adapter_models.resolve_opencode_model_mappings(
                     Path(temp_dir),
                     runner=runner,
                     which=lambda command: r"C:\\npm\\opencode.CMD",
@@ -60,8 +59,8 @@ class OpenCodeCliResolutionTests(unittest.TestCase):
             return SimpleNamespace(returncode=7, stdout="", stderr="bad OpenCode config")
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            with self.assertRaises(opencode_adapter.OpenCodeAdapterError) as raised:
-                opencode_adapter.resolve_opencode_model_mappings(
+            with self.assertRaises(opencode_adapter_contract.OpenCodeAdapterError) as raised:
+                opencode_adapter_models.resolve_opencode_model_mappings(
                     Path(temp_dir),
                     runner=runner,
                     which=lambda command: "/usr/local/bin/opencode",
@@ -74,3 +73,7 @@ class OpenCodeCliResolutionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+from automation import opencode_adapter_contract
+
+from automation import opencode_adapter_models

@@ -220,7 +220,7 @@ class ExecutionClassificationHookTests(unittest.TestCase):
                 }
 
             with patch.object(role_coordinator_flow, "run_stage", new=fake_stage), patch.object(
-                role_coordinator_flow.opencode_adapter,
+                execution_classification_evidence.opencode_adapter_protocol,
                 "_ensure_opencode_protocol",
             ) as ensure_protocol, patch.object(
                 role_coordinator_flow.role_resume,

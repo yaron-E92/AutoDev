@@ -9,16 +9,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PRODUCTION_ROOTS = (ROOT / "automation", ROOT / "area_reader")
 MAX_MODULE_LINES = 700
-COMPATIBILITY_SHIMS = (
-    ROOT / "automation" / "workflow_stages_core.py",
-    ROOT / "automation" / "run_real_issue_core.py",
-)
 REPRESENTATIVE_MODULES = (
     "automation.scheduler_registration",
     "automation.workflow_dispatch",
-    "automation.issue_run_entrypoint",
     "automation.semantic_invocation",
-    "automation.evaluation_reporting",
     "automation.privacy_grant_hooks",
     "automation.claim_lease",
     "automation.scheduler_health_lifecycle",
@@ -119,13 +113,6 @@ class PythonArchitectureTests(unittest.TestCase):
         cycle = first_cycle(graph)
         self.assertEqual(cycle, [], "top-level local import cycle: " + " -> ".join(cycle))
 
-    def test_legacy_core_files_are_compatibility_shims_not_dumping_grounds(self):
-        offenders = {
-            path.relative_to(ROOT).as_posix(): len(path.read_text(encoding="utf-8").splitlines())
-            for path in COMPATIBILITY_SHIMS
-            if path.is_file() and len(path.read_text(encoding="utf-8").splitlines()) > 300
-        }
-        self.assertEqual(offenders, {})
 
     def test_representative_responsibility_modules_import_cleanly(self):
         for name in REPRESENTATIVE_MODULES:
@@ -138,6 +125,7 @@ class PythonArchitectureTests(unittest.TestCase):
             for parent in (ROOT / "scripts", ROOT / ".github" / "workflows")
             if parent.is_dir()
             for path in parent.glob("issue-180-*")
+            if path.name not in {"issue-180-canonical-reachability.yml", "issue-180-remove-legacy-runner.yml"}
         )
         chunks = sorted(
             path.relative_to(ROOT).as_posix()

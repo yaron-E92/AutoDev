@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from automation import opencode_adapter_handoff
+
+from automation import opencode_adapter_contract
+
 from pathlib import Path
 
 from automation.windows_verification_contract import (
@@ -18,7 +22,7 @@ from automation.windows_verification_manifest import (
 
 def install_opencode_hooks() -> None:
     install_manifest_hooks()
-    from automation import opencode_adapter, opencode_resume, run_manifest, workflow_stages
+    from automation import opencode_resume, run_manifest, workflow_stages
 
     if getattr(opencode_resume, "_autodev_windows_hooks_installed", False):
         return
@@ -26,7 +30,7 @@ def install_opencode_hooks() -> None:
     opencode_resume.REPAIR_STAGE_KIND[MANIFEST_STAGE] = "windows"
 
     original_repair_kind = opencode_resume._repair_kind
-    original_fixer_source = opencode_adapter._fixer_source
+    original_fixer_source = opencode_adapter_handoff._fixer_source
     original_resume_action = opencode_resume.resume_action
     original_checkpoint_stage = opencode_resume.checkpoint_stage
     original_status_text = opencode_resume.status_text
@@ -42,7 +46,7 @@ def install_opencode_hooks() -> None:
             path = current / REPAIR_FILE
             if path.is_file():
                 return path
-            raise opencode_adapter.OpenCodeAdapterError(
+            raise opencode_adapter_contract.OpenCodeAdapterError(
                 f"Windows repair artifact is missing: .autodev-run/current/{REPAIR_FILE}"
             )
         return original_fixer_source(current, arguments)
@@ -152,7 +156,7 @@ def install_opencode_hooks() -> None:
         return payload
 
     opencode_resume._repair_kind = repair_kind
-    opencode_adapter._fixer_source = fixer_source
+    opencode_adapter_handoff._fixer_source = fixer_source
     opencode_resume.resume_action = resume_action
     opencode_resume.checkpoint_stage = checkpoint_stage
     opencode_resume.status_text = status_text

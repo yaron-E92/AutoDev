@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from automation import opencode_adapter_contract
+
 import argparse
 import json
 import shlex
 from pathlib import Path
 from automation import (
-    opencode_adapter,
     opencode_runtime,
     role_resume,
     role_runtime,
@@ -27,7 +28,7 @@ from automation.role_coordinator_stages import (
 def invalidations(arguments: str) -> set[str]:
     return coordination_state.invalidated_roles(
         arguments,
-        roles=tuple(opencode_adapter.ROLE_NAMES),
+        roles=tuple(opencode_adapter_contract.ROLE_NAMES),
         error_type=RoleCoordinatorError,
     )
 
@@ -50,7 +51,7 @@ def run(argv: list[str] | None = None) -> int:
         RoleCoordinatorError,
         role_runtime.RoleRuntimeError,
         role_resume.RoleResumeError,
-        opencode_adapter.OpenCodeAdapterError,
+        opencode_adapter_contract.OpenCodeAdapterError,
         workflow_stages.WorkflowStageError,
         OSError,
         ValueError,

@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+from automation import opencode_adapter_roles
+
+from automation import opencode_adapter_protocol
+
+from automation import opencode_adapter_contract
+
 import json
 import subprocess
 from pathlib import Path
 from typing import Callable, Mapping
 from automation import (
-    opencode_adapter,
     opencode_runtime,
     role_resume,
     role_runtime,
@@ -37,18 +42,18 @@ def _accept_role(
     runtime_name: str,
 ) -> list[Path]:
     current = repo / workflow_stages.CURRENT_DIR
-    opencode_adapter._write_role_contracts(current)
+    opencode_adapter_protocol._write_role_contracts(current)
     try:
-        outputs = opencode_adapter._accept_role_once(role, current, input_path)
+        outputs = opencode_adapter_roles._accept_role_once(role, current, input_path)
     except (
-        opencode_adapter.OpenCodeAdapterError,
+        opencode_adapter_contract.OpenCodeAdapterError,
         PromptRunnerError,
         SemanticVerifierError,
     ) as exc:
-        opencode_adapter._raise_contract_rejection(current, role, input_path, exc)
+        opencode_adapter_roles._raise_contract_rejection(current, role, input_path, exc)
         raise AssertionError("contract rejection must raise") from exc
-    opencode_adapter._mark_role_accepted(current, role, outputs)
-    opencode_adapter._reset_current_correction(current, role)
+    opencode_adapter_protocol._mark_role_accepted(current, role, outputs)
+    opencode_adapter_protocol._reset_current_correction(current, role)
     role_resume.checkpoint_role(
         repo,
         role,
@@ -235,7 +240,7 @@ def run_role(
             snapshots,
             runtime_name=runtime.name,
         )
-    except opencode_adapter.OpenCodeAdapterError as first_error:
+    except opencode_adapter_contract.OpenCodeAdapterError as first_error:
         reason = f"role {role} output was rejected: {first_error}"
         last_diagnostic = _record_attempt(
             repo,
@@ -273,7 +278,7 @@ def run_role(
                 snapshots,
                 runtime_name=runtime.name,
             )
-        except opencode_adapter.OpenCodeAdapterError as second_error:
+        except opencode_adapter_contract.OpenCodeAdapterError as second_error:
             reason = f"role {role} protocol correction failed: {second_error}"
             last_diagnostic = _record_attempt(
                 repo,

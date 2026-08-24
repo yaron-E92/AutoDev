@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from automation import semantic_evidence
+
 import json
 import tempfile
 import unittest
@@ -7,7 +9,6 @@ from pathlib import Path
 from unittest import mock
 
 from automation import (
-    opencode_adapter,
     opencode_resume,
     run_manifest,
     windows_semantic_order,
@@ -344,7 +345,7 @@ class WindowsSemanticOrderTests(unittest.TestCase):
                 '{"state":"passed","run_id":321}\n',
                 encoding="utf-8",
             )
-            evidence = opencode_adapter.collect_deterministic_evidence(current)
+            evidence = semantic_evidence.collect_deterministic_evidence(current)
 
         self.assertIn(windows_verification.RESULT_FILE, evidence)
         self.assertIn('"run_id":321', evidence)

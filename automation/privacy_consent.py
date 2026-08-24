@@ -10,7 +10,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from automation import opencode_adapter, opencode_resume, privacy, run_manifest, workflow_stages
+from automation import opencode_resume, privacy, run_manifest, workflow_stages
 
 
 LEDGER_NAME = "privacy-consent.json"

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 from automation import (
-    opencode_adapter,
     opencode_runtime,
     role_resume,
     role_runtime,

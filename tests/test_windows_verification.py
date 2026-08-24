@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from automation import opencode_adapter_handoff
+
 import json
 import os
 import tempfile
@@ -8,7 +10,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from automation import opencode_adapter, opencode_resume, run_manifest, windows_verification, workflow_stages
+from automation import opencode_resume, run_manifest, windows_verification, workflow_stages
 
 
 HEAD = "a" * 40
@@ -404,7 +406,7 @@ class WindowsVerificationTests(unittest.TestCase):
 
             repair_path = current / windows_verification.REPAIR_FILE
             repair_path.write_text("repair windows\n", encoding="utf-8")
-            self.assertEqual(opencode_adapter._fixer_source(current, "100 windows"), repair_path)
+            self.assertEqual(opencode_adapter_handoff._fixer_source(current, "100 windows"), repair_path)
 
             affected = run_manifest.invalidated_stages_for_role(manifest, "implementer")
             self.assertIn(windows_verification.MANIFEST_STAGE, affected)

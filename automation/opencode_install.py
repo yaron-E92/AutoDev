@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+from automation import opencode_adapter_contract
+
+from automation import opencode_adapter_assets
+
 import argparse
 import json
 import os
 from pathlib import Path
 
-from automation import opencode_adapter, windows_verification
+from automation import windows_verification
 
 
 PYTHON_COMMAND_TEMPLATES = (
@@ -62,13 +66,13 @@ def _remove_legacy_bridge_config(target_repo: Path, installed: list[Path]) -> No
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        raise opencode_adapter.OpenCodeAdapterError(
+        raise opencode_adapter_contract.OpenCodeAdapterError(
             f"legacy AutoDev OpenCode config is not recognized and will not be removed: {path}"
         ) from exc
     if not isinstance(value, dict) or value.get("version") != 1 or not set(value).issubset(
         {"version", "autodev_root", "python"}
     ):
-        raise opencode_adapter.OpenCodeAdapterError(
+        raise opencode_adapter_contract.OpenCodeAdapterError(
             f"legacy AutoDev OpenCode config is not recognized and will not be removed: {path}"
         )
     path.unlink()
@@ -153,10 +157,10 @@ def _modernize_agent_text(text: str) -> str:
 
 def _modernize_installed_agents(target_repo: Path) -> None:
     agents = target_repo / ".opencode" / "agents"
-    for name in opencode_adapter.AGENT_FILES:
+    for name in opencode_adapter_contract.AGENT_FILES:
         path = agents / name
         if not path.is_file():
-            raise opencode_adapter.OpenCodeAdapterError(
+            raise opencode_adapter_contract.OpenCodeAdapterError(
                 f"installed OpenCode agent is missing: {path}"
             )
         path.write_text(
@@ -167,7 +171,7 @@ def _modernize_installed_agents(target_repo: Path) -> None:
 
 def _render_python_command(template: str, template_path: Path) -> str:
     if template.count(PYTHON_SHELL_PLACEHOLDER) != 1 or template.count(LEGACY_COMMAND_PREFIX) != 1:
-        raise opencode_adapter.OpenCodeAdapterError(
+        raise opencode_adapter_contract.OpenCodeAdapterError(
             "Python-coordinator command template must contain exactly one canonical legacy bridge prefix: "
             f"{template_path}"
         )
@@ -176,13 +180,13 @@ def _render_python_command(template: str, template_path: Path) -> str:
 
 def install_assets(
     target_repo: Path,
-    autodev_root: Path = opencode_adapter.AUTODEV_ROOT,
+    autodev_root: Path = opencode_adapter_contract.AUTODEV_ROOT,
     *,
     python_command: str = "python",
 ) -> list[Path]:
     target_repo = target_repo.expanduser().resolve()
     autodev_root = autodev_root.expanduser().resolve()
-    installed = opencode_adapter.install_assets(
+    installed = opencode_adapter_assets.install_assets(
         target_repo,
         autodev_root,
         python_command=python_command,
@@ -199,7 +203,7 @@ def install_assets(
     for name in PYTHON_COMMAND_TEMPLATES:
         template_path = source / name
         if not template_path.is_file():
-            raise opencode_adapter.OpenCodeAdapterError(
+            raise opencode_adapter_contract.OpenCodeAdapterError(
                 f"missing canonical Python-coordinator OpenCode command template: {template_path}"
             )
         target = destination / name
@@ -212,18 +216,18 @@ def install_assets(
 
     workflow_template = autodev_root / WINDOWS_CALLER_TEMPLATE
     if not workflow_template.is_file():
-        raise opencode_adapter.OpenCodeAdapterError(
+        raise opencode_adapter_contract.OpenCodeAdapterError(
             f"missing canonical Windows verification caller workflow: {workflow_template}"
         )
     workflow_text = workflow_template.read_text(encoding="utf-8")
     if workflow_text.count(WINDOWS_SETUP_PLACEHOLDER) != 1:
-        raise opencode_adapter.OpenCodeAdapterError(
+        raise opencode_adapter_contract.OpenCodeAdapterError(
             f"Windows verification caller template must contain exactly one setup placeholder: {workflow_template}"
         )
     try:
         windows_config = windows_verification.load_config(target_repo)
     except windows_verification.WindowsVerificationError as exc:
-        raise opencode_adapter.OpenCodeAdapterError(str(exc)) from exc
+        raise opencode_adapter_contract.OpenCodeAdapterError(str(exc)) from exc
     workflow_target = target_repo / WINDOWS_CALLER_TARGET
     workflow_target.parent.mkdir(parents=True, exist_ok=True)
     workflow_target.write_text(
@@ -240,7 +244,7 @@ def run(argv: list[str] | None = None) -> int:
         description="Install or update the complete AutoDev OpenCode integration."
     )
     parser.add_argument("--target-repo", default=".")
-    parser.add_argument("--autodev-root", default=str(opencode_adapter.AUTODEV_ROOT))
+    parser.add_argument("--autodev-root", default=str(opencode_adapter_contract.AUTODEV_ROOT))
     parser.add_argument("--python", default=os.environ.get("PYTHON", "python"))
     args = parser.parse_args(argv)
 

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from automation import semantic_evidence
+
 from pathlib import Path
 
-from automation import opencode_adapter, opencode_resume, run_manifest, windows_verification, workflow_stages
+from automation import opencode_resume, run_manifest, windows_verification, workflow_stages
 
 
 WINDOWS_EVIDENCE_FILES = (
@@ -166,7 +168,7 @@ def install() -> None:
     original_resume_action = opencode_resume.resume_action
     original_checkpoint_stage = opencode_resume.checkpoint_stage
     original_resume = opencode_resume.resume
-    original_collect_deterministic_evidence = opencode_adapter.collect_deterministic_evidence
+    original_collect_deterministic_evidence = semantic_evidence.collect_deterministic_evidence
 
     def source_identity(
         repo: Path,
@@ -236,5 +238,5 @@ def install() -> None:
     opencode_resume.resume_action = resume_action
     opencode_resume.checkpoint_stage = checkpoint_stage
     opencode_resume.resume = resume
-    opencode_adapter.collect_deterministic_evidence = collect_deterministic_evidence
+    semantic_evidence.collect_deterministic_evidence = collect_deterministic_evidence
     opencode_resume._autodev_windows_semantic_order_installed = True

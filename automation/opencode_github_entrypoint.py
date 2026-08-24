@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from automation import opencode_adapter_models
+
+from automation import opencode_adapter_contract
+
 import argparse
 import json
 import sys
@@ -8,7 +12,6 @@ from pathlib import Path
 from automation import (
     github_cli_proxy,
     non_success_report,
-    opencode_adapter,
     opencode_failure_entrypoint,
     role_resume,
     role_runtime,
@@ -71,7 +74,7 @@ def run(argv: list[str] | None = None) -> int:
         try:
             selected_name, _ = role_runtime.resolve_runtime_name(repo, args.runtime)
             if selected_name == "opencode":
-                opencode_adapter.reject_unsupported_model_overrides(args.arguments)
+                opencode_adapter_models.reject_unsupported_model_overrides(args.arguments)
             payload = role_coordinator_flow.coordinate(
                 repo,
                 arguments=args.arguments,
@@ -89,7 +92,7 @@ def run(argv: list[str] | None = None) -> int:
             role_coordinator_contract.RoleCoordinatorError,
             role_runtime.RoleRuntimeError,
             role_resume.RoleResumeError,
-            opencode_adapter.OpenCodeAdapterError,
+            opencode_adapter_contract.OpenCodeAdapterError,
             workflow_stages.WorkflowStageError,
             OSError,
             ValueError,

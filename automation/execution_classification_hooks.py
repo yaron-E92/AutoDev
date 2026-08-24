@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+from automation import opencode_adapter_roles
+
+from automation import opencode_adapter_handoff
+
+from automation import opencode_adapter_contract
+
 import json
 import subprocess
 from pathlib import Path
@@ -7,7 +13,6 @@ from pathlib import Path
 from automation import (
     execution_classification as execution,
     issue_queue,
-    opencode_adapter,
     opencode_resume,
     role_coordinator_flow,
     role_resume,
@@ -495,7 +500,7 @@ def _install_prepare_gate() -> None:
 
 
 def _install_reader_gate() -> None:
-    current_prepare = opencode_adapter._prepare_reader  # type: ignore[attr-defined]
+    current_prepare = opencode_adapter_handoff._prepare_reader  # type: ignore[attr-defined]
     if not getattr(current_prepare, "_autodev_execution_classification", False):
         original_prepare = current_prepare
 
@@ -510,9 +515,9 @@ def _install_reader_gate() -> None:
             return prompt
 
         _prepare_reader._autodev_execution_classification = True  # type: ignore[attr-defined]
-        opencode_adapter._prepare_reader = _prepare_reader  # type: ignore[attr-defined]
+        opencode_adapter_handoff._prepare_reader = _prepare_reader  # type: ignore[attr-defined]
 
-    current_accept = opencode_adapter._accept_role_once  # type: ignore[attr-defined]
+    current_accept = opencode_adapter_roles._accept_role_once  # type: ignore[attr-defined]
     if not getattr(current_accept, "_autodev_execution_classification", False):
         original_accept = current_accept
 
@@ -536,7 +541,7 @@ def _install_reader_gate() -> None:
                     issue_text,
                 )
             except execution.ExecutionClassificationError as exc:
-                raise opencode_adapter.OpenCodeAdapterError(
+                raise opencode_adapter_contract.OpenCodeAdapterError(
                     f"reader execution-classification contract rejected: {exc}"
                 ) from exc
             execution.apply_state_fields(state, report)
@@ -545,7 +550,7 @@ def _install_reader_gate() -> None:
             return outputs
 
         _accept_role_once._autodev_execution_classification = True  # type: ignore[attr-defined]
-        opencode_adapter._accept_role_once = _accept_role_once  # type: ignore[attr-defined]
+        opencode_adapter_roles._accept_role_once = _accept_role_once  # type: ignore[attr-defined]
 
 
 def _attention_resume_payload(

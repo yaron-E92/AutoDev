@@ -7,7 +7,6 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from automation import (
-    opencode_adapter,
     opencode_role_runtime,
     privacy,
     privacy_consent,

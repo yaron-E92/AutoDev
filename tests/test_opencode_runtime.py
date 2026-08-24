@@ -6,7 +6,7 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
-from automation import opencode_adapter, opencode_runtime, workflow_stages
+from automation import opencode_runtime, workflow_stages
 
 
 class FakeResponse:
@@ -67,7 +67,7 @@ class OpenCodeRuntimeTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            args = opencode_adapter.build_parser().parse_args(
+            args = opencode_adapter_cli.build_parser().parse_args(
                 [
                     "stage",
                     "--name",
@@ -291,7 +291,7 @@ class OpenCodeRuntimeTests(unittest.TestCase):
 
             with (
                 patch(
-                    "automation.opencode_runtime.opencode_adapter.resolve_opencode_model_mappings",
+                    "automation.opencode_runtime.opencode_adapter_models.resolve_opencode_model_mappings",
                     return_value=mappings,
                 ),
                 patch(
@@ -362,3 +362,7 @@ class OpenCodeRuntimeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+from automation import opencode_adapter_cli
+
+from automation import opencode_adapter_models

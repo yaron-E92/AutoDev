@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from automation import opencode_adapter_roles
+
 import hashlib
 from pathlib import Path
 from automation import (
-    opencode_adapter,
     opencode_runtime,
     role_resume,
     role_runtime,
@@ -27,4 +28,4 @@ def _prepare_role(repo: Path, role: str, *, repair_kind: str = "") -> None:
         return
     issue = _issue_number(repo)
     arguments = f"{issue} {repair_kind}".strip() if repair_kind else str(issue)
-    opencode_adapter.prepare_role(role, repo, arguments)
+    opencode_adapter_roles.prepare_role(role, repo, arguments)

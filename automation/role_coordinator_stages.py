@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from automation import opencode_adapter_protocol
+
 import json
 import subprocess
 from pathlib import Path
 from typing import Callable, Mapping
 from automation import (
-    opencode_adapter,
     opencode_runtime,
     role_resume,
     role_runtime,
@@ -52,7 +53,7 @@ def run_stage(
     print(json.dumps({"event": "stage", **payload}, sort_keys=True), flush=True)
     current = repo / workflow_stages.CURRENT_DIR
     if name == "prepare" and payload.get("state") == "CONTINUE" and current.is_dir():
-        opencode_adapter._ensure_opencode_protocol(current)
+        opencode_adapter_protocol._ensure_opencode_protocol(current)
         role_resume.create_manifest(
             repo,
             workflow_stages.read_state(current),
@@ -65,8 +66,8 @@ def run_stage(
             force_manifest=True,
         )
     elif name == "render-implementer" and payload.get("state") == "CONTINUE" and current.is_dir():
-        opencode_adapter._ensure_opencode_protocol(current)
-        opencode_adapter._begin_role_invocation(current, "implementer")
+        opencode_adapter_protocol._ensure_opencode_protocol(current)
+        opencode_adapter_protocol._begin_role_invocation(current, "implementer")
     if name != "prepare" and role_resume.has_manifest(repo):
         role_resume.checkpoint_stage(repo, name, payload, attempt)
     if code != 0 and payload.get("state") not in {"FAILED", "BLOCKED", "REPAIR"}:

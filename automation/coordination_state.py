@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from automation import opencode_adapter_contract
+
 import hashlib
 import shlex
 from pathlib import Path
@@ -67,9 +69,9 @@ def role_acceptance(repo: Path, role: str) -> dict[str, object]:
 
 
 def role_output_path(repo: Path, role: str) -> Path | None:
-    from automation import opencode_adapter, workflow_stages
+    from automation import workflow_stages
 
-    relative = str(opencode_adapter.role_contracts().get(role, {}).get("output_artifact", ""))
+    relative = str(opencode_adapter_contract.role_contracts().get(role, {}).get("output_artifact", ""))
     if relative.startswith(".autodev-run/current/"):
         return repo / workflow_stages.CURRENT_DIR / Path(relative).name
     return None

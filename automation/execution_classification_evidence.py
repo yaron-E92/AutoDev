@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from automation import opencode_adapter_protocol
+
 import subprocess
 from dataclasses import replace
 from pathlib import Path
@@ -8,7 +10,6 @@ from automation import (
     execution_classification as execution,
     execution_classification_hooks as hooks,
     issue_queue,
-    opencode_adapter,
     role_coordinator_flow,
     role_resume,
     role_runtime,
@@ -182,7 +183,7 @@ def _install_attention_prepare_manifest() -> None:
             and not role_resume.has_manifest(resolved)
         ):
             runtime_name = str(kwargs.get("runtime_name", "")).strip() or "opencode"
-            opencode_adapter._ensure_opencode_protocol(current_dir)
+            opencode_adapter_protocol._ensure_opencode_protocol(current_dir)
             role_resume.create_manifest(
                 resolved,
                 workflow_stages.read_state(current_dir),

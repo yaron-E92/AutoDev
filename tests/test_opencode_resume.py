@@ -5,7 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from automation import opencode_adapter, opencode_resume, run_manifest, workflow_stages
+from automation import opencode_resume, run_manifest, workflow_stages
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -19,7 +19,7 @@ def mappings(**overrides):
             "model": f"provider/{role}",
             "inherits_from": "",
         }
-        for role in opencode_adapter.OPENCODE_ROLE_NAMES
+        for role in opencode_adapter_contract.OPENCODE_ROLE_NAMES
     }
     for role, model in overrides.items():
         values[role] = {
@@ -274,13 +274,13 @@ class OpenCodeResumeTests(unittest.TestCase):
     def test_installer_sync_includes_status_and_resume_commands(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             target = Path(temp_dir)
-            opencode_adapter.install_assets(target, REPO_ROOT)
+            opencode_adapter_assets.install_assets(target, REPO_ROOT)
 
             self.assertTrue((target / ".opencode" / "commands" / "autodev-status.md").is_file())
             self.assertTrue((target / ".opencode" / "commands" / "autodev-resume.md").is_file())
 
     def test_status_and_resume_parser_surface_is_portable(self):
-        parser = opencode_adapter.build_parser()
+        parser = opencode_adapter_cli.build_parser()
         status = parser.parse_args(["status", "--repo", ".", "--invalidate-role", "planner"])
         resume = parser.parse_args(["resume", "--repo", ".", "--invalidate-role", "implementer"])
 
@@ -292,3 +292,9 @@ class OpenCodeResumeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+from automation import opencode_adapter_assets
+
+from automation import opencode_adapter_cli
+
+from automation import opencode_adapter_contract

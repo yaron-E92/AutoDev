@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+from automation import opencode_adapter_models
+
+from automation import opencode_adapter_contract
+
+from automation import opencode_adapter_cli
+
 import argparse
 import hashlib
 import io
@@ -13,7 +19,7 @@ import urllib.request
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
-from automation import opencode_adapter, opencode_resume, workflow_stages
+from automation import opencode_resume, workflow_stages
 
 
 SUPPORTED_ROOT_OPENCODE_CONFIG = {"opencode.json", "opencode.jsonc"}
@@ -347,7 +353,7 @@ def _run_adapter(argv: list[str]) -> tuple[int, str, str]:
     stdout = io.StringIO()
     stderr = io.StringIO()
     with redirect_stdout(stdout), redirect_stderr(stderr):
-        code = opencode_adapter.run(argv)
+        code = opencode_adapter_cli.run(argv)
     out = stdout.getvalue()
     err = stderr.getvalue()
     sys.stdout.write(out)
@@ -491,14 +497,14 @@ def _headroom_diagnostics(provider: str) -> dict[str, object]:
 
 def _role_diagnostics(repo: Path, role: str) -> dict[str, object]:
     current = repo / workflow_stages.CURRENT_DIR
-    contract = opencode_adapter.role_contracts().get(role, {})
+    contract = opencode_adapter_contract.role_contracts().get(role, {})
     model = ""
     source = ""
     try:
-        mapping = opencode_adapter.resolve_opencode_model_mappings(repo).get(role, {})
+        mapping = opencode_adapter_models.resolve_opencode_model_mappings(repo).get(role, {})
         model = str(mapping.get("model", ""))
         source = str(mapping.get("source", ""))
-    except (OSError, ValueError, opencode_adapter.OpenCodeAdapterError):
+    except (OSError, ValueError, opencode_adapter_contract.OpenCodeAdapterError):
         pass
 
     inputs: list[dict[str, object]] = []
@@ -521,7 +527,7 @@ def _role_diagnostics(repo: Path, role: str) -> dict[str, object]:
 
 def _role_check(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="autodev role-check")
-    parser.add_argument("--role", choices=opencode_adapter.ROLE_NAMES, required=True)
+    parser.add_argument("--role", choices=opencode_adapter_contract.ROLE_NAMES, required=True)
     parser.add_argument("--repo", default=".")
     args = parser.parse_args(argv)
 
@@ -590,7 +596,7 @@ def run(argv: list[str] | None = None) -> int:
     if values and values[0] == ROLE_CHECK_COMMAND:
         return _role_check(values[1:])
 
-    args = opencode_adapter.build_parser().parse_args(values)
+    args = opencode_adapter_cli.build_parser().parse_args(values)
 
     if args.command == "stage" and args.name == "failed":
         return _terminal_failed(args)

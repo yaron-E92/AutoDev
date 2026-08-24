@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from automation import opencode_adapter_models
+
+from automation import opencode_adapter_contract
+
 import argparse
 import json
 import shutil
@@ -12,7 +16,6 @@ from typing import Callable
 from automation import (
     execution_classification_hooks,
     issue_queue,
-    opencode_adapter,
     opencode_install,
     privacy,
     privacy_grants,
@@ -430,11 +433,11 @@ def _check_opencode(
     checks: list[DoctorCheck] = []
     missing = [
         f".opencode/commands/{name}"
-        for name in opencode_adapter.COMMAND_FILES
+        for name in opencode_adapter_contract.COMMAND_FILES
         if not (repo / ".opencode" / "commands" / name).is_file()
     ] + [
         f".opencode/agents/{name}"
-        for name in opencode_adapter.AGENT_FILES
+        for name in opencode_adapter_contract.AGENT_FILES
         if not (repo / ".opencode" / "agents" / name).is_file()
     ]
     if missing:
@@ -448,7 +451,7 @@ def _check_opencode(
         )
     else:
         stale = []
-        for name in opencode_adapter.AGENT_FILES:
+        for name in opencode_adapter_contract.AGENT_FILES:
             text = (repo / ".opencode" / "agents" / name).read_text(encoding="utf-8")
             if ".opencode/autodev.json" in text:
                 stale.append(name)
@@ -481,7 +484,7 @@ def _check_opencode(
         )
         return checks
     try:
-        mappings = opencode_adapter.resolve_opencode_model_mappings(
+        mappings = opencode_adapter_models.resolve_opencode_model_mappings(
             repo,
             runner=runner,
             which=lambda _command: opencode_cli,
@@ -663,7 +666,7 @@ def run_cli(
         issue_queue.QueueError,
         privacy.PrivacyError,
         queue_selection.RoadmapError,
-        opencode_adapter.OpenCodeAdapterError,
+        opencode_adapter_contract.OpenCodeAdapterError,
     ) as exc:
         print(str(exc), file=sys.stderr)
         return 2

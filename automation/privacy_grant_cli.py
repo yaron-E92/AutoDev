@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from automation import opencode_adapter_models
+
 import argparse
 import json
 import subprocess
@@ -33,10 +35,10 @@ def _resolve_requirements(
     runner=subprocess.run,
     which=None,
 ):
-    from automation import opencode_adapter, opencode_cli, privacy_consent
+    from automation import opencode_cli, privacy_consent
 
     executable = opencode_cli.resolve_opencode_cli(which=which)
-    mappings = opencode_adapter.resolve_opencode_model_mappings(
+    mappings = opencode_adapter_models.resolve_opencode_model_mappings(
         repo, runner=runner, which=which
     )
     with bypass_grants():

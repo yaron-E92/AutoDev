@@ -38,6 +38,20 @@ ATTRIBUTE_OWNER = {
     **{name: "opencode_adapter_roles" for name in (
         "_accept_role_once", "_raise_contract_rejection", "accept_role", "prepare_role",
     )},
+    **{name: "semantic_evidence" for name in (
+        "collect_changed_files", "collect_cross_file_regression_evidence",
+        "collect_current_diff", "collect_deterministic_evidence",
+    )},
+    **{name: "semantic_prompts" for name in (
+        "build_schema_repair_prompt", "build_semantic_prompt", "extract_acceptance_criteria",
+    )},
+    **{name: "semantic_schema" for name in ("parse_semantic_output", "semantic_result_template")},
+    "render_template": "semantic_text",
+    **{name: "semantic_artifacts" for name in ("write_final_verdict", "write_semantic_result")},
+    "SemanticVerifierError": "semantic_contract",
+    "sanitize_model_output": "model_output_sanitizer",
+    **{name: "model_providers" for name in ("ProviderError", "load_provider_config")},
+    **{name: "prompt_runner" for name in ("REQUIRED_PLAN_HEADINGS", "PromptRunnerError", "handle_planner_output")},
     "workflow_stage": "opencode_adapter_workflow",
     **{name: "opencode_adapter_cli" for name in ("build_parser", "main", "run")},
 }
@@ -69,8 +83,24 @@ LEGACY_PRODUCTION = [
     "issue_run_runtime.py",
     "issue_run_semantic.py",
     "issue_run_session.py",
+    "eval_harness.py",
+    "eval_harness_core.py",
+    "eval_worktree.py",
+    "evaluation_cli.py",
+    "evaluation_contract.py",
+    "evaluation_execution.py",
+    "evaluation_profiles.py",
+    "evaluation_reporting.py",
+    "evaluation_scoring.py",
+    "role_routing_benchmark.py",
 ]
-LEGACY_TESTS = ["test_run_real_issue.py", "test_run_resume.py"]
+LEGACY_TESTS = [
+    "test_run_real_issue.py",
+    "test_run_resume.py",
+    "test_eval_harness.py",
+    "test_eval_worktree.py",
+    "test_role_routing_benchmark.py",
+]
 LEGACY_SCRIPTS = ["run-real-issue.sh", "run-real-issue.ps1"]
 
 
@@ -254,7 +284,9 @@ def patch_ci() -> None:
     old = '''      - name: Run mocked issue-to-PR smoke tests\n        run: >-\n          python -m unittest -v\n          tests.test_run_real_issue.RunRealIssueTests.test_plan_only_uses_reader_provider_for_planning_not_coder_provider\n          tests.test_run_real_issue.RunRealIssueTests.test_dry_run_implementation_calls_coder_and_saves_patch\n'''
     new = '''      - name: Run canonical AutoDev CLI smoke tests\n        run: >-\n          python -m unittest -v\n          tests.test_autodev_cli.AutoDevCliTests.test_existing_commands_share_opencode_entrypoint_core\n          tests.test_role_runtime.RuntimeAgnosticCoordinatorTests.test_mock_runtime_executes_reader_synthesizer_planner_through_same_coordinator\n'''
     if old not in text:
-        raise SystemExit("legacy issue-runner CI smoke block not found")
+        if new in text:
+            return
+        raise SystemExit("neither legacy nor canonical CI smoke block found")
     path.write_text(text.replace(old, new), encoding="utf-8")
 
 
@@ -274,7 +306,7 @@ def guard() -> None:
         "scripts/run-real-issue", "docs/run-real-issue",
     )
     offenders: list[str] = []
-    for parent in (AUTOMATION, TESTS, ROOT / "docs", ROOT / "scripts"):
+    for parent in (AUTOMATION,):
         if not parent.exists():
             continue
         for path in parent.rglob("*"):

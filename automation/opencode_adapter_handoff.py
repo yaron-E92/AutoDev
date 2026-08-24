@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from pathlib import Path
 from area_reader import context as area_reader_context
@@ -182,3 +183,118 @@ def _bounded_text(value: str, limit: int) -> str:
         return value
     digest = hashlib.sha256(value.encode("utf-8", errors="replace")).hexdigest()
     return value[:limit] + f"\n[truncated; sha256={digest}]\n"
+
+
+def _collect_workspace_paths(value: object, files: set[str], workspace_paths: set[str]) -> None:
+    if isinstance(value, dict):
+        for item in value.values():
+            _collect_workspace_paths(item, files, workspace_paths)
+    elif isinstance(value, list):
+        for item in value:
+            _collect_workspace_paths(item, files, workspace_paths)
+    elif isinstance(value, str):
+        normalized = value.replace("\\", "/").strip()
+        if (
+            normalized
+            and not normalized.startswith("/")
+            and not any(marker in normalized for marker in ("\n", "\r", "*"))
+            and (not workspace_paths or normalized in workspace_paths)
+            and ("/" in normalized or "." in Path(normalized).name)
+        ):
+            files.add(normalized)
+
+
+def _area_reader_relevant_files(current: Path, workspace_snapshot: object) -> list[str]:
+    workspace_paths = set(workspace_snapshot) if isinstance(workspace_snapshot, dict) else set()
+    files: set[str] = set()
+    _collect_workspace_paths(_read_json(current / "detected-facts.json"), files, workspace_paths)
+    return sorted(files)
+
+
+def _workspace_snapshot_summary(workspace_snapshot: object, limit: int = 200) -> str:
+    if not isinstance(workspace_snapshot, dict):
+        return "{}"
+    paths = sorted(str(path) for path in workspace_snapshot)
+    return json.dumps(
+        {"path_count": len(paths), "paths": paths[:limit], "truncated": len(paths) > limit},
+        indent=2,
+        sort_keys=True,
+    )
+
+
+def build_planner_prompt_from_area_reader(
+    current: Path,
+    issue_text: str,
+    local_check: str,
+    labels: list[str],
+    profile_context_hints: str,
+) -> str:
+    workspace_snapshot = _read_json(current / "workspace-snapshot.json")
+    routed_areas = _read_json(current / "routed-areas.json")
+    synthesized_handoff = sanitize_model_output(_read_text(current / "synthesized-handoff.md"))
+    coder_plan = sanitize_model_output(_read_text(current / "coder-plan.md"))
+    recommendations = _read_json(current / "recommended-command-groups.json")
+    relevant_files = _area_reader_relevant_files(current, workspace_snapshot)
+    return f"""Use the issue-to-pr-automation skill.
+
+You are the Planner for this repository.
+
+Operating mode: PLAN ONLY - NO CODE.
+
+Area-reader routed areas:
+{json.dumps(routed_areas, indent=2, sort_keys=True)}
+
+Area-reader synthesized handoff:
+{synthesized_handoff or '(no synthesized handoff available)'}
+
+Area-reader coder / implementation plan:
+{coder_plan}
+
+Detected relevant files from area-reader facts:
+{json.dumps(relevant_files, indent=2, sort_keys=True)}
+
+Recommended command groups:
+{json.dumps(recommendations, indent=2, sort_keys=True)}
+
+Workspace snapshot grounding:
+{_workspace_snapshot_summary(workspace_snapshot)}
+
+Routing hints only:
+- GitHub labels: {', '.join(labels) if labels else '(none)'}
+- Profile context hints: {profile_context_hints.strip() or '(none)'}
+
+Automation context:
+- The configured local verification command is: {local_check}
+- Build/run/tests are handled by AutoDev unless explicitly stated otherwise.
+- Do not modify files.
+
+Goal:
+Plan the implementation of the issue below as a fast, localized change with minimal risk.
+
+Constraints:
+- Treat labels and profile text as routing hints only. Use area-reader synthesis and repository facts as the final planning scope.
+- Ground every file or path in the workspace snapshot and area-reader facts. Do not invent paths.
+- Do NOT over-decompose.
+- Use at most 4 implementation steps.
+- Touch as few files as possible, preferably 1-3 files.
+- Prefer editing existing code over creating new abstractions.
+- Avoid task stubs, TODO-only work, and speculative architecture.
+- If something is unclear, make a reasonable assumption and call it out briefly.
+
+Output format:
+1) Where to look
+2) Files / areas likely to touch
+3) Assumptions
+4) Plan
+5) Risks / gotchas
+6) Recommended implementation approach
+
+Rules:
+- No code or pseudo-code.
+- No refactoring wishlist.
+- Keep the plan implementer-ready.
+- Output only the final plan.
+
+Issue:
+{issue_text}
+"""

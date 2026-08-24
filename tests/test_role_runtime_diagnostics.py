@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from automation import opencode_adapter_contract
+
 import json
 import tempfile
 import unittest
@@ -9,7 +11,6 @@ from unittest.mock import patch
 
 from automation import (
     non_success_report,
-    opencode_adapter,
     opencode_role_runtime,
     role_coordinator_contract,
     role_coordinator_runtime,
@@ -112,7 +113,7 @@ class RoleRuntimeDiagnosticsTests(unittest.TestCase):
                 stdout='{"type":"text","text":"claimed success token=runtime-secret"}\n',
                 stderr="",
             )
-            rejection = opencode_adapter.OpenCodeAdapterError(
+            rejection = opencode_adapter_contract.OpenCodeAdapterError(
                 "reader protocol correction limit exhausted after one retry: role result is empty: "
                 ".autodev-run/current/reader-brief.md"
             )
@@ -121,7 +122,7 @@ class RoleRuntimeDiagnosticsTests(unittest.TestCase):
                 role_coordinator_runtime,
                 "_accept_role",
                 side_effect=[
-                    opencode_adapter.OpenCodeAdapterError(
+                    opencode_adapter_contract.OpenCodeAdapterError(
                         "role result is empty: .autodev-run/current/reader-brief.md"
                     ),
                     rejection,
@@ -201,7 +202,7 @@ class RoleRuntimeDiagnosticsTests(unittest.TestCase):
                 role_coordinator_runtime,
                 "_accept_role",
                 side_effect=[
-                    opencode_adapter.OpenCodeAdapterError(
+                    opencode_adapter_contract.OpenCodeAdapterError(
                         "role result is empty: .autodev-run/current/reader-brief.md"
                     ),
                     [],

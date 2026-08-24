@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from automation import opencode_adapter, opencode_install
+from automation import opencode_install
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -140,7 +140,7 @@ class OpenCodeLocalCoordinatorHardeningTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             target = Path(temp_dir)
             opencode_install.install_assets(target, REPO_ROOT, python_command="python3")
-            for name in opencode_adapter.AGENT_FILES:
+            for name in opencode_adapter_contract.AGENT_FILES:
                 path = target / ".opencode" / "agents" / name
                 text = path.read_text(encoding="utf-8")
                 with self.subTest(agent=name):
@@ -152,3 +152,5 @@ class OpenCodeLocalCoordinatorHardeningTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+from automation import opencode_adapter_contract
