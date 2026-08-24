@@ -11,7 +11,7 @@ from automation.semantic_contract import (
 def render_template(template: str, values: dict[str, str]) -> str:
     unresolved: set[str] = set()
     for match in _TEMPLATE_PLACEHOLDER.finditer(template):
-        key = match.group("new") or match.group("legacy")
+        key = match.group("name")
         if key not in values:
             unresolved.add(match.group(0))
     if unresolved:
@@ -22,7 +22,7 @@ def render_template(template: str, values: dict[str, str]) -> str:
         )
 
     def replacement(match: re.Match[str]) -> str:
-        key = match.group("new") or match.group("legacy")
+        key = match.group("name")
         return values.get(key, match.group(0))
 
     return _TEMPLATE_PLACEHOLDER.sub(replacement, template)
