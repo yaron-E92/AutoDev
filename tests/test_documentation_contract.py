@@ -12,6 +12,7 @@ PUBLIC_DOCS = (
     "docs/installation.md",
     "docs/model-roles.md",
     "docs/opencode.md",
+    "docs/opencode-context-sizing.md",
     "docs/privacy.md",
     "docs/releases.md",
     "docs/scheduler.md",
@@ -80,6 +81,12 @@ class DocumentationContractTests(unittest.TestCase):
         self.assertIn("provider-layer Headroom proxy is **not** automatically in that transport path", headroom)
         self.assertNotIn("headroom wrap opencode\n```", headroom)
         self.assertNotIn("autodev coordinate --arguments 123", headroom)
+
+    def test_context_profiler_is_documented_as_source_diagnostic(self) -> None:
+        sizing = self._read("docs/opencode-context-sizing.md")
+        self.assertIn("source-development diagnostic", sizing)
+        self.assertIn("autodev issue-to-pr", sizing)
+        self.assertIn("python3 -m automation.context_optimization", sizing)
 
     def test_privacy_guide_uses_time_bounded_revocable_grants(self) -> None:
         privacy = self._read("docs/privacy.md")
