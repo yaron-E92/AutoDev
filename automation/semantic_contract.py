@@ -72,10 +72,7 @@ SEMANTIC_IGNORED_PARTS = {
     "__pycache__",
 }
 
-_TEMPLATE_PLACEHOLDER = re.compile(
-    r"\{~\{(?P<new>[A-Za-z][A-Za-z0-9_]*)\}~\}"
-    r"|\{\{(?P<legacy>[A-Za-z][A-Za-z0-9_]*)\}\}"
-)
+_TEMPLATE_PLACEHOLDER = re.compile(r"\{~\{(?P<name>[A-Za-z][A-Za-z0-9_]*)\}~\}")
 
 
 _DECLARATION_PATTERNS = (
