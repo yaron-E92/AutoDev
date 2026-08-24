@@ -216,6 +216,13 @@ def prune_runner_only_tests() -> None:
         text = text.replace("from unittest import mock\n", "")
     path.write_text(text, encoding="utf-8")
 
+    path = ROOT / "tests/test_opencode_integration.py"
+    text = path.read_text(encoding="utf-8")
+    text = text.replace("from automation import prompt_runner", "from automation import planner_output")
+    text = text.replace("prompt_runner.", "planner_output.")
+    text = text.replace("PromptRunnerError", "PlannerOutputError")
+    path.write_text(text, encoding="utf-8")
+
 
 def update_architecture_guard() -> None:
     path = ROOT / "tests/test_python_architecture.py"
