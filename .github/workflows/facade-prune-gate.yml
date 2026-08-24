@@ -26,6 +26,7 @@ jobs:
       - name: Retarget callers and remove pure facades
         run: |
           python scripts/issue_180_facade_guard_patch.py
+          python scripts/issue_180_facade_test_patch.py
           python scripts/issue_180_remove_module_facades.py
 
       - name: Compile canonical Python
