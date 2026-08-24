@@ -47,7 +47,7 @@ def _help() -> str:
 
 def _friendly_error(message: str, *, command: str = "") -> int:
     print(f"autodev: {message}", file=sys.stderr)
-    if command and command in cli_help.HELP:
+    if command and (command,) in cli_help.HELP:
         print(f"Run 'autodev {command} --help' for usage.", file=sys.stderr)
     else:
         print("Run 'autodev --help' to see supported commands.", file=sys.stderr)
