@@ -5,11 +5,11 @@ You are the Planner for this repository.
 Operating mode: PLAN ONLY — NO CODE.
 
 Stack context:
-{{StackContext}}
+{~{StackContext}~}
 
 Automation context:
 
-- The configured local verification command is: {{LocalCheck}}
+- The configured local verification command is: {~{LocalCheck}~}
 - Build/run/tests are handled by the automation script unless explicitly stated otherwise.
 - Do not modify files.
 
@@ -58,4 +58,4 @@ Rules:
 - Keep the plan implementer-ready.
 
 Issue:
-{{IssueText}}
+{~{IssueText}~}
