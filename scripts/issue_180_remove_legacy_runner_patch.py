@@ -1,5 +1,6 @@
 from pathlib import Path
 
+root = Path(__file__).resolve().parents[1]
 path = Path(__file__).resolve().with_name("issue_180_remove_legacy_runner.py")
 text = path.read_text(encoding="utf-8")
 anchor = '    "workflow_stage": "opencode_adapter_workflow",\n'
@@ -23,3 +24,15 @@ if addition not in text:
         raise SystemExit("adapter owner mapping anchor missing")
     text = text.replace(anchor, addition + anchor)
 path.write_text(text, encoding="utf-8")
+
+integration = root / "tests" / "test_opencode_integration.py"
+integration_text = integration.read_text(encoding="utf-8")
+integration_text = integration_text.replace(
+    'REPO_ROOT / "automation" / "opencode_adapter.py"',
+    'REPO_ROOT / "automation" / "opencode_adapter_workflow.py"',
+)
+integration_text = integration_text.replace(
+    "def test_opencode_adapter_has_no_windows_workflow_backend(self):",
+    "def test_opencode_workflow_adapter_has_no_windows_workflow_backend(self):",
+)
+integration.write_text(integration_text, encoding="utf-8")
