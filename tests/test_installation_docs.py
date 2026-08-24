@@ -12,8 +12,10 @@ class InstallationDocumentationTests(unittest.TestCase):
         installation = (REPO_ROOT / "docs" / "installation.md").read_text(encoding="utf-8")
         queue = (REPO_ROOT / "docs" / "queue.md").read_text(encoding="utf-8")
 
+        self.assertIn("autodev --help", installation)
+        self.assertIn("autodev issue-to-pr 123", installation)
         self.assertIn("autodev repo install", installation)
-        self.assertIn("autodev repo doctor", installation)
+        self.assertIn("autodev doctor", installation)
         self.assertIn("autodev queue next", installation)
         self.assertIn("autodev queue reconcile", queue)
 
@@ -27,6 +29,16 @@ class InstallationDocumentationTests(unittest.TestCase):
         self.assertIn("remains authoritative", installation)
         self.assertNotIn("temporary compatibility shim", installation)
         self.assertNotIn(".opencode/autodev.json", installation)
+
+    def test_installation_docs_separate_runtime_and_contributor_workflows(self):
+        installation = (REPO_ROOT / "docs" / "installation.md").read_text(encoding="utf-8")
+
+        self.assertIn("## Runtime and provider configuration", installation)
+        self.assertIn("AUTODEV_ROLE_RUNTIME", installation)
+        self.assertIn("autodev models", installation)
+        self.assertIn("## Contributor development", installation)
+        self.assertIn("source-development checks", installation)
+        self.assertIn("python -m unittest discover -s tests -v", installation)
 
 
 if __name__ == "__main__":
