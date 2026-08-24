@@ -33,9 +33,9 @@ def _resolve_requirements(
     runner=subprocess.run,
     which=None,
 ):
-    from automation import opencode_adapter, opencode_coordinator, privacy_consent
+    from automation import opencode_adapter, opencode_cli, privacy_consent
 
-    executable = opencode_coordinator.opencode_cli.resolve_opencode_cli(which=which)
+    executable = opencode_cli.resolve_opencode_cli(which=which)
     mappings = opencode_adapter.resolve_opencode_model_mappings(
         repo, runner=runner, which=which
     )

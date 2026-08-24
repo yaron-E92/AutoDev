@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from automation import (
     opencode_resume,
-    role_coordinator,
+    role_coordinator_flow,
     role_resume,
     role_workflow_hooks,
     semantic_repair_budget,
@@ -29,20 +29,20 @@ class RoleWorkflowHookTests(unittest.TestCase):
             return dict(waiting)
 
         def base_coordinate(*args, **kwargs):
-            role_coordinator.run_stage(
+            role_coordinator_flow.run_stage(
                 Path("."),
                 "pr-and-ci",
                 runtime_name="mock",
             )
             self.fail("WAITING must stop the deterministic transition loop")
 
-        with patch.object(role_coordinator, "run_stage", base_run_stage), patch.object(
-            role_coordinator,
+        with patch.object(role_coordinator_flow, "run_stage", base_run_stage), patch.object(
+            role_coordinator_flow,
             "coordinate",
             base_coordinate,
         ):
             role_workflow_hooks._install_waiting_bridge()
-            payload = role_coordinator.coordinate(Path("."))
+            payload = role_coordinator_flow.coordinate(Path("."))
 
         self.assertEqual(payload, waiting)
 
@@ -104,9 +104,9 @@ class RoleWorkflowHookTests(unittest.TestCase):
             )
 
     def test_install_extends_generic_repair_vocabulary_with_windows(self):
-        original = dict(role_coordinator.REPAIR_KINDS)
+        original = dict(role_coordinator_flow.REPAIR_KINDS)
         try:
-            role_coordinator.REPAIR_KINDS.pop("fixer-windows", None)
+            role_coordinator_flow.REPAIR_KINDS.pop("fixer-windows", None)
             with patch.object(
                 role_workflow_hooks,
                 "_install_waiting_bridge",
@@ -116,12 +116,12 @@ class RoleWorkflowHookTests(unittest.TestCase):
             ):
                 role_workflow_hooks.install()
             self.assertEqual(
-                role_coordinator.REPAIR_KINDS["fixer-windows"],
+                role_coordinator_flow.REPAIR_KINDS["fixer-windows"],
                 "windows",
             )
         finally:
-            role_coordinator.REPAIR_KINDS.clear()
-            role_coordinator.REPAIR_KINDS.update(original)
+            role_coordinator_flow.REPAIR_KINDS.clear()
+            role_coordinator_flow.REPAIR_KINDS.update(original)
 
 
 if __name__ == "__main__":

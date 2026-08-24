@@ -10,12 +10,17 @@ from automation import (
     non_success_report,
     opencode_adapter,
     opencode_failure_entrypoint,
-    role_coordinator as opencode_coordinator,
     role_resume,
     role_runtime,
     workflow_stages,
 )
 
+from automation import (
+    role_coordinator_cli,
+    role_coordinator_contract,
+    role_coordinator_flow,
+    role_coordinator_stages,
+)
 
 SUCCESSFUL_TERMINAL_STATES = {
     "PR_READY",
@@ -67,12 +72,12 @@ def run(argv: list[str] | None = None) -> int:
             selected_name, _ = role_runtime.resolve_runtime_name(repo, args.runtime)
             if selected_name == "opencode":
                 opencode_adapter.reject_unsupported_model_overrides(args.arguments)
-            payload = opencode_coordinator.coordinate(
+            payload = role_coordinator_flow.coordinate(
                 repo,
                 arguments=args.arguments,
                 resume=args.resume,
                 invalidated_roles=(
-                    opencode_coordinator.invalidations(args.arguments)
+                    role_coordinator_cli.invalidations(args.arguments)
                     if args.resume
                     else set()
                 ),
@@ -81,7 +86,7 @@ def run(argv: list[str] | None = None) -> int:
             )
         except (
             opencode_failure_entrypoint.ProviderCapabilityError,
-            opencode_coordinator.RoleCoordinatorError,
+            role_coordinator_contract.RoleCoordinatorError,
             role_runtime.RoleRuntimeError,
             role_resume.RoleResumeError,
             opencode_adapter.OpenCodeAdapterError,
@@ -89,7 +94,7 @@ def run(argv: list[str] | None = None) -> int:
             OSError,
             ValueError,
         ) as exc:
-            payload = opencode_coordinator.terminal_payload(
+            payload = role_coordinator_stages.terminal_payload(
                 repo,
                 {
                     "state": "FAILED",

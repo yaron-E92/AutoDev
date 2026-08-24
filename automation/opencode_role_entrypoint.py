@@ -9,7 +9,8 @@ from automation import (
     opencode_adapter,
     opencode_role_runtime,
     opencode_runtime,
-    role_coordinator,
+    role_coordinator_contract,
+    role_coordinator_runtime,
     role_resume,
     role_runtime,
     workflow_stages,
@@ -35,7 +36,7 @@ def run(argv: list[str] | None = None) -> int:
         runtime.validate_arguments(args.arguments)
         snapshots = runtime.role_snapshots(repo, runner=subprocess.run)
         opencode_adapter.prepare_role(args.role, repo, args.arguments)
-        acceptance = role_coordinator.run_role(
+        acceptance = role_coordinator_runtime.run_role(
             repo,
             args.role,
             runtime,
@@ -53,7 +54,7 @@ def run(argv: list[str] | None = None) -> int:
         return 0
     except (
         opencode_adapter.OpenCodeAdapterError,
-        role_coordinator.RoleCoordinatorError,
+        role_coordinator_contract.RoleCoordinatorError,
         role_runtime.RoleRuntimeError,
         role_resume.RoleResumeError,
         workflow_stages.WorkflowStageError,

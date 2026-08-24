@@ -8,7 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from automation import opencode_coordinator, privacy, privacy_consent, run_manifest, workflow_stages
+from automation import privacy, privacy_consent, run_manifest, workflow_stages
 
 
 class _FakeTTY(io.StringIO):

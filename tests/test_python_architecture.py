@@ -29,8 +29,7 @@ REPRESENTATIVE_MODULES = (
     "automation.windows_verification_execution",
     "automation.opencode_adapter_workflow",
     "automation.coordination_state",
-    "automation.role_coord_flow",
-    "automation.opencode_coord_flow",
+    "automation.role_coordinator_flow",
     "area_reader.pipeline",
 )
 

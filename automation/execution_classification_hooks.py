@@ -9,7 +9,7 @@ from automation import (
     issue_queue,
     opencode_adapter,
     opencode_resume,
-    role_coordinator,
+    role_coordinator_flow,
     role_resume,
     workflow_stages,
 )
@@ -638,7 +638,7 @@ def _install_resume_gates() -> None:
 
 
 def _install_python_coordinator_gate() -> None:
-    current_resume_payload = role_coordinator._resume_payload  # type: ignore[attr-defined]
+    current_resume_payload = role_coordinator_flow._resume_payload  # type: ignore[attr-defined]
     if not getattr(current_resume_payload, "_autodev_execution_classification", False):
         original_resume_payload = current_resume_payload
 
@@ -649,9 +649,9 @@ def _install_python_coordinator_gate() -> None:
             return payload
 
         _resume_payload._autodev_execution_classification = True  # type: ignore[attr-defined]
-        role_coordinator._resume_payload = _resume_payload  # type: ignore[attr-defined]
+        role_coordinator_flow._resume_payload = _resume_payload  # type: ignore[attr-defined]
 
-    current_terminal = role_coordinator.terminal_payload
+    current_terminal = role_coordinator_flow.terminal_payload
     if not getattr(current_terminal, "_autodev_execution_classification", False):
         original_terminal = current_terminal
 
@@ -661,9 +661,9 @@ def _install_python_coordinator_gate() -> None:
             return original_terminal(repo, payload, **kwargs)
 
         terminal_payload._autodev_execution_classification = True  # type: ignore[attr-defined]
-        role_coordinator.terminal_payload = terminal_payload
+        role_coordinator_flow.terminal_payload = terminal_payload
 
-    current_coordinate = role_coordinator.coordinate
+    current_coordinate = role_coordinator_flow.coordinate
     if not getattr(current_coordinate, "_autodev_execution_classification", False):
         original_coordinate = current_coordinate
 
@@ -674,7 +674,7 @@ def _install_python_coordinator_gate() -> None:
                 return dict(attention.payload)
 
         coordinate._autodev_execution_classification = True  # type: ignore[attr-defined]
-        role_coordinator.coordinate = coordinate
+        role_coordinator_flow.coordinate = coordinate
 
 
 def install() -> None:

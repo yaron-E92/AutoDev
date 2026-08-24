@@ -16,13 +16,13 @@ from automation.prompt_runner import PromptRunnerError
 from automation.semantic_verifier import SemanticVerifierError
 from automation import coordination_contract, coordination_state
 
-from automation.role_coord_contract import (
+from automation.role_coordinator_contract import (
     CORRECTION_PROMPT,
     ROLE_PROMPT,
     RoleCoordinatorError,
     role_timeout_seconds,
 )
-from automation.role_coord_state import (
+from automation.role_coordinator_state import (
     _prepare_role,
     _role_output_path,
     role_acceptance,

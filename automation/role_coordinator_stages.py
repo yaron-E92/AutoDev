@@ -14,10 +14,10 @@ from automation import (
 )
 from automation import coordination_contract, coordination_state
 
-from automation.role_coord_contract import (
+from automation.role_coordinator_contract import (
     RoleCoordinatorError,
 )
-from automation.role_coord_state import (
+from automation.role_coordinator_state import (
     _issue_number,
 )
 

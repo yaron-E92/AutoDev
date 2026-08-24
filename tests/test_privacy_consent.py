@@ -7,7 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from automation import opencode_coordinator, privacy, privacy_consent, run_manifest, workflow_stages
+from automation import opencode_resume, privacy, privacy_consent, run_manifest, workflow_stages
 
 
 class PrivacyConsentTests(unittest.TestCase):
@@ -52,14 +52,13 @@ class PrivacyConsentTests(unittest.TestCase):
             reason="training policy is unknown; customer-content retention is unknown",
         )
 
-    def _originals(self) -> tuple[object, object, object]:
-        return privacy._consent_or_block, privacy._audit, opencode_coordinator._run_agent_process
+    def _originals(self) -> tuple[object, object]:
+        return privacy._consent_or_block, privacy._audit
 
     @staticmethod
-    def _restore(originals: tuple[object, object, object]) -> None:
+    def _restore(originals: tuple[object, object]) -> None:
         privacy._consent_or_block = originals[0]  # type: ignore[assignment]
         privacy._audit = originals[1]  # type: ignore[assignment]
-        opencode_coordinator._run_agent_process = originals[2]  # type: ignore[assignment]
 
     def test_known_routes_include_conditional_fixer(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -215,7 +214,7 @@ class PrivacyConsentTests(unittest.TestCase):
                     "approvals": [privacy_consent._approval_record(repo, policy, decision, mode="batch")],
                 },
             )
-            path = opencode_coordinator.opencode_resume.manifest_path(repo)
+            path = opencode_resume.manifest_path(repo)
             manifest = run_manifest.load_manifest(path)
             manifest["run_id"] = "new-run-id"
             run_manifest.save_manifest(path, manifest)

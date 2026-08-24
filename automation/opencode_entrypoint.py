@@ -36,9 +36,8 @@ def run(argv: list[str] | None = None) -> int:
     context_optimization.install()
     privacy_consent.install()
     privacy_grants.install(run_consent=True)
-    # Existing workflow policy hooks historically wrapped opencode_coordinator.
-    # Bridge their runtime-neutral behavior into the canonical role coordinator
-    # only after those hooks have installed their underlying workflow patches.
+    # Install runtime-neutral workflow policy on the canonical coordinator
+    # after the underlying workflow patches are active.
     role_workflow_hooks.install()
     # Manual/external execution classification must wrap the final shared role
     # and resume boundaries so both slash-command and Python coordination stop

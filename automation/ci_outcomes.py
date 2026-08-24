@@ -222,33 +222,6 @@ def _install_waiting_guards() -> None:
         execute_stage._autodev_ci_waiting_guard = True  # type: ignore[attr-defined]
         workflow_stages.execute_stage = execute_stage
 
-    from automation import opencode_coordinator
-
-    current_run_stage = opencode_coordinator.run_stage
-    if not getattr(current_run_stage, "_autodev_ci_waiting_guard", False):
-        original_run_stage = current_run_stage
-
-        def run_stage(*args, **kwargs) -> dict[str, object]:
-            payload = original_run_stage(*args, **kwargs)
-            if payload.get("state") == "WAITING":
-                raise _CiWaiting(payload)
-            return payload
-
-        run_stage._autodev_ci_waiting_guard = True  # type: ignore[attr-defined]
-        opencode_coordinator.run_stage = run_stage
-
-    current_coordinate = opencode_coordinator.coordinate
-    if not getattr(current_coordinate, "_autodev_ci_waiting_guard", False):
-        original_coordinate = current_coordinate
-
-        def coordinate(*args, **kwargs) -> dict[str, object]:
-            try:
-                return original_coordinate(*args, **kwargs)
-            except _CiWaiting as waiting:
-                return dict(waiting.payload)
-
-        coordinate._autodev_ci_waiting_guard = True  # type: ignore[attr-defined]
-        opencode_coordinator.coordinate = coordinate
 
 
 def install() -> None:

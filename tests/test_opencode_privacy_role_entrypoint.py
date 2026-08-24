@@ -9,7 +9,7 @@ from automation import (
     opencode_install,
     opencode_role_entrypoint,
     opencode_role_runtime,
-    role_coordinator,
+    role_coordinator_runtime,
 )
 
 
@@ -53,7 +53,7 @@ class OpenCodePrivacyRoleEntrypointTests(unittest.TestCase):
             opencode_adapter,
             "prepare_role",
         ) as prepare, patch.object(
-            role_coordinator,
+            role_coordinator_runtime,
             "run_role",
             return_value={
                 "state": "ACCEPTED",
@@ -101,9 +101,9 @@ class OpenCodePrivacyRoleEntrypointTests(unittest.TestCase):
             opencode_adapter,
             "prepare_role",
         ), patch.object(
-            role_coordinator,
+            role_coordinator_runtime,
             "run_role",
-            side_effect=role_coordinator.RoleCoordinatorError(
+            side_effect=role_coordinator_runtime.RoleCoordinatorError(
                 "privacy blocked planner route provider/model",
                 classification="privacy_blocked",
             ),

@@ -4,7 +4,8 @@ from pathlib import Path
 
 from automation import (
     opencode_resume,
-    role_coordinator,
+    role_coordinator_contract,
+    role_coordinator_flow,
     role_resume,
     run_manifest,
     semantic_repair_budget,
@@ -20,7 +21,7 @@ class _CiWaiting(RuntimeError):
 
 
 def _install_waiting_bridge() -> None:
-    current_run_stage = role_coordinator.run_stage
+    current_run_stage = role_coordinator_flow.run_stage
     if not getattr(current_run_stage, "_autodev_role_ci_waiting", False):
         original_run_stage = current_run_stage
 
@@ -31,9 +32,9 @@ def _install_waiting_bridge() -> None:
             return payload
 
         run_stage._autodev_role_ci_waiting = True  # type: ignore[attr-defined]
-        role_coordinator.run_stage = run_stage
+        role_coordinator_flow.run_stage = run_stage
 
-    current_coordinate = role_coordinator.coordinate
+    current_coordinate = role_coordinator_flow.coordinate
     if not getattr(current_coordinate, "_autodev_role_ci_waiting", False):
         original_coordinate = current_coordinate
 
@@ -44,7 +45,7 @@ def _install_waiting_bridge() -> None:
                 return dict(waiting.payload)
 
         coordinate._autodev_role_ci_waiting = True  # type: ignore[attr-defined]
-        role_coordinator.coordinate = coordinate
+        role_coordinator_flow.coordinate = coordinate
 
 
 def _install_resume_bridge() -> None:
@@ -95,6 +96,6 @@ def install() -> None:
     # Windows verification extends the existing repair vocabulary. Keep that
     # workflow concern visible to the generic coordinator without teaching the
     # runtime abstraction anything about Windows or GitHub Actions.
-    role_coordinator.REPAIR_KINDS.setdefault("fixer-windows", "windows")
+    role_coordinator_contract.REPAIR_KINDS.setdefault("fixer-windows", "windows")
     _install_waiting_bridge()
     _install_resume_bridge()

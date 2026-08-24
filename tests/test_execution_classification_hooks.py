@@ -11,7 +11,7 @@ from automation import (
     execution_classification_evidence,
     execution_classification_hooks,
     opencode_github_entrypoint,
-    role_coordinator,
+    role_coordinator_flow,
     workflow_stages,
 )
 
@@ -184,21 +184,21 @@ class ExecutionClassificationHookTests(unittest.TestCase):
             self.fail(f"unexpected stage after manual attention: {name}")
 
         with patch.object(
-            role_coordinator.opencode_runtime,
+            role_coordinator_flow.opencode_runtime,
             "install_workflow_guards",
         ), patch.object(
-            role_coordinator.role_runtime,
+            role_coordinator_flow.role_runtime,
             "select_runtime",
             return_value=(runtime, "test"),
-        ), patch.object(role_coordinator, "run_stage", side_effect=fake_stage), patch.object(
-            role_coordinator,
+        ), patch.object(role_coordinator_flow, "run_stage", side_effect=fake_stage), patch.object(
+            role_coordinator_flow,
             "run_role",
         ) as run_role, patch.object(
-            role_coordinator,
+            role_coordinator_flow,
             "terminal_payload",
             side_effect=lambda _repo, payload, **kwargs: dict(payload),
         ):
-            payload = role_coordinator.coordinate(Path("."), arguments="176")
+            payload = role_coordinator_flow.coordinate(Path("."), arguments="176")
 
         self.assertEqual(payload["state"], "ATTENTION_REQUIRED")
         self.assertEqual(calls, ["preflight", "prepare"])
@@ -219,22 +219,22 @@ class ExecutionClassificationHookTests(unittest.TestCase):
                     "successful_non_runnable": True,
                 }
 
-            with patch.object(role_coordinator, "run_stage", new=fake_stage), patch.object(
-                role_coordinator.opencode_adapter,
+            with patch.object(role_coordinator_flow, "run_stage", new=fake_stage), patch.object(
+                role_coordinator_flow.opencode_adapter,
                 "_ensure_opencode_protocol",
             ) as ensure_protocol, patch.object(
-                role_coordinator.role_resume,
+                role_coordinator_flow.role_resume,
                 "has_manifest",
                 return_value=False,
             ), patch.object(
-                role_coordinator.role_resume,
+                role_coordinator_flow.role_resume,
                 "create_manifest",
             ) as create_manifest, patch.object(
-                role_coordinator.role_runtime,
+                role_coordinator_flow.role_runtime,
                 "persist_selection",
             ) as persist_selection:
                 execution_classification_evidence._install_attention_prepare_manifest()
-                payload = role_coordinator.run_stage(
+                payload = role_coordinator_flow.run_stage(
                     repo,
                     "prepare",
                     runtime_name="opencode",

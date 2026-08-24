@@ -11,7 +11,8 @@ from unittest.mock import patch
 from automation import (
     opencode_adapter,
     opencode_role_runtime,
-    role_coordinator,
+    role_coordinator_flow,
+    role_coordinator_runtime,
     role_runtime,
     run_manifest,
     workflow_stages,
@@ -278,29 +279,29 @@ class RuntimeAgnosticCoordinatorTests(unittest.TestCase):
             }
 
         with tempfile.TemporaryDirectory() as temp_dir, patch.object(
-            role_coordinator.opencode_runtime,
+            role_coordinator_flow.opencode_runtime,
             "install_workflow_guards",
         ), patch.object(
-            role_coordinator,
+            role_coordinator_flow,
             "run_stage",
             side_effect=[{"state": "CONTINUE"}, {"state": "CONTINUE"}],
         ) as stage, patch.object(
-            role_coordinator,
+            role_coordinator_flow,
             "_resume_payload",
             side_effect=cursors,
         ), patch.object(
-            role_coordinator,
+            role_coordinator_runtime,
             "_prepare_role",
         ), patch.object(
-            role_coordinator,
+            role_coordinator_runtime,
             "_accept_role",
             return_value=[],
         ), patch.object(
-            role_coordinator,
+            role_coordinator_runtime,
             "role_acceptance",
             side_effect=lambda repo, role: accepted(role),
         ):
-            result = role_coordinator.coordinate(
+            result = role_coordinator_flow.coordinate(
                 Path(temp_dir),
                 arguments="29",
                 runtime_name="mock",
@@ -323,19 +324,19 @@ class RuntimeAgnosticCoordinatorTests(unittest.TestCase):
             runner=lambda *args, **kwargs: None,
         )
         with tempfile.TemporaryDirectory() as temp_dir, patch.object(
-            role_coordinator,
+            role_coordinator_runtime,
             "_prepare_role",
         ), patch.object(
-            role_coordinator,
+            role_coordinator_runtime,
             "_accept_role",
             return_value=[],
         ), patch.object(
-            role_coordinator,
+            role_coordinator_runtime,
             "role_acceptance",
             return_value={"state": "MISSING", "reason": "not accepted"},
         ):
-            with self.assertRaises(role_coordinator.RoleCoordinatorError) as raised:
-                role_coordinator.run_role(
+            with self.assertRaises(role_coordinator_runtime.RoleCoordinatorError) as raised:
+                role_coordinator_runtime.run_role(
                     Path(temp_dir),
                     "reader",
                     runtime,

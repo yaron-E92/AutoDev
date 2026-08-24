@@ -13,17 +13,17 @@ from automation import (
 )
 from automation import coordination_contract, coordination_state
 
-from automation.role_coord_contract import (
+from automation.role_coordinator_contract import (
     MAX_TRANSITIONS,
     REPAIR_KINDS,
     ROLE_ACTIONS,
     RoleCoordinatorError,
     RoleResumeErrorAlias,
 )
-from automation.role_coord_runtime import (
+from automation.role_coordinator_runtime import (
     run_role,
 )
-from automation.role_coord_stages import (
+from automation.role_coordinator_stages import (
     _resume_payload,
     run_stage,
     terminal_payload,

@@ -18,13 +18,12 @@ from automation.windows_verification_manifest import (
 
 def install_opencode_hooks() -> None:
     install_manifest_hooks()
-    from automation import opencode_adapter, opencode_coordinator, opencode_resume, run_manifest, workflow_stages
+    from automation import opencode_adapter, opencode_resume, run_manifest, workflow_stages
 
     if getattr(opencode_resume, "_autodev_windows_hooks_installed", False):
         return
 
     opencode_resume.REPAIR_STAGE_KIND[MANIFEST_STAGE] = "windows"
-    opencode_coordinator.REPAIR_KINDS["fixer-windows"] = "windows"
 
     original_repair_kind = opencode_resume._repair_kind
     original_fixer_source = opencode_adapter._fixer_source
