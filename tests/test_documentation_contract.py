@@ -8,6 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_DOCS = (
     "README.md",
+    "docs/headroom.md",
     "docs/installation.md",
     "docs/model-roles.md",
     "docs/opencode.md",
@@ -66,6 +67,13 @@ class DocumentationContractTests(unittest.TestCase):
             self.assertIn(role, roles)
         self.assertIn("autodev models", roles)
         self.assertNotIn("`automation.opencode_adapter_models`", roles)
+
+    def test_headroom_guide_respects_opencode_transport_boundary(self) -> None:
+        headroom = self._read("docs/headroom.md")
+        self.assertIn("autodev issue-to-pr 123", headroom)
+        self.assertIn("provider-layer Headroom proxy is **not** automatically in that transport path", headroom)
+        self.assertNotIn("headroom wrap opencode\n```", headroom)
+        self.assertNotIn("autodev coordinate --arguments 123", headroom)
 
     def test_privacy_guide_uses_time_bounded_revocable_grants(self) -> None:
         privacy = self._read("docs/privacy.md")
