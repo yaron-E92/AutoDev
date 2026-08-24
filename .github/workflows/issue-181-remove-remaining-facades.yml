@@ -23,13 +23,14 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 0
 
-      - name: Include accidental model-provider exports in migration map
+      - name: Normalize facade migration edge cases
         shell: bash
         run: |
           python - <<'PY'
           from pathlib import Path
-          path = Path('scripts/issue_181_remove_remaining_facades.py')
-          text = path.read_text(encoding='utf-8')
+
+          migration = Path('scripts/issue_181_remove_remaining_facades.py')
+          text = migration.read_text(encoding='utf-8')
           marker = '        "with_headroom_role": "provider_headroom",\n'
           addition = marker + ''.join(
               f'        "{name}": "headroom",\n'
@@ -43,7 +44,25 @@ jobs:
           )
           if marker not in text:
               raise SystemExit('model-provider mapping marker missing')
-          path.write_text(text.replace(marker, addition, 1), encoding='utf-8')
+          text = text.replace(marker, addition, 1)
+          old = '''            for facade in FACADES:\n                if re.search(rf"\\b(?:automation\\.)?{re.escape(facade)}\\b", text):\n                    leftovers.append(f"{path.relative_to(ROOT)}: {facade}")\n'''
+          new = '''            for facade in FACADES:\n                patterns = (\n                    rf"\\bautomation\\.{re.escape(facade)}\\b",\n                    rf"\\bfrom\\s+automation\\s+import[^\\n]*\\b{re.escape(facade)}\\b",\n                    rf"\\b{re.escape(facade)}\\.",\n                    rf"\\bpatch\\.object\\(\\s*{re.escape(facade)}\\b",\n                )\n                if any(re.search(pattern, text) for pattern in patterns):\n                    leftovers.append(f"{path.relative_to(ROOT)}: {facade}")\n'''
+          if old not in text:
+              raise SystemExit('facade leftover detector marker missing')
+          migration.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          queue_selection = Path('automation/queue_selection.py')
+          qtext = queue_selection.read_text(encoding='utf-8')
+          start = qtext.find('class _IssueQueueCompat:')
+          end = qtext.find('ROADMAP_PATH =', start)
+          if start < 0 or end < 0:
+              raise SystemExit('queue selection compatibility block not found')
+          qtext = qtext[:start] + qtext[end:]
+          qtext = qtext.replace('issue_queue._run_gh', '_run_gh')
+          qtext = qtext.replace('issue_queue._json_result', '_json_result')
+          qtext = qtext.replace('issue_queue.inspect_queue', 'inspect_queue')
+          qtext = qtext.replace('issue_queue.reconcile_queue', 'reconcile_queue')
+          queue_selection.write_text(qtext, encoding='utf-8')
           PY
 
       - name: Retarget facade consumers to owner modules
@@ -62,11 +81,15 @@ jobs:
           facades=(model_providers issue_queue distributed_claims privacy_grants scheduler_health semantic_repair_budget)
           for facade in "${facades[@]}"; do
             test ! -e "automation/${facade}.py"
-            if git grep -n -E "(^|[^A-Za-z0-9_])${facade}([^A-Za-z0-9_]|$)" -- automation area_reader tests ':!scripts/issue_181_*'; then
+            if git grep -n -E "(automation\.${facade}|from automation import.*${facade}|${facade}\.)" -- automation area_reader tests ':!scripts/issue_181_*'; then
               echo "Compatibility facade reference remains: ${facade}" >&2
               exit 1
             fi
           done
+          if git grep -n -F '_IssueQueueCompat' -- automation tests; then
+            echo 'Queue selection compatibility object remains.' >&2
+            exit 1
+          fi
 
       - name: Commit verified facade removal
         shell: bash
