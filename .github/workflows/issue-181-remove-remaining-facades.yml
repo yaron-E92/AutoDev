@@ -1,0 +1,62 @@
+name: Issue 181 remove remaining compatibility facades
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: issue-181-facades-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  remove-facades:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out PR branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Retarget facade consumers to owner modules
+        run: python scripts/issue_181_remove_remaining_facades.py
+
+      - name: Compile maintained Python
+        run: python -m compileall -q automation area_reader tests
+
+      - name: Run full unit suite
+        run: python -m unittest discover -s tests -v
+
+      - name: Reject compatibility facades and references
+        shell: bash
+        run: |
+          set -euo pipefail
+          facades=(model_providers issue_queue distributed_claims privacy_grants scheduler_health semantic_repair_budget)
+          for facade in "${facades[@]}"; do
+            test ! -e "automation/${facade}.py"
+            if git grep -n -E "(^|[^A-Za-z0-9_])${facade}([^A-Za-z0-9_]|$)" -- automation area_reader tests ':!scripts/issue_181_*'; then
+              echo "Compatibility facade reference remains: ${facade}" >&2
+              exit 1
+            fi
+          done
+
+      - name: Commit verified facade removal
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add -A automation area_reader tests
+          git reset -- scripts/issue_181_remove_remaining_facades.py || true
+          git diff --cached --check
+          if git diff --cached --quiet; then
+            echo 'No source changes to commit.'
+            exit 0
+          fi
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m 'refactor: remove compatibility aggregation facades'
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
