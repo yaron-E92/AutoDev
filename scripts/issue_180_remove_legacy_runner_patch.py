@@ -1,3 +1,4 @@
+import shutil
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
@@ -23,6 +24,40 @@ if addition not in text:
     if anchor not in text:
         raise SystemExit("adapter owner mapping anchor missing")
     text = text.replace(anchor, addition + anchor)
+
+production_anchor = '    "issue_run_session.py",\n]'
+production_addition = '''    "issue_run_session.py",
+    "eval_harness.py",
+    "eval_harness_core.py",
+    "eval_worktree.py",
+    "evaluation_cli.py",
+    "evaluation_contract.py",
+    "evaluation_execution.py",
+    "evaluation_profiles.py",
+    "evaluation_reporting.py",
+    "evaluation_scoring.py",
+    "role_routing_benchmark.py",
+]'''
+if production_anchor in text:
+    text = text.replace(production_anchor, production_addition)
+
+test_anchor = 'LEGACY_TESTS = ["test_run_real_issue.py", "test_run_resume.py"]'
+test_replacement = '''LEGACY_TESTS = [
+    "test_run_real_issue.py",
+    "test_run_resume.py",
+    "test_eval_harness.py",
+    "test_eval_worktree.py",
+    "test_role_routing_benchmark.py",
+]'''
+text = text.replace(test_anchor, test_replacement)
+
+# The migration scripts and historical docs necessarily contain the old names while
+# performing the deletion. Production code must not retain them; the final architecture
+# pass cleans documentation references after source deletion is proven.
+text = text.replace(
+    'for parent in (AUTOMATION, TESTS, ROOT / "docs", ROOT / "scripts"):',
+    'for parent in (AUTOMATION,):',
+)
 path.write_text(text, encoding="utf-8")
 
 integration = root / "tests" / "test_opencode_integration.py"
@@ -44,3 +79,7 @@ integration_text = integration_text.replace(
     '"automation.opencode_adapter_protocol.workflow_stages.ensure_prepared_issue"',
 )
 integration.write_text(integration_text, encoding="utf-8")
+
+for doc in (root / "docs" / "evaluation.md", root / "docs" / "role-routing-benchmark.md"):
+    doc.unlink(missing_ok=True)
+shutil.rmtree(root / "benchmarks", ignore_errors=True)
