@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+SCRIPT = Path(__file__).resolve()
 
 RENAMES = {
     "area_reader_cli.py": "cli.py",
@@ -62,6 +63,7 @@ def replace_all(text: str) -> str:
 def patch_workflow(package: Path) -> None:
     path = package / "workflow.py"
     text = path.read_text(encoding="utf-8")
+    text = text.replace("from area_reader import runner_core as _core\n", "from area_reader import pipeline as _pipeline\n")
     text = text.replace("from area_reader import workflow as _core\n", "from area_reader import pipeline as _pipeline\n")
     text = text.replace("from area_reader.workflow import *  # noqa: F401,F403\n", "from area_reader.cli import parse_args as _base_parse_args\n")
     text = text.replace("_ORIGINAL_PARSE_ARGS = _core.parse_args", "_ORIGINAL_PARSE_ARGS = _base_parse_args")
@@ -70,7 +72,7 @@ def patch_workflow(package: Path) -> None:
     if old not in text and "_pipeline.main(" not in text:
         raise SystemExit("canonical area-reader workflow delegation pattern not found")
     text = text.replace(old, new)
-    if "_core" in text or "import *" in text:
+    if "_core" in text or "import *" in text or "runner_core" in text:
         raise SystemExit("area-reader workflow still contains facade compatibility")
     path.write_text(text, encoding="utf-8")
 
@@ -116,7 +118,7 @@ def main() -> None:
         core.unlink()
 
     for path in ROOT.rglob("*"):
-        if not path.is_file() or path.suffix.lower() not in TEXT_EXTENSIONS or ".git" in path.parts:
+        if path.resolve() == SCRIPT or not path.is_file() or path.suffix.lower() not in TEXT_EXTENSIONS or ".git" in path.parts:
             continue
         try:
             original = path.read_text(encoding="utf-8")
@@ -132,13 +134,13 @@ def main() -> None:
 
     old_refs = []
     for path in ROOT.rglob("*"):
-        if not path.is_file() or path.suffix.lower() not in TEXT_EXTENSIONS or ".git" in path.parts:
+        if path.resolve() == SCRIPT or not path.is_file() or path.suffix.lower() not in TEXT_EXTENSIONS or ".git" in path.parts:
             continue
         try:
             text = path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             continue
-        if "area_reader_v2" in text or "runner_core" in text and "area_reader" in text:
+        if "area_reader_v2" in text or ("runner_core" in text and "area_reader" in text):
             old_refs.append(str(path.relative_to(ROOT)))
     if old_refs:
         raise SystemExit("obsolete area-reader references remain: " + ", ".join(old_refs))
