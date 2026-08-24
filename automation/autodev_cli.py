@@ -41,8 +41,21 @@ def _enable_interactive_consent_for_direct_cli(*, explicit: bool = False) -> Non
 
 
 def _help() -> str:
-    """Compatibility helper for callers/tests that render top-level public help."""
-    return cli_help.render_top_level()
+    text = cli_help.render_top_level()
+    extra = (
+        "Configuration:\n"
+        "  autodev models             Show effective OpenCode role/model mappings.\n"
+        "  --runtime NAME             Override role runtime for issue-to-pr/resume.\n"
+        "  Runtime precedence         explicit > AUTODEV_ROLE_RUNTIME > repository > user > opencode.\n"
+        "  OpenCode model mappings    Configure in opencode.json / opencode.jsonc.\n"
+        "\n"
+        "Contributors:\n"
+        "  End-user `autodev` commands are separate from source-development checks.\n"
+        "  Validate a checkout with `python -m compileall -q automation area_reader tests` and\n"
+        "  `python -m unittest discover -s tests -v`; contributor-only helpers are not public commands.\n"
+        "\n"
+    )
+    return text.replace("Privacy:\n", extra + "Privacy:\n", 1)
 
 
 def _friendly_error(message: str, *, command: str = "") -> int:
@@ -80,7 +93,7 @@ def _issue_to_pr(values: list[str]) -> tuple[list[str] | None, str]:
 
 def _render_requested_help(values: list[str]) -> tuple[bool, int]:
     try:
-        text = cli_help.render(values)
+        path = cli_help.resolve_path(values)
     except KeyError as exc:
         direct = values[0] if values else ""
         if direct in INTERNAL_FORWARD_COMMANDS and any(
@@ -89,8 +102,9 @@ def _render_requested_help(values: list[str]) -> tuple[bool, int]:
             return False, 0
         unknown = str(exc).strip("'")
         return True, _friendly_error(f"no public help topic for {unknown!r}")
-    if text is None:
+    if path is None:
         return False, 0
+    text = _help() if not path else cli_help.render_command(path)
     print(text, end="")
     return True, 0
 
