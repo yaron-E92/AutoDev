@@ -1,0 +1,25 @@
+name: Issue 181 remaining compatibility audit
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Remaining compatibility markers
+        shell: bash
+        run: |
+          set -u
+          echo '=== legacy/backward/deprecated markers ==='
+          git grep -n -Ei 'legacy|backward.?compat|compatibility|deprecated|fallback' -- automation integrations tests docs README.md CONTRIBUTING.md || true
+          echo '=== old reader/coder profile terms ==='
+          git grep -n -E 'reader.*coder|coder.*reader|READER_(PROVIDER|MODEL|COMMAND)|CODER_(PROVIDER|MODEL|COMMAND)|"coder"[[:space:]]*:' -- automation integrations tests docs README.md CONTRIBUTING.md || true
+          echo '=== issue 181 migration scaffolding ==='
+          find .github/workflows scripts -maxdepth 2 -type f -name '*issue*181*' -print | sort
