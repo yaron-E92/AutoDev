@@ -12,6 +12,7 @@ PUBLIC_DOCS = (
     "docs/model-roles.md",
     "docs/opencode.md",
     "docs/releases.md",
+    "docs/scheduler.md",
     "docs/windows-verification.md",
     "docs/workspace-scope.md",
     "examples/opencode/README.md",
@@ -51,6 +52,20 @@ class DocumentationContractTests(unittest.TestCase):
             opencode,
         )
 
+    def test_model_role_guide_lists_every_model_backed_role(self) -> None:
+        roles = self._read("docs/model-roles.md")
+        for role in (
+            "autodev-reader",
+            "autodev-synthesizer",
+            "autodev-planner",
+            "autodev-implementer",
+            "autodev-fixer",
+            "autodev-verifier",
+        ):
+            self.assertIn(role, roles)
+        self.assertIn("autodev models", roles)
+        self.assertNotIn("`automation.opencode_adapter_models`", roles)
+
     def test_release_guide_matches_current_packager_outputs(self) -> None:
         releases = self._read("docs/releases.md")
         self.assertIn("autodev-vX.Y.Z-common.zip", releases)
@@ -58,6 +73,14 @@ class DocumentationContractTests(unittest.TestCase):
         self.assertIn("workflow_dispatch", releases)
         self.assertNotIn("autodev-vX.Y.Z-linux.zip", releases)
         self.assertIn("Native Windows MSI and Linux DEB/RPM packages are **not available yet**", releases)
+
+    def test_scheduler_prerequisites_assume_installed_cli(self) -> None:
+        scheduler = self._read("docs/scheduler.md")
+        prerequisites = scheduler.split("## Install", 1)[0]
+        self.assertIn("docs/installation.md", self._read("README.md"))
+        self.assertIn("autodev repo install", prerequisites)
+        self.assertIn("autodev doctor", prerequisites)
+        self.assertNotIn("autodev install --user", prerequisites)
 
     def test_windows_verification_uses_public_repository_setup(self) -> None:
         windows = self._read("docs/windows-verification.md")
