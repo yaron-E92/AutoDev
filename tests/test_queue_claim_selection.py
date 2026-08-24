@@ -1,23 +1,25 @@
 from __future__ import annotations
 
+from automation import queue_contract
+
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from automation import issue_queue, queue_selection
+from automation import queue_selection
 
 
 class QueueClaimSelectionTests(unittest.TestCase):
     @staticmethod
-    def _state(number: int, created_at: str) -> issue_queue.QueueState:
-        return issue_queue.QueueState(
-            issue=issue_queue.QueueIssue(
+    def _state(number: int, created_at: str) -> queue_contract.QueueState:
+        return queue_contract.QueueState(
+            issue=queue_contract.QueueIssue(
                 number=number,
                 title=f"Issue {number}",
                 url=f"https://github.test/owner/repo/issues/{number}",
                 state="open",
-                labels=(issue_queue.MANAGED_LABEL, issue_queue.READY_LABEL),
+                labels=(queue_contract.MANAGED_LABEL, queue_contract.READY_LABEL),
                 created_at=created_at,
             ),
             reason="ready",
@@ -32,7 +34,7 @@ class QueueClaimSelectionTests(unittest.TestCase):
                 self._state(3, "2026-01-03T00:00:00Z"),
             ]
             with patch.object(
-                queue_selection.issue_queue,
+                queue_selection,
                 "reconcile_queue",
                 return_value=(states, ()),
             ), patch.object(
@@ -63,7 +65,7 @@ class QueueClaimSelectionTests(unittest.TestCase):
             repo = Path(temp_dir)
             states = [self._state(42, "2026-01-01T00:00:00Z")]
             with patch.object(
-                queue_selection.issue_queue,
+                queue_selection,
                 "reconcile_queue",
                 return_value=(states, ()),
             ):

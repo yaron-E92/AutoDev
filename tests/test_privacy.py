@@ -6,8 +6,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from automation import privacy
-from automation.model_providers import ModelConfig, ModelProvider, ProviderResponse
-from automation.model_roles import ModelInvocationError, invoke_model
+from automation.provider_contract import ModelConfig, ModelProvider, ProviderResponse
 
 
 class _RecordingProvider(ModelProvider):
@@ -141,12 +140,10 @@ class PrivacyTests(unittest.TestCase):
                 model="m",
                 base_url="https://unknown.example/v1",
             )
-            with self.assertRaises(ModelInvocationError) as raised:
-                invoke_model(provider, config, "SECRET REPOSITORY PROMPT", role="planner", repo=repo)
+            with self.assertRaises(privacy.PrivacyError):
+                privacy.authorize_direct_call(provider, config, role="planner", repo=repo)
 
         self.assertFalse(provider.called)
-        self.assertEqual(raised.exception.classification, "privacy_blocked")
-        self.assertNotIn("SECRET REPOSITORY PROMPT", json.dumps(raised.exception.record))
 
     def test_no_training_profile_allows_groq_but_strict_requires_consent_without_zdr_attestation(self):
         config = ModelConfig(
@@ -401,7 +398,8 @@ class PrivacyTests(unittest.TestCase):
                 model="vendor/model",
                 base_url="https://openrouter.ai/api/v1",
             )
-            invoke_model(provider, config, "TOP SECRET PROMPT", role="planner", repo=repo)
+            privacy.authorize_direct_call(provider, config, role="planner", repo=repo)
+            provider.invoke("TOP SECRET PROMPT", model=config.model, timeout_seconds=config.timeout_seconds)
             audit = (repo / ".autodev-run" / privacy.PRIVACY_AUDIT).read_text(encoding="utf-8")
 
         self.assertIn("request-verified", audit)

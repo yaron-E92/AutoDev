@@ -256,7 +256,7 @@ def _next_steps(
         head = str(payload.get("pr_head_sha", "") or state.get("PrHeadSha", ""))
         return [
             f"Wait for the required checks on exact PR head `{head}` to reach a terminal state." if head else "Wait for the required PR checks to reach a terminal state.",
-            "Run `python3 .opencode/autodev.py coordinate --resume`.",
+            "Run `autodev coordinate --resume`.",
             "If the same-head checks pass, AutoDev should advance to PR_READY; only a terminal unsuccessful check should enter the CI repair path.",
         ]
 
@@ -264,12 +264,12 @@ def _next_steps(
     if repeated and classification == workflow_stages.FAILURE_DETERMINISTIC:
         return [
             "Do not retry the unchanged run; inspect the decisive evidence below and correct the deterministic cause first.",
-            "After the source/configuration is corrected, run `python3 .opencode/autodev.py coordinate --resume` if the checkpoint remains valid; otherwise restart intentionally.",
+            "After the source/configuration is corrected, run `autodev coordinate --resume` if the checkpoint remains valid; otherwise restart intentionally.",
         ]
     if classification == workflow_stages.FAILURE_TRANSIENT:
         return [
             "Correct or wait out the reported provider/GitHub/infrastructure condition.",
-            "Run `python3 .opencode/autodev.py coordinate --resume`; completed durable stages should be reused.",
+            "Run `autodev coordinate --resume`; completed durable stages should be reused.",
         ]
     if outcome == "BLOCKED":
         return [
@@ -278,7 +278,7 @@ def _next_steps(
         ]
     return [
         "Inspect the decisive evidence/artifact paths below and correct the reported cause.",
-        "Run `python3 .opencode/autodev.py coordinate --resume` when the run is again safely resumable.",
+        "Run `autodev coordinate --resume` when the run is again safely resumable.",
     ]
 
 

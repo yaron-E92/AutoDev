@@ -16,35 +16,36 @@ OPEN_CODE_ROOT = REPO_ROOT / "integrations" / "opencode"
 
 class OpenCodeIntegrationTests(unittest.TestCase):
     def test_public_role_commands_are_isolated_portable_and_model_free(self):
-        expected_agents = {
-            "autodev-read.md": "autodev-reader",
-            "autodev-plan.md": "autodev-planner",
-            "autodev-implement.md": "autodev-implementer",
-            "autodev-fix.md": "autodev-fixer",
-            "autodev-verify.md": "autodev-verifier",
+        expected_roles = {
+            "autodev-read.md": "reader",
+            "autodev-plan.md": "planner",
+            "autodev-implement.md": "implementer",
+            "autodev-fix.md": "fixer",
+            "autodev-verify.md": "verifier",
         }
-        for name, agent in expected_agents.items():
+        for name, role in expected_roles.items():
             text = (OPEN_CODE_ROOT / "commands" / name).read_text(encoding="utf-8")
             self.assertIn("$ARGUMENTS", text)
-            self.assertIn("subtask: true", text)
-            self.assertIn(f"agent: {agent}", text)
-            self.assertIn(".opencode/autodev.py", text)
-            self.assertNotIn("autodev.ps1", text)
+            self.assertIn("subtask: false", text)
+            self.assertIn("agent: build", text)
+            self.assertIn(f"!`autodev role --role {role}", text)
+            self.assertIn("--interactive-consent", text)
+            self.assertNotIn(".opencode/autodev", text)
             self.assertNotIn("model:", text)
             self.assertNotIn("api_key", text.casefold())
-            self.assertNotIn("portable bridge `accept", text)
 
     def test_coordinator_is_primary_portable_and_task_allowlisted(self):
         command = (OPEN_CODE_ROOT / "commands" / "autodev-issue-to-pr.md").read_text(encoding="utf-8")
         agent = (OPEN_CODE_ROOT / "agents" / "autodev-coordinator.md").read_text(encoding="utf-8")
 
-        self.assertIn("$ARGUMENTS", command)
-        self.assertIn("agent: autodev-coordinator", command)
+        self.assertIn("$1", command)
+        self.assertIn("agent: build", command)
         self.assertIn("subtask: false", command)
+        self.assertIn("!`autodev coordinate", command)
+        self.assertIn("--interactive-consent", command)
         self.assertIn("mode: primary", agent)
         self.assertIn("edit: deny", agent)
-        self.assertIn(".opencode/autodev.py", agent)
-        self.assertNotIn("autodev.ps1", agent)
+        self.assertNotIn(".opencode/autodev", agent)
         self.assertNotIn("windows/scripts", agent)
         for role in (
             "autodev-reader",
@@ -59,8 +60,7 @@ class OpenCodeIntegrationTests(unittest.TestCase):
         self.assertNotIn("api_key", agent.casefold())
         self.assertIn("non-retryable-deterministic", agent)
         self.assertIn("repeated-failure fingerprint", agent)
-        self.assertNotIn("prepare --role implementer", agent)
-        self.assertNotIn("autodev.py ...", agent)
+        self.assertIn('"autodev stage *": allow', agent)
 
     def test_role_agents_are_subagents_model_free_and_use_exact_bridge_permissions(self):
         files = sorted(path.name for path in (OPEN_CODE_ROOT / "agents").glob("autodev-*.md"))
@@ -70,12 +70,11 @@ class OpenCodeIntegrationTests(unittest.TestCase):
             if name == "autodev-coordinator.md":
                 continue
             text = (OPEN_CODE_ROOT / "agents" / name).read_text(encoding="utf-8")
-            self.assertIn("mode: subagent", text)
+            self.assertIn("mode: all", text)
             self.assertIn("task: deny", text)
-            self.assertIn(".opencode/autodev.py", text)
-            self.assertNotIn('"python .opencode/autodev.py *": allow', text)
-            self.assertNotIn('"python3 .opencode/autodev.py *": allow', text)
-            self.assertNotIn("autodev.ps1", text)
+            self.assertIn("Canonical AutoDev launcher", text)
+            self.assertIn("autodev", text)
+            self.assertNotIn(".opencode/autodev", text)
             self.assertNotIn("model:", text)
             self.assertNotIn("api_key", text.casefold())
 
@@ -121,26 +120,17 @@ class OpenCodeIntegrationTests(unittest.TestCase):
         self.assertIn("do not run prepare", body.casefold())
 
     def test_checked_in_bridge_snippets_use_only_real_argparse_commands(self):
-        parser = opencode_adapter_cli.build_parser()
-        paths = list((OPEN_CODE_ROOT / "agents").glob("autodev-*.md")) + list(
-            (OPEN_CODE_ROOT / "commands").glob("autodev-*.md")
-        )
-        pattern = re.compile(r"`(python3? \.opencode/autodev\.py [^`]+)`")
+        paths = list((OPEN_CODE_ROOT / "commands").glob("autodev-*.md"))
+        pattern = re.compile(r"!`(autodev [^`]+)`")
         seen = 0
         for path in paths:
             text = path.read_text(encoding="utf-8")
+            self.assertNotIn(".opencode/autodev", text, path.name)
+            self.assertNotIn("__AUTODEV_PYTHON_SHELL__", text, path.name)
             for snippet in pattern.findall(text):
                 seen += 1
-                tokens = shlex.split(snippet)[2:]
-                self.assertIn(tokens[0], {"prepare", "accept", "stage"}, f"{path}: {snippet}")
-                normalized = []
-                for index, token in enumerate(tokens):
-                    if token.startswith("<") and token.endswith(">"):
-                        previous = tokens[index - 1] if index else ""
-                        token = "0" if previous == "--attempt" else "value"
-                    normalized.append(token)
-                parser.parse_args(normalized)
-        self.assertGreater(seen, 10)
+                self.assertTrue(snippet.startswith("autodev "), f"{path}: {snippet}")
+        self.assertGreaterEqual(seen, 7)
 
     def test_install_is_idempotent_and_preserves_user_opencode_config(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -153,27 +143,18 @@ class OpenCodeIntegrationTests(unittest.TestCase):
             project_json.write_text('{"agent":{"autodev-reader":{"model":"provider/reader"}}}\n', encoding="utf-8")
             project_jsonc.write_text('// user-owned\n{"model":"provider/default"}\n', encoding="utf-8")
 
-            first = opencode_adapter_assets.install_assets(target, REPO_ROOT, python_command="python-custom")
-            second = opencode_adapter_assets.install_assets(target, REPO_ROOT, python_command="python-custom")
-            config = json.loads((target / ".opencode" / "autodev.json").read_text(encoding="utf-8"))
+            first = opencode_adapter_assets.install_assets(target, REPO_ROOT)
+            second = opencode_adapter_assets.install_assets(target, REPO_ROOT)
 
             self.assertEqual(len(first), len(second))
             self.assertEqual(custom.read_text(encoding="utf-8"), "user-owned\n")
-            self.assertEqual(
-                project_json.read_text(encoding="utf-8"),
-                '{"agent":{"autodev-reader":{"model":"provider/reader"}}}\n',
-            )
-            self.assertEqual(
-                project_jsonc.read_text(encoding="utf-8"),
-                '// user-owned\n{"model":"provider/default"}\n',
-            )
-            self.assertEqual(config["autodev_root"], str(REPO_ROOT.resolve()))
-            self.assertEqual(config["python"], "python-custom")
-            self.assertTrue((target / ".opencode" / "autodev.py").is_file())
-            self.assertTrue((target / ".opencode" / "autodev.ps1").is_file())
+            self.assertEqual(project_json.read_text(encoding="utf-8"), '{"agent":{"autodev-reader":{"model":"provider/reader"}}}\n')
+            self.assertEqual(project_jsonc.read_text(encoding="utf-8"), '// user-owned\n{"model":"provider/default"}\n')
+            self.assertFalse((target / ".opencode" / "autodev.json").exists())
+            self.assertFalse((target / ".opencode" / "autodev.py").exists())
+            self.assertFalse((target / ".opencode" / "autodev.ps1").exists())
             self.assertTrue((target / ".opencode" / "commands" / "autodev-issue-to-pr.md").is_file())
             self.assertTrue((target / ".opencode" / "agents" / "autodev-coordinator.md").is_file())
-            self.assertNotIn("api_key", json.dumps(config).casefold())
 
     def test_all_seven_opencode_roles_can_be_mapped_independently(self):
         agents = {
@@ -355,7 +336,6 @@ class OpenCodeIntegrationTests(unittest.TestCase):
                 "Bounded handoff with enough repository evidence to remain valid for planner prompt rendering.\n",
                 encoding="utf-8",
             )
-            (current / "coder-plan.md").write_text("Reader plan\n", encoding="utf-8")
             (current / "recommended-command-groups.json").write_text("{}\n", encoding="utf-8")
 
             path = opencode_adapter_roles.prepare_role("planner", repo, "65", autodev_root=REPO_ROOT)
@@ -366,7 +346,7 @@ class OpenCodeIntegrationTests(unittest.TestCase):
             self.assertIn("Bounded handoff", prompt)
             self.assertIn("Role-specific prompt policy (lite; autodev-ponytail-v1)", prompt)
             self.assertIn("# GitHub Issue #65", prompt)
-            for heading in prompt_runner.REQUIRED_PLAN_HEADINGS:
+            for heading in planner_output.REQUIRED_PLAN_HEADINGS:
                 self.assertIn(heading, template)
             self.assertEqual(contracts["protocol_correction_limit"], 1)
             self.assertEqual(set(contracts["roles"]), set(opencode_adapter_contract.ROLE_NAMES))
@@ -461,7 +441,7 @@ class OpenCodeIntegrationTests(unittest.TestCase):
             plan = current / "plan.md"
             plan.write_text("not a valid six-section plan\n", encoding="utf-8")
             (current / "plan.template.md").write_text(
-                "\n\n".join(prompt_runner.REQUIRED_PLAN_HEADINGS) + "\n",
+                "\n\n".join(planner_output.REQUIRED_PLAN_HEADINGS) + "\n",
                 encoding="utf-8",
             )
 
@@ -480,11 +460,15 @@ class OpenCodeIntegrationTests(unittest.TestCase):
         parser = opencode_adapter_cli.build_parser()
         for contract in opencode_adapter_contract.role_contracts().values():
             accept = str(contract["accept"])
-            parser.parse_args(shlex.split(accept)[2:])
+            tokens = shlex.split(accept)
+            self.assertEqual(tokens[0], "autodev")
+            parser.parse_args(tokens[1:])
             prepare = contract["prepare"]
             prepare_commands = prepare if isinstance(prepare, list) else [prepare]
             for command in prepare_commands:
-                parser.parse_args(shlex.split(str(command))[2:])
+                tokens = shlex.split(str(command))
+                self.assertEqual(tokens[0], "autodev")
+                parser.parse_args(tokens[1:])
 
     def test_semantic_repair_then_pass_preserves_attempt_history(self):
         repair = {
@@ -527,16 +511,13 @@ class OpenCodeIntegrationTests(unittest.TestCase):
     def test_opencode_workflow_adapter_has_no_windows_workflow_backend(self):
         adapter = (REPO_ROOT / "automation" / "opencode_adapter_workflow.py").read_text(encoding="utf-8")
         runtime = (REPO_ROOT / "automation" / "opencode_runtime.py").read_text(encoding="utf-8")
-        portable = (REPO_ROOT / "integrations" / "opencode" / "autodev.py").read_text(encoding="utf-8")
 
         self.assertNotIn("windows/scripts", adapter)
         self.assertNotIn("windows/scripts", runtime)
         self.assertNotIn("issue-to-pr-cycle.ps1", adapter)
         self.assertNotIn("issue-to-pr-cycle.ps1", runtime)
-        self.assertNotIn("pwsh", portable)
-        self.assertIn('shutil.which("autodev")', portable)
-        self.assertIn("automation.autodev_cli", portable)
-        self.assertNotIn("automation.opencode_runtime", portable)
+        self.assertFalse((OPEN_CODE_ROOT / "autodev.py").exists())
+        self.assertFalse((OPEN_CODE_ROOT / "autodev.ps1").exists())
         self.assertIn("opencode_adapter", runtime)
 
     def _write_state(self, repo: Path, **overrides):
@@ -572,7 +553,7 @@ from automation import opencode_adapter_roles
 
 from automation import opencode_adapter_workflow
 
-from automation import prompt_runner
+from automation import planner_output
 
 from automation import semantic_contract
 

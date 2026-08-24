@@ -1,24 +1,32 @@
 {
   "defaultProfile": "auto",
-  "verifyCommandTemplate": "pwsh -File \"{{CodexToolsDir}}\\codex-verify.ps1\" -Profiles \"{{ProfilesCsv}}\"",
+  "verifyCommandTemplate": "pwsh -File \"{~{CodexToolsDir}~}\\codex-verify.ps1\" -Profiles \"{~{ProfilesCsv}~}\"",
   "profiles": {
     "backend": {
-      "labels": ["area:backend"],
+      "labels": [
+        "area:backend"
+      ],
       "verifyProfile": "backend",
       "stackContext": "- Backend/API area\n- Use repository AGENTS.md for architecture boundaries\n- Do not touch Web, MAUI, Python, or unrelated presentation layers unless explicitly required"
     },
     "web": {
-      "labels": ["area:web"],
+      "labels": [
+        "area:web"
+      ],
       "verifyProfile": "web",
       "stackContext": "- React + TypeScript + Vite web presentation layer\n- Use repository AGENTS.md for architecture boundaries\n- Do not touch Backend, MAUI, or Python unless explicitly required"
     },
     "maui": {
-      "labels": ["area:maui"],
+      "labels": [
+        "area:maui"
+      ],
       "verifyProfile": "maui",
       "stackContext": "- .NET MAUI presentation layer\n- Use repository AGENTS.md for architecture boundaries\n- Do not touch Backend, persistence, domain logic, Web, or Python unless explicitly required"
     },
     "python": {
-      "labels": ["area:python"],
+      "labels": [
+        "area:python"
+      ],
       "verifyProfile": "python",
       "stackContext": "- Python area\n- Use repository AGENTS.md for architecture boundaries\n- Do not touch Backend, Web, or MAUI unless explicitly required"
     }

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from automation import claim_contract
+
 import io
 import json
 import tempfile
@@ -7,7 +9,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from automation import distributed_claims, queue_selection, scheduler
+from automation import queue_selection, scheduler
 
 
 def make_registration(root: Path) -> tuple[Path, scheduler.SchedulerRegistration]:
@@ -31,8 +33,8 @@ def make_registration(root: Path) -> tuple[Path, scheduler.SchedulerRegistration
     return path, registration
 
 
-def claim(issue: int, worker: str = "worker-a") -> distributed_claims.Claim:
-    return distributed_claims.Claim(
+def claim(issue: int, worker: str = "worker-a") -> claim_contract.Claim:
+    return claim_contract.Claim(
         repository="owner/repo",
         issue_number=issue,
         worker_id=worker,
@@ -41,13 +43,13 @@ def claim(issue: int, worker: str = "worker-a") -> distributed_claims.Claim:
         acquired_at="2026-08-23T08:00:00Z",
         heartbeat_at="2026-08-23T08:00:00Z",
         lease_seconds=7200,
-        ref=distributed_claims.claim_ref(issue),
+        ref=claim_contract.claim_ref(issue),
         sha=("a" if worker == "worker-a" else "b") * 40,
     )
 
 
 class DummyLease:
-    def __init__(self, _repo: Path, owned: distributed_claims.Claim, **_kwargs):
+    def __init__(self, _repo: Path, owned: claim_contract.Claim, **_kwargs):
         self.claim = owned
         self.lost = False
 
@@ -66,17 +68,17 @@ class SchedulerClaimTests(unittest.TestCase):
         return (
             patch.object(scheduler, "_prepare_worker", return_value=queue_selection.ExistingRun("NONE")),
             patch.object(
-                scheduler.distributed_claims,
+                scheduler.claim_identity,
                 "load_claim_policy",
-                return_value=distributed_claims.ClaimPolicy(max_concurrent_issues=2, lease_minutes=120),
+                return_value=claim_contract.ClaimPolicy(max_concurrent_issues=2, lease_minutes=120),
             ),
             patch.object(
-                scheduler.distributed_claims,
+                scheduler.claim_identity,
                 "worker_identity",
-                return_value=distributed_claims.WorkerIdentity("worker-a"),
+                return_value=claim_contract.WorkerIdentity("worker-a"),
             ),
-            patch.object(scheduler.distributed_claims, "reconcile_stale_claims"),
-            patch.object(scheduler.distributed_claims, "HeartbeatLease", DummyLease),
+            patch.object(scheduler.claim_recovery, "reconcile_stale_claims"),
+            patch.object(scheduler.claim_lease, "HeartbeatLease", DummyLease),
         )
 
     def test_losing_claim_race_reselects_next_eligible_issue(self):
@@ -100,12 +102,12 @@ class SchedulerClaimTests(unittest.TestCase):
 
             def acquire(_repo, _github_repo, issue_number, *_args, **_kwargs):
                 if issue_number == 1:
-                    return distributed_claims.ClaimAttempt(
+                    return claim_contract.ClaimAttempt(
                         "BUSY",
                         owner=claim(1, "worker-b"),
                         detail="race lost",
                     )
-                return distributed_claims.ClaimAttempt(
+                return claim_contract.ClaimAttempt(
                     "ACQUIRED",
                     claim=acquired_second,
                     owner=acquired_second,
@@ -118,7 +120,7 @@ class SchedulerClaimTests(unittest.TestCase):
 
             common = self._common()
             with common[0], common[1], common[2], common[3], common[4], patch.object(
-                scheduler.distributed_claims,
+                scheduler.claim_repository,
                 "list_claims",
                 side_effect=[(), (), ()],
             ), patch.object(
@@ -126,7 +128,7 @@ class SchedulerClaimTests(unittest.TestCase):
                 "select_next",
                 side_effect=select_next,
             ), patch.object(
-                scheduler.distributed_claims,
+                scheduler.claim_lease,
                 "acquire_claim",
                 side_effect=acquire,
             ), patch.object(
@@ -134,7 +136,7 @@ class SchedulerClaimTests(unittest.TestCase):
                 "_coordinator_state",
                 return_value="ReadyForReview",
             ), patch.object(
-                scheduler.distributed_claims,
+                scheduler.claim_lease,
                 "release_claim",
                 return_value=True,
             ):
@@ -170,7 +172,7 @@ class SchedulerClaimTests(unittest.TestCase):
             claims = (claim(1), claim(2, "worker-b"))
             common = self._common()
             with common[0], common[1], common[2], common[3], common[4], patch.object(
-                scheduler.distributed_claims,
+                scheduler.claim_repository,
                 "list_claims",
                 return_value=claims,
             ), patch.object(
@@ -201,21 +203,21 @@ class SchedulerClaimTests(unittest.TestCase):
                 next_action="verifier",
                 reason="resume first",
             )
-            busy = distributed_claims.ClaimAttempt(
+            busy = claim_contract.ClaimAttempt(
                 "BUSY",
                 owner=claim(42, "worker-b"),
                 detail="owned elsewhere",
             )
             with patch.object(scheduler, "_prepare_worker", return_value=existing), patch.object(
-                scheduler.distributed_claims,
+                scheduler.claim_identity,
                 "load_claim_policy",
-                return_value=distributed_claims.ClaimPolicy(max_concurrent_issues=2),
+                return_value=claim_contract.ClaimPolicy(max_concurrent_issues=2),
             ), patch.object(
-                scheduler.distributed_claims,
+                scheduler.claim_identity,
                 "worker_identity",
-                return_value=distributed_claims.WorkerIdentity("worker-a"),
-            ), patch.object(scheduler.distributed_claims, "reconcile_stale_claims"), patch.object(
-                scheduler.distributed_claims,
+                return_value=claim_contract.WorkerIdentity("worker-a"),
+            ), patch.object(scheduler.claim_recovery, "reconcile_stale_claims"), patch.object(
+                scheduler.claim_repository,
                 "list_claims",
                 return_value=(busy.owner,),
             ), patch.object(
@@ -229,7 +231,7 @@ class SchedulerClaimTests(unittest.TestCase):
                     explanation="resume first",
                 ),
             ), patch.object(
-                scheduler.distributed_claims,
+                scheduler.claim_lease,
                 "acquire_claim",
                 return_value=busy,
             ), patch.object(
@@ -259,7 +261,7 @@ class SchedulerClaimTests(unittest.TestCase):
                 owned = claim(7)
                 common = self._common()
                 with common[0], common[1], common[2], common[3], common[4], patch.object(
-                    scheduler.distributed_claims,
+                    scheduler.claim_repository,
                     "list_claims",
                     return_value=(),
                 ), patch.object(
@@ -271,9 +273,9 @@ class SchedulerClaimTests(unittest.TestCase):
                         issue_number=7,
                     ),
                 ), patch.object(
-                    scheduler.distributed_claims,
+                    scheduler.claim_lease,
                     "acquire_claim",
-                    return_value=distributed_claims.ClaimAttempt(
+                    return_value=claim_contract.ClaimAttempt(
                         "ACQUIRED",
                         claim=owned,
                         owner=owned,
@@ -283,7 +285,7 @@ class SchedulerClaimTests(unittest.TestCase):
                     "_coordinator_state",
                     return_value=durable_state,
                 ), patch.object(
-                    scheduler.distributed_claims,
+                    scheduler.claim_lease,
                     "release_claim",
                     return_value=True,
                 ) as release:
@@ -311,11 +313,11 @@ class SchedulerClaimTests(unittest.TestCase):
             owned = claim(8)
             common = self._common()
             with common[0], common[1], common[2], common[3], patch.object(
-                scheduler.distributed_claims,
+                scheduler.claim_lease,
                 "HeartbeatLease",
                 LostLease,
             ), patch.object(
-                scheduler.distributed_claims,
+                scheduler.claim_repository,
                 "list_claims",
                 return_value=(),
             ), patch.object(
@@ -327,9 +329,9 @@ class SchedulerClaimTests(unittest.TestCase):
                     issue_number=8,
                 ),
             ), patch.object(
-                scheduler.distributed_claims,
+                scheduler.claim_lease,
                 "acquire_claim",
-                return_value=distributed_claims.ClaimAttempt(
+                return_value=claim_contract.ClaimAttempt(
                     "ACQUIRED",
                     claim=owned,
                     owner=owned,

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from automation import privacy_grant_cli, privacy_grant_commands, privacy_grant_matching, queue_contract, queue_github, queue_presentation, queue_workflow
+
 import hashlib
 import json
 import shutil
@@ -7,7 +9,7 @@ import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, TextIO
-from automation import issue_queue, privacy, privacy_grants, queue_selection, scheduler, workflow_stages
+from automation import privacy, queue_selection, scheduler, workflow_stages
 
 from automation.scheduler_health_contract import (
     HealthSnapshot,
@@ -17,7 +19,7 @@ from automation.scheduler_health_contract import (
 
 def _privacy_grant_summary(repo: Path) -> dict[str, int]:
     counts = {"active": 0, "expired": 0, "revoked": 0}
-    for record in privacy_grants.current_grants(repo):
+    for record in privacy_grant_commands.current_grants(repo):
         status = str(record.get("status", ""))
         if status in counts:
             counts[status] += 1
@@ -34,7 +36,7 @@ def _privacy_probe(
     if not policy.enabled or policy.local_only or policy.consent_mode != "explicit":
         return False, counts
     try:
-        required = privacy_grants._resolve_requirements(repo, runner=runner, which=which)  # type: ignore[attr-defined]
+        required = privacy_grant_cli._resolve_requirements(repo, runner=runner, which=which)  # type: ignore[attr-defined]
     except Exception:
         # Health remains useful even when optional route introspection is unavailable.
         # The actual coordinator privacy gate still fails closed before any model call.
@@ -42,7 +44,7 @@ def _privacy_probe(
     uncovered = [
         item
         for item in required
-        if privacy_grants.matching_grant(repo, policy, item) is None
+        if privacy_grant_matching.matching_grant(repo, policy, item) is None
     ]
     return bool(uncovered), counts
 
@@ -59,7 +61,7 @@ def _raw_run_status(repo: Path) -> tuple[str, int]:
         int(state.get("IssueNumber", 0) or 0),
     )
 
-def _blocker_counts(states: list[issue_queue.QueueState]) -> dict[str, int]:
+def _blocker_counts(states: list[queue_contract.QueueState]) -> dict[str, int]:
     counts: dict[int, int] = {}
     for state in states:
         if state.reason != "blocked":
@@ -69,7 +71,7 @@ def _blocker_counts(states: list[issue_queue.QueueState]) -> dict[str, int]:
     ordered = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
     return {str(number): count for number, count in ordered}
 
-def _first_issue_number(states: list[issue_queue.QueueState], reason: str) -> int:
+def _first_issue_number(states: list[queue_contract.QueueState], reason: str) -> int:
     return min(
         (state.issue.number for state in states if state.reason == reason),
         default=0,
@@ -121,11 +123,11 @@ def compute_health(
     privacy_probe: Callable[[Path], tuple[bool, dict[str, int]]] | None = None,
 ) -> HealthSnapshot:
     repo = repo.expanduser().resolve()
-    states = issue_queue.inspect_queue(repo, github_repo, runner=runner)
-    summary = issue_queue.queue_summary(states)
-    issues = issue_queue.list_issues(repo, github_repo, runner=runner)
+    states = queue_workflow.inspect_queue(repo, github_repo, runner=runner)
+    summary = queue_presentation.queue_summary(states)
+    issues = queue_github.list_issues(repo, github_repo, runner=runner)
     unmanaged_open = sum(
-        issue.state == "open" and issue_queue.MANAGED_LABEL not in issue.labels
+        issue.state == "open" and queue_contract.MANAGED_LABEL not in issue.labels
         for issue in issues
     )
     existing = queue_selection.inspect_existing_run(repo)

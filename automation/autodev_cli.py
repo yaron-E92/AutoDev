@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from automation import claim_cli, scheduler_health_cli
+
 import os
 import sys
 from pathlib import Path
@@ -79,12 +81,10 @@ def run(argv: list[str] | None = None) -> int:
         return repo_setup.run_cli(rest)
     if command == "scheduler":
         if rest and rest[0] == "worker-id":
-            from automation import distributed_claims
 
-            return distributed_claims.run_worker_cli(rest[1:])
-        from automation import scheduler_health
+            return claim_cli.run_worker_cli(rest[1:])
 
-        return scheduler_health.run_cli(rest)
+        return scheduler_health_cli.run_cli(rest)
 
     _enable_interactive_consent_for_direct_cli(explicit=explicit_interactive)
     if command == "resume":

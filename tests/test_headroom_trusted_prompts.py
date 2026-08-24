@@ -11,7 +11,7 @@ TEMPLATES = REPO_ROOT / "promptTemplates"
 def render(name, values):
     value = (TEMPLATES / name).read_text(encoding="utf-8")
     for key, replacement in values.items():
-        value = value.replace("{{" + key + "}}", replacement)
+        value = value.replace("{~{" + key + "}~}", replacement)
     return value + "\n\nOutput contract:\nPROTECTED OUTPUT CONTRACT\n"
 
 

@@ -387,7 +387,7 @@ class WindowsVerificationTests(unittest.TestCase):
             run_manifest.save_manifest(manifest_path, manifest)
             state = _state()
             state["PrHeadSha"] = HEAD
-            state["Status"] = "CiPassedVerifierPromptRendered"
+            state["Status"] = "CiPassed"
 
             self.assertEqual(opencode_resume_status.resume_action(manifest, state), "pr-and-ci")
 

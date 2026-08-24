@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from automation import repair_budget_resume
+
 from automation import windows_verification_manifest
 
 from automation import windows_verification_contract
@@ -8,7 +10,7 @@ from automation import opencode_resume_status
 
 from pathlib import Path
 
-from automation import role_coordinator_contract, role_coordinator_flow, role_resume, run_manifest, semantic_repair_budget, workflow_stages
+from automation import role_coordinator_contract, role_coordinator_flow, role_resume, run_manifest, workflow_stages
 
 
 class _CiWaiting(RuntimeError):
@@ -56,9 +58,9 @@ def _install_resume_bridge() -> None:
         # The legacy OpenCode resume wrapper used to own this reopening hook.
         # It is workflow policy, not runtime policy, so apply it before generic
         # snapshot reconciliation regardless of the selected role runtime.
-        semantic_repair_budget.maybe_reopen_exhausted_budget(resolved)
+        repair_budget_resume.maybe_reopen_exhausted_budget(resolved)
         payload = original_resume(resolved, snapshots, **kwargs)
-        semantic_repair_budget._append_resume_metadata(resolved, payload)
+        repair_budget_resume._append_resume_metadata(resolved, payload)
 
         current = resolved / workflow_stages.CURRENT_DIR
         try:

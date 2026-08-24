@@ -8,14 +8,14 @@ from automation import opencode_resume_checkpoint
 
 import argparse
 import json
-import os
 import sys
 from pathlib import Path
 from automation import workflow_stages
-from automation.model_providers import ProviderError, load_provider_config
-from automation.prompt_runner import (
+from automation.provider_contract import ProviderError
+from automation.provider_factory import load_provider_config
+from automation.planner_output import (
     REQUIRED_PLAN_HEADINGS,
-    PromptRunnerError,
+    PlannerOutputError,
     handle_planner_output,
 )
 from automation.semantic_artifacts import write_final_verdict, write_semantic_result
@@ -48,10 +48,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Thin OpenCode frontend for existing AutoDev role artifacts.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    install = subparsers.add_parser("install")
-    install.add_argument("--target-repo", default=".")
-    install.add_argument("--autodev-root", default=str(AUTODEV_ROOT))
-    install.add_argument("--python", default=os.environ.get("PYTHON", "python"))
 
     models = subparsers.add_parser("models")
     models.add_argument("--repo", default=".")
@@ -95,24 +91,6 @@ def build_parser() -> argparse.ArgumentParser:
 def run(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        if args.command == "install":
-            from automation import opencode_install
-
-            print(
-                "DEPRECATED: `python -m automation.opencode_adapter install` is a compatibility shim; "
-                "use `python -m automation.opencode_install` instead.",
-                file=sys.stderr,
-            )
-            return opencode_install.run(
-                [
-                    "--target-repo",
-                    args.target_repo,
-                    "--autodev-root",
-                    args.autodev_root,
-                    "--python",
-                    args.python,
-                ]
-            )
         if args.command == "models":
             mappings = resolve_opencode_model_mappings(Path(args.repo))
             print(render_model_mappings(mappings))
@@ -170,7 +148,7 @@ def run(argv: list[str] | None = None) -> int:
                 )
             except (
                 OpenCodeAdapterError,
-                PromptRunnerError,
+                PlannerOutputError,
                 SemanticVerifierError,
                 ProviderError,
                 workflow_stages.WorkflowStageError,
@@ -190,7 +168,7 @@ def run(argv: list[str] | None = None) -> int:
             return code
     except (
         OpenCodeAdapterError,
-        PromptRunnerError,
+        PlannerOutputError,
         SemanticVerifierError,
         ProviderError,
         workflow_stages.WorkflowStageError,

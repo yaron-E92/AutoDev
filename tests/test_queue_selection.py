@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from automation import queue_cli, queue_contract
+
 import io
 import json
 import tempfile
@@ -7,22 +9,22 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from automation import issue_queue, queue_selection
+from automation import queue_selection
 
 
 class SelectionGitHub:
     def __init__(self):
         self.repo = "owner/repo"
         self.labels = {
-            issue_queue.MANAGED_LABEL,
-            issue_queue.READY_LABEL,
-            issue_queue.BLOCKED_LABEL,
-            issue_queue.ATTENTION_LABEL,
-            issue_queue.RUNNING_LABEL,
+            queue_contract.MANAGED_LABEL,
+            queue_contract.READY_LABEL,
+            queue_contract.BLOCKED_LABEL,
+            queue_contract.ATTENTION_LABEL,
+            queue_contract.RUNNING_LABEL,
         }
         self.label_metadata: dict[str, dict[str, str]] = {}
         for name in self.labels:
-            color, description = issue_queue.LABEL_SPECS.get(
+            color, description = queue_contract.LABEL_SPECS.get(
                 name,
                 ("ededed", ""),
             )
@@ -40,7 +42,7 @@ class SelectionGitHub:
     def _ensure_label_metadata(self, name: str) -> None:
         if name in self.label_metadata:
             return
-        color, description = issue_queue.LABEL_SPECS.get(
+        color, description = queue_contract.LABEL_SPECS.get(
             name,
             ("ededed", ""),
         )
@@ -227,7 +229,7 @@ class SelectionGitHub:
 class QueueSelectionTests(unittest.TestCase):
     def _ready(self, fake: SelectionGitHub, number: int, **kwargs) -> None:
         labels = list(kwargs.pop("labels", []))
-        labels.append(issue_queue.MANAGED_LABEL)
+        labels.append(queue_contract.MANAGED_LABEL)
         fake.add_issue(number, labels=labels, **kwargs)
 
     def _write_roadmap(self, repo: Path, text: str) -> None:
@@ -274,7 +276,7 @@ class QueueSelectionTests(unittest.TestCase):
             self._ready(
                 fake,
                 30,
-                labels=[issue_queue.ATTENTION_LABEL],
+                labels=[queue_contract.ATTENTION_LABEL],
                 created_at="2026-01-02T00:00:00Z",
             )
             fake.add_issue(200)
@@ -342,10 +344,10 @@ class QueueSelectionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
             fake = SelectionGitHub()
-            self._ready(fake, 1, labels=[issue_queue.ATTENTION_LABEL])
+            self._ready(fake, 1, labels=[queue_contract.ATTENTION_LABEL])
             output = io.StringIO()
 
-            code = issue_queue.run_cli(
+            code = queue_cli.run_cli(
                 ["next", "--github-repo", fake.repo, "--json"],
                 repo=repo,
                 runner=fake,
@@ -410,7 +412,7 @@ class QueueSelectionTests(unittest.TestCase):
             )
             err = io.StringIO()
 
-            code = issue_queue.run_cli(
+            code = queue_cli.run_cli(
                 ["next", "--github-repo", fake.repo],
                 repo=repo,
                 runner=fake,

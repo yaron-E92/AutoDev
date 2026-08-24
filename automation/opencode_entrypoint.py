@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from automation import privacy_grant_cli, privacy_grant_hooks, queue_cli, repair_budget_resume
+
 from automation import windows_verification_hooks
 
 import sys
 
-from automation import ci_outcomes, context_optimization, execution_classification_evidence, execution_classification_hooks, issue_queue, opencode_github_entrypoint, opencode_role_entrypoint, opencode_runtime, pr_head_sync, privacy_consent, privacy_grants, role_workflow_hooks, semantic_repair_budget, windows_semantic_order
+from automation import ci_outcomes, context_optimization, execution_classification_evidence, execution_classification_hooks, opencode_github_entrypoint, opencode_role_entrypoint, opencode_runtime, pr_head_sync, privacy_consent, role_workflow_hooks, windows_semantic_order
 
 
 COORDINATE_COMMAND = "coordinate"
@@ -16,12 +18,12 @@ QUEUE_COMMAND = "queue"
 def run(argv: list[str] | None = None) -> int:
     ci_outcomes.install()
     pr_head_sync.install()
-    semantic_repair_budget.install_opencode_resume_hooks()
+    repair_budget_resume.install_opencode_resume_hooks()
     windows_verification_hooks.install_opencode_hooks()
     windows_semantic_order.install()
     context_optimization.install()
     privacy_consent.install()
-    privacy_grants.install(run_consent=True)
+    privacy_grant_hooks.install(run_consent=True)
     # Install runtime-neutral workflow policy on the canonical coordinator
     # after the underlying workflow patches are active.
     role_workflow_hooks.install()
@@ -34,9 +36,9 @@ def run(argv: list[str] | None = None) -> int:
     execution_classification_evidence.install()
     values = list(sys.argv[1:] if argv is None else argv)
     if values and values[0] == PRIVACY_COMMAND:
-        return privacy_grants.run_cli(values[1:])
+        return privacy_grant_cli.run_cli(values[1:])
     if values and values[0] == QUEUE_COMMAND:
-        return issue_queue.run_cli(values[1:])
+        return queue_cli.run_cli(values[1:])
     if values and values[0] == COORDINATE_COMMAND:
         return opencode_github_entrypoint.run(values[1:])
     if values and values[0] == ROLE_COMMAND:

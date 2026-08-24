@@ -120,8 +120,7 @@ def build_execute_stage(core, original_execute_stage):
                 classification=core.FAILURE_TRANSIENT,
             )
 
-        core.render_legacy_verifier(repo, current, state, autodev_root, runner=runner)
-        state["Status"] = "CiPassedVerifierPromptRendered"
+        state["Status"] = "CiPassed"
         core.write_state(current, state)
         result = core.stage_payload(
             repo,
@@ -231,12 +230,3 @@ def build_execute_stage(core, original_execute_stage):
         return code, payload
 
     return execute_stage
-
-
-def install(core) -> None:
-    """Compatibility installer for callers that still request mutation explicitly."""
-
-    if getattr(core, "_autodev_windows_workflow_hooks_installed", False):
-        return
-    core.execute_stage = build_execute_stage(core, core.execute_stage)
-    core._autodev_windows_workflow_hooks_installed = True

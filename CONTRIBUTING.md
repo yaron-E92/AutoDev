@@ -1,511 +1,83 @@
-# Contributing
+# Contributing to AutoDev
 
-Thank you for improving this automation. The goal is simple:
+AutoDev's supported product surface is the `autodev` CLI plus the maintained OpenCode, scheduler, Windows-verification, CI, and release integrations. Do not reintroduce source-checkout-only launchers or compatibility implementations after they have been retired.
 
-> Let Codex Desktop process small GitHub issues into reviewable PRs without giving it broad machine access, without nested `codex exec`, and without extra OpenAI API billing.
+## Development checks
 
-This project is intentionally conservative. It should feel boring in the good way: predictable, auditable, and easy to recover when the robot trips over a rake.
-
----
-
-## Design principles
-
-### 1. Codex Desktop is the AI brain
-
-Do not reintroduce nested calls like:
-
-```powershell
-codex exec ...
-```
-
-The final working design avoids nested Codex CLI calls because they caused transport/proxy issues and would require a different auth/billing path.
-
-Codex Desktop should do:
+Before opening or updating a PR, run:
 
 ```text
-planning
-implementation
-repair
-verification
-```
-
-The scripts should do deterministic operations only.
-
----
-
-### 2. Do not write local `.git`
-
-The Codex Desktop sandbox may block writes to `.git`, including:
-
-```text
-.git/FETCH_HEAD
-.git/index
-.git/refs
-.git/worktrees/...
-```
-
-Do not add local Git operations that require metadata writes:
-
-```powershell
-git fetch
-git switch
-git checkout
-git add
-git commit
-git push
-```
-
-The final design commits through the GitHub API instead.
-
-Allowed Git usage, if ever needed, should be read-only and carefully justified. Prefer `gh api` over local Git.
-
----
-
-### 3. GitHub state changes go through trusted scripts
-
-The automation prompt should not ask Codex to manually mutate GitHub issue/PR state except by running trusted scripts.
-
-Trusted scripts:
-
-```text
-codex-prepare-next-ready-issue.ps1
-codex-finalize-current-issue.ps1
-codex-mark-current-issue.ps1
-ensure-codex-labels.ps1
-```
-
----
-
-### 4. One issue per run
-
-The automation should process exactly one issue per cycle.
-
-Good:
-
-```text
-one issue
-one branch
-one PR
-one verification loop
-```
-
-Bad:
-
-```text
-batching issues
-multi-issue mega PRs
-background branch soup
-```
-
-Branch soup tastes like regret.
-
----
-
-### 5. Keep repos clean
-
-Each target repo should need only:
-
-```text
-AGENTS.md
-```
-
-Do not require repo-local verifier scripts unless there is a strong reason.
-
-Global reusable tooling belongs under:
-
-- Windows:
-
-```text
-C:\Users\<you>\codex-tools
-```
-
-Repository source files are split by portability:
-
-```text
-agentFiles/
-promptTemplates/
-skill/
-codex-profiles.json
-```
-
-stay common at the root. OS-specific source scripts belong under:
-
-```text
-windows/scripts/
-linux/run-once.sh
-linux/scripts/
-linux/systemd/
-linux/config.example.env
-```
-
----
-
-## Labels
-
-Required workflow labels:
-
-```text
-codex:ready
-codex:in-progress
-codex:ready-for-review
-codex:blocked
-```
-
-Optional area labels:
-
-```text
-area:backend
-area:web
-area:maui
-area:python
-```
-
-Area labels are flags and may be combined.
-
-Do not add:
-
-```text
-area:fullstack
-```
-
-Use combinations instead:
-
-```text
-area:backend + area:web
-area:backend + area:maui
-area:web + area:maui
-```
-
----
-
-## Script responsibilities
-
-### `codex-prepare-next-ready-issue.ps1`
-
-Allowed responsibilities:
-
-- load GitHub token
-- set `GH_TOKEN`
-- set `GH_CONFIG_DIR`
-- select one ready issue
-- mark issue `codex:in-progress`
-- resolve profiles
-- read base commit/tree from GitHub API
-- create `.autodev-run/current/state.json`
-- create `.autodev-run/current/workspace-snapshot.json`
-- render `.autodev-run/current/planner.md`
-
-Not allowed:
-
-- nested `codex exec`
-- local `git fetch`
-- local branch creation
-- local commit or push
-
----
-
-### `codex-finalize-current-issue.ps1`
-
-Allowed modes:
-
-```text
-RenderImplementerPrompt
-LocalCheck
-PrAndCi
-RenderVerificationRepair
-```
-
-Allowed responsibilities:
-
-- render implementer/repair/verifier prompts
-- run configured local check
-- compare workspace against snapshot
-- create blobs/trees/commits through GitHub API
-- create/update remote branch ref through GitHub API
-- create PR
-- watch CI
-- write CI summary
-- render verifier prompt from PR diff
-
-Not allowed:
-
-- local Git commit/push
-- direct Codex CLI invocation
-- merging PRs
-
----
-
-### `codex-mark-current-issue.ps1`
-
-Allowed responsibilities:
-
-- mark issue ready for review
-- mark issue blocked
-- add issue comments
-- update `.autodev-run/current/state.json`
-
-Not allowed:
-
-- implementation changes
-- PR merging
-
----
-
-## Authentication
-
-Recommended GitHub auth:
-
-```text
-fine-grained PAT
-selected repositories only
-stored in dedicated KeePassXC database
-loaded through keepassxc-cli
-```
-
-Recommended token permissions:
-
-```text
-Metadata: read
-Contents: read/write
-Issues: read/write
-Pull requests: read/write
-Actions: read
-```
-
-The KeePassXC database should contain automation tokens only.
-
-Do not store:
-
-```text
-personal passwords
-GitHub account password
-recovery codes
-email credentials
-```
-
----
-
-## Local checks
-
-Checks are selected through `codex-profiles.json`.
-
-Examples:
-
-```text
-area:web
-  -> codex-verify.ps1 -Profiles web
-
-area:backend + area:web
-  -> codex-verify.ps1 -Profiles backend,web
-
-no area label
-  -> codex-verify.ps1 -Profiles auto
-```
-
-`codex-verify.ps1` should remain global and generic.
-
-For .NET/MAUI repos:
-
-- backend verification should avoid accidentally building MAUI when possible
-- MAUI verification should target MAUI `.csproj` files directly
-- a non-GUI `.slnf` may be preferred for non-MAUI .NET verification
-
-### AutoDev CI equivalents
-
-Run these commands from the AutoDev repository root.
-
-Python syntax, unit tests, and the explicit no-network mocked runner smoke path:
-
-```text
-python -m compileall automation area_reader benchmarks tests
+python -m compileall -q automation area_reader tests
 python -m unittest discover -s tests -v
-python -m unittest -v tests.test_autodev_cli.AutoDevCliTests.test_existing_commands_share_opencode_entrypoint_core tests.test_role_runtime.RuntimeAgnosticCoordinatorTests.test_mock_runtime_executes_reader_synthesizer_planner_through_same_coordinator
 ```
 
-Bash syntax on Linux:
+Also run the relevant platform or workflow checks for files you touched. CI covers the supported Linux/Windows Python matrix, canonical CLI smoke tests, PowerShell/Bash syntax, workflow lint and immutable external action refs, release reproducibility, version intent, repository hygiene, and exact-source Windows verification.
 
-```bash
-found=0
-while IFS= read -r -d '' script; do
-  found=1
-  echo "Checking $script"
-  bash -n "$script"
-done < <(git ls-files -z -- '*.sh')
+## Architecture rules
 
-if [[ "$found" -eq 0 ]]; then
-  echo "No tracked Bash scripts found." >&2
-  exit 1
-fi
+`tests/test_python_architecture.py` is a permanent guardrail. In production Python under `automation/` and `area_reader/`:
+
+- keep responsibility modules below the configured giant-module threshold;
+- keep the top-level local import graph acyclic;
+- depend on owning responsibility modules rather than aggregate compatibility facades;
+- do not restore paths explicitly listed as removed;
+- do not add temporary issue-migration workflows/scripts to the finished tree;
+- do not commit `*.chunk*.txt` artifacts.
+
+When a migration leaves an old path unused, delete it instead of keeping an indefinite shim unless a current supported entrypoint demonstrably requires it.
+
+## Workflow behavior
+
+Python owns deterministic sequencing, durable state, resume decisions, verification boundaries, repair budgets, PR/CI progression, and terminal outcomes. Model runtimes should receive bounded role inputs and must not become owners of workflow transitions.
+
+The canonical command for a normal issue run is:
+
+```text
+autodev coordinate --arguments 123
 ```
 
-PowerShell syntax on Windows:
+Resume with:
 
-```powershell
-$files = @(git ls-files -- '*.ps1')
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-if ($files.Count -eq 0) { throw 'No tracked PowerShell scripts found.' }
-
-$failed = $false
-foreach ($file in $files) {
-    $tokens = $null
-    $errors = $null
-    [System.Management.Automation.Language.Parser]::ParseFile(
-        (Resolve-Path -LiteralPath $file).Path,
-        [ref]$tokens,
-        [ref]$errors
-    ) | Out-Null
-
-    foreach ($error in $errors) {
-        Write-Host "ERROR ${file}:$($error.Extent.StartLineNumber):$($error.Extent.StartColumnNumber): $($error.Message)"
-        $failed = $true
-    }
-}
-
-if ($failed) { exit 1 }
+```text
+autodev resume
 ```
 
-Repository hygiene on Linux:
-
-```bash
-mapfile -d '' forbidden < <(
-  git ls-files -z |
-    grep -zE '(^|/)(\.pytest_cache|__pycache__|\.autodev-run|\.benchmark-results)(/|$)|\.py[co]$' || true
-)
-
-if ((${#forbidden[@]} > 0)); then
-  printf 'Forbidden tracked artifact: %s\n' "${forbidden[@]}" >&2
-  exit 1
-fi
-```
-
-The two named smoke tests exercise canonical CLI routing and the mock-runtime coordinator flow without contacting Ollama, GitHub, or a cloud model.
-
----
+OpenCode is an optional frontend over the same workflow. Its model mapping remains in `opencode.json` / `opencode.jsonc`.
 
 ## Prompt templates
 
-Prompt templates live in:
+Maintained workflow templates live in `promptTemplates/`. Template placeholders use the canonical delimiter:
 
 ```text
-codex-tools/prompts/
+{~{IssueText}~}
+{~{Plan}~}
 ```
 
-Current templates:
+Use the canonical placeholder syntax consistently. Current semantic templates are:
 
 ```text
-planner.md
-implementer.md
-local-repair.md
-ci-repair.md
-verifier.md
-verification-repair.md
+promptTemplates/semantic-verifier.md
+promptTemplates/semantic-repair.md
 ```
 
-Templates should stay role-specific and concise.
+The durable repair artifact `.autodev-run/current/verification-repair.md` is run state, not a prompt-template file.
 
-Do not make the scripts generate large prompt prose directly. Scripts should pass values into templates.
+## Tests
 
----
+Delete tests that only exercise deleted compatibility behavior. Preserve or retarget tests that protect a still-supported contract. A cleanup PR should prove both that the obsolete path is gone and that current behavior remains covered.
 
-## Testing changes
+Prefer focused tests for the owning module plus the full unit suite before finalizing broad refactors.
 
-Before testing with a real issue:
+## Documentation
 
-1. Use a small repo or a harmless issue.
-2. Ensure labels exist.
-3. Ensure KeePass token loads.
-4. Ensure `gh issue list` works.
-5. Run the prepare script.
-6. Confirm `.autodev-run/current/state.json` and `planner.md` are created.
-7. Let Codex implement a tiny change.
-8. Run `LocalCheck`.
-9. Run `PrAndCi`.
-10. Confirm a PR is created.
+Document only current supported entrypoints. Git history is the archive for retired commands and architecture. If code is deleted, remove instructions that tell users to invoke it.
 
-Good smoke test issue:
+## Version intent
+
+PRs must state release intent using the repository's version-intent convention. Behavior-preserving cleanup such as dead-code removal uses:
 
 ```text
-Update one README sentence.
++semver: none
 ```
 
-Bad smoke test issue:
-
-```text
-Refactor authentication and migrate the database.
-```
-
-Do not start by asking the robot to juggle chainsaws in a fireworks factory.
-
----
-
-## Recovery
-
-Reset a blocked issue:
-
-```powershell
-gh issue edit 54 `
-  --repo "OWNER/REPO" `
-  --remove-label "codex:blocked" `
-  --remove-label "codex:in-progress" `
-  --add-label "codex:ready"
-```
-
-Mark current state blocked:
-
-```powershell
-pwsh -File "$env:USERPROFILE\codex-tools\codex-mark-current-issue.ps1" `
-  -Status Blocked `
-  -Message "Manual review needed."
-```
-
-Mark current state ready for review:
-
-```powershell
-pwsh -File "$env:USERPROFILE\codex-tools\codex-mark-current-issue.ps1" `
-  -Status ReadyForReview
-```
-
-If `.autodev-run/current` is stale, archive it manually or rerun prepare with the appropriate force/current handling.
-
----
-
-## Pull request expectations
-
-A successful PR should include:
-
-- one issue-scoped change
-- a clear title from the issue
-- body containing issue text and plan
-- local verification command
-- passing CI, if required checks exist
-- issue marked `codex:ready-for-review`
-
-The automation must never merge the PR.
-
----
-
-## What not to add back
-
-Do not reintroduce these unless there is a major architecture change:
-
-```text
-nested codex exec
-OpenAI API key requirement
-local git fetch/switch/commit/push in the sandbox
-area:fullstack label
-repo-local verify scripts by default
-broad sandbox full-access requirement
-automatic merge
-```
-
-If a change needs one of those, document why and treat it as a design decision, not a casual patch.
-
----
-
-## Tone of the project
-
-Be strict with scope, kind to future maintainers, and suspicious of cleverness.
-
-Boring automation is good automation.
-
-Clever automation is often just a bug wearing sunglasses.
+Use a release-advancing intent only when the change actually warrants one.

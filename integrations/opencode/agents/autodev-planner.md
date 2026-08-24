@@ -15,10 +15,8 @@ permission:
     ".autodev-run/current/plan.md": allow
   bash:
     "*": deny
-    "python .opencode/autodev.py prepare --role planner*": allow
-    "python3 .opencode/autodev.py prepare --role planner*": allow
-    "python .opencode/autodev.py accept --role planner*": allow
-    "python3 .opencode/autodev.py accept --role planner*": allow
+    "autodev prepare --role planner*": allow
+    "autodev accept --role planner*": allow
   question: deny
   doom_loop: deny
   external_directory: deny
@@ -30,14 +28,16 @@ Legacy `mode: subagent` is intentionally not used here: `mode: all` keeps this r
 
 **Python-coordinator mode:** when the invoking prompt explicitly says AutoDev Python already prepared this role and will accept it after the process exits, do not read launcher configuration and do not run any AutoDev `prepare` or `accept` command. Read the already-prepared planner artifacts, perform only the requested repository analysis, write `.autodev-run/current/plan.md`, and return. If the invoking prompt names `contract-correction-planner.md`, apply only that correction and return. This mode overrides the numbered prepare/accept steps below for that invocation.
 
-For standalone/manual invocation, read `.opencode/autodev.json` once and use its non-empty `python` field as the exact bridge launcher. Never probe or fall back to another Python command. In generated role-contract commands, replace only the leading canonical `python` token with that configured launcher when necessary; preserve the rest of the command exactly.
+For standalone/manual invocation, use the installed `autodev` command as the exact bridge launcher. Never probe or fall back to another Python command. Role-contract commands already use `autodev`; preserve every argument exactly.
 
 Every `.opencode/...` and `.autodev-run/current/...` path in this contract is a literal repository-relative path. Use it exactly as written; never prepend the current working directory or insert another path component. Repository source inspection must remain inside the active worktree.
 
-1. Run the planner `prepare` command from `.autodev-run/current/role-contracts.json` using the configured launcher.
+1. Run the planner `prepare` command from `.autodev-run/current/role-contracts.json` using the installed `autodev` launcher.
 2. Read `.autodev-run/current/planner.md`, `.autodev-run/current/plan.template.md`, and the `planner` entry in `.autodev-run/current/role-contracts.json`.
 3. Follow the generated prompt and write the final six-section plan to `.autodev-run/current/plan.md` using the pre-created section structure exactly.
-4. Run the planner `accept` command from the role contract using the same configured launcher. This accept call is mandatory for standalone/manual invocation.
+4. Run the planner `accept` command from the role contract using the same `autodev` launcher. This accept call is mandatory for standalone/manual invocation.
 5. If that accept command rejects the protocol artifact, read `.autodev-run/current/contract-correction-planner.md`, correct the artifact once, and rerun the same accept command once. If it is rejected again, stop and report failure.
 
 Do not invent bridge subcommands, edit repository source files, or coordinate other agents.
+
+**Canonical AutoDev launcher:** use the installed `autodev` command exactly; do not probe for Python interpreters or repository-local bridge paths. Role-contract commands already use `autodev`; preserve every remaining argument.

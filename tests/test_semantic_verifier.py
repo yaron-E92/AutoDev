@@ -3,15 +3,10 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest import mock
 
-from automation import prompt_runner
-from automation.model_providers import ModelConfig, MockProvider, ProviderError
-from automation.prompt_policies import resolve_prompt_policies
 from automation.semantic_configuration import resolve_semantic_settings
 from automation.semantic_contract import SemanticSettings, SemanticVerifierError
 from automation.semantic_evidence import collect_cross_file_regression_evidence
-from automation.semantic_invocation import invoke_semantic_verifier
 from automation.semantic_prompts import build_semantic_prompt, extract_acceptance_criteria
 from automation.semantic_schema import parse_semantic_output
 
@@ -123,7 +118,7 @@ class SemanticVerifierTests(unittest.TestCase):
                 changed_files=[],
                 diff="",
                 deterministic_evidence="checks passed",
-                template="Issue: {{IssueText}}\nMissing: {{MissingRequiredEvidence}}\n",
+                template="Issue: {~{IssueText}~}\nMissing: {~{MissingRequiredEvidence}~}\n",
             )
 
         self.assertEqual(raised.exception.classification, "unresolved_semantic_placeholders")
@@ -170,91 +165,6 @@ class SemanticVerifierTests(unittest.TestCase):
         self.assertIn("potential blocking regression", evidence)
         self.assertIn("src/CampaignViewModel.cs:1", prompt)
 
-    def test_schema_retry_uses_verifier_again_and_records_separate_telemetry(self):
-        provider = MockProvider(["not json", semantic_result()])
-        policies = resolve_prompt_policies({})
-        with tempfile.TemporaryDirectory() as temp_dir:
-            telemetry = Path(temp_dir) / "model-invocations.json"
-            result = invoke_semantic_verifier(
-                provider=provider,
-                config=ModelConfig(provider="mock", model="verifier"),
-                prompt="Review this implementation.",
-                telemetry_path=telemetry,
-                policies=policies,
-                max_schema_retries=1,
-            )
-            records = json.loads(telemetry.read_text(encoding="utf-8"))
-
-        self.assertEqual(result["verdict"], "pass")
-        self.assertEqual(len(provider.prompts), 2)
-        self.assertIn("previous response was rejected", provider.prompts[1].casefold())
-        self.assertEqual([record["role"] for record in records], ["verifier", "verifier"])
-        self.assertEqual([record["attempt"] for record in records], [0, 1])
-
-    def test_prompt_runner_semantic_mode_keeps_legacy_mode_available(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            profile = root / "profile.json"
-            prompt = root / "prompt.md"
-            semantic_output = root / "semantic.json"
-            legacy_output = root / "legacy.txt"
-            profile.write_text(
-                json.dumps(
-                    {
-                        "version": 2,
-                        "roles": {
-                            "verifier": {"transport": "mock", "model": "verifier"}
-                        },
-                    }
-                ),
-                encoding="utf-8",
-            )
-            prompt.write_text("Verify this patch.", encoding="utf-8")
-
-            with mock.patch.object(
-                prompt_runner,
-                "create_provider",
-                side_effect=[MockProvider([semantic_result()]), MockProvider(["PASS\nLooks good."])],
-            ):
-                semantic_code = prompt_runner.run(
-                    [
-                        "--role", "verifier",
-                        "--provider-profile", str(profile),
-                        "--prompt-file", str(prompt),
-                        "--output-file", str(semantic_output),
-                        "--verifier-format", "semantic-json",
-                    ]
-                )
-                legacy_code = prompt_runner.run(
-                    [
-                        "--role", "verifier",
-                        "--provider-profile", str(profile),
-                        "--prompt-file", str(prompt),
-                        "--output-file", str(legacy_output),
-                    ]
-                )
-
-            self.assertEqual(semantic_code, 0)
-            self.assertEqual(legacy_code, 0)
-            self.assertEqual(json.loads(semantic_output.read_text(encoding="utf-8"))["verdict"], "pass")
-            self.assertTrue(legacy_output.read_text(encoding="utf-8").startswith("PASS"))
-
-
-
-
-    def test_windows_and_linux_gate_before_pr_and_reverify_after_ci_repair(self):
-        windows = (REPO_ROOT / "windows" / "scripts" / "issue-to-pr-cycle.ps1").read_text(encoding="utf-8")
-        linux = (REPO_ROOT / "linux" / "scripts" / "issue-to-pr-cycle.sh").read_text(encoding="utf-8")
-
-        self.assertIn('VerifierFormat "semantic-json"', windows)
-        self.assertIn("automation.semantic_cli", windows)
-        self.assertLess(windows.index("Invoke-SemanticGate"), windows.index("Invoke-PrAndCiWithRepairs"))
-        self.assertIn("$semanticCode = Invoke-SemanticGate", windows)
-
-        self.assertIn("semantic-json", linux)
-        self.assertIn("automation.semantic_cli", linux)
-        self.assertLess(linux.index("semantic_gate"), linux.index("pr_and_ci_with_repairs"))
-        self.assertIn("semantic_gate || return", linux)
 
 
 if __name__ == "__main__":

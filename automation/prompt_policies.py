@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from automation.model_providers import ProviderError
-from automation.model_roles import MODEL_ROLES
+from automation.provider_contract import ProviderError
 
 
 PONYTAIL_SOURCE = "DietrichGebert/ponytail"
@@ -9,6 +8,7 @@ PONYTAIL_SOURCE_VERSION = "v4.8.4"
 PONYTAIL_SOURCE_COMMIT = "bc9ee949d5f439e8b9f3bb92c6d6d3d1e6ebd324"
 PROMPT_POLICY_VERSION = "autodev-ponytail-v1"
 SUPPORTED_POLICY_MODES = {"off", "lite", "full", "review"}
+MODEL_ROLES = ("reader", "synthesizer", "planner", "implementer", "fixer", "verifier")
 DEFAULT_POLICY_MODES = {
     "reader": "off",
     "synthesizer": "lite",

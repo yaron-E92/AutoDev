@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from automation import headroom, workflow_stages
-from automation.model_providers import load_provider_config
+from automation.provider_factory import load_provider_config
 from automation.prompt_policies import compose_prompt
 
 
@@ -152,7 +152,6 @@ Read authoritative durable evidence from these repository-relative artifacts:
 2. `.autodev-run/current/synthesized-handoff.md` — read once; it is the primary repository-evidence handoff.
 3. `.autodev-run/current/detected-facts.json` and `.autodev-run/current/workspace-snapshot.json` — consult only to validate paths/facts you actually use.
 4. `.autodev-run/current/recommended-command-groups.json` — consult only for verification scope.
-5. `.autodev-run/current/coder-plan.md` — normally DO NOT read. It is a prior planning artifact and is redundant with your role. Read it only if the synthesized handoff explicitly says synthesis is unavailable/fallback or a critical ambiguity remains.
 
 Do not re-copy durable evidence into scratch artifacts and do not reread an artifact unless needed to resolve a concrete ambiguity.
 
@@ -167,7 +166,7 @@ You are the Implementer editing this repository in FAST PATCH MODE.
 
 Read these durable artifacts once:
 1. `.autodev-run/current/issue.md` — authoritative requirements and acceptance criteria.
-2. `.autodev-run/current/plan.md` — authoritative implementation constraints; if absent, use `.autodev-run/current/coder-plan.md`.
+2. `.autodev-run/current/plan.md` — authoritative implementation constraints.
 3. `.autodev-run/current/synthesized-handoff.md` — optional; read only when the plan cites unresolved repository evidence or you must resolve a concrete ambiguity.
 4. `.autodev-run/current/recommended-command-groups.json` — optional; verification is owned by AutoDev after the edit.
 
@@ -230,13 +229,11 @@ def _components_for_role(
             ("detected-facts.json", False, "path/fact validation"),
             ("workspace-snapshot.json", False, "path grounding"),
             ("recommended-command-groups.json", False, "verification scope"),
-            ("coder-plan.md", False, "fallback-only prior plan"),
         ]
     elif role == "implementer":
-        plan_name = "plan.md" if (current / "plan.md").is_file() else "coder-plan.md"
         specs = [
             ("issue.md", True, "requirements"),
-            (plan_name, True, "implementation constraints"),
+            ("plan.md", True, "implementation constraints"),
             ("synthesized-handoff.md", False, "ambiguity-only repository evidence"),
             ("recommended-command-groups.json", False, "verification scope"),
         ]

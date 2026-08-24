@@ -58,7 +58,7 @@ class ExecutionClassificationHookTests(unittest.TestCase):
                 return SimpleNamespace(returncode=0, stdout="", stderr="")
 
             with patch.object(
-                execution_classification_hooks.issue_queue,
+                execution_classification_hooks.queue_github,
                 "ensure_queue_labels",
                 return_value=(),
             ), patch.object(workflow_stages, "gh", side_effect=fake_gh):
@@ -109,7 +109,7 @@ class ExecutionClassificationHookTests(unittest.TestCase):
                 return SimpleNamespace(returncode=0, stdout="", stderr="")
 
             with patch.object(workflow_stages, "gh_json", return_value=issue), patch.object(
-                execution_classification_evidence.issue_queue,
+                execution_classification_evidence.queue_github,
                 "ensure_queue_labels",
                 return_value=(),
             ), patch.object(workflow_stages, "gh", side_effect=fake_gh):
@@ -262,30 +262,6 @@ class ExecutionClassificationHookTests(unittest.TestCase):
             "ATTENTION_REQUIRED",
             opencode_github_entrypoint.SUCCESSFUL_TERMINAL_STATES,
         )
-
-    def test_label_bootstrap_scripts_include_canonical_queue_vocabulary(self):
-        root = Path(__file__).resolve().parents[1]
-        linux = (root / "linux" / "scripts" / "ensure-labels.sh").read_text(
-            encoding="utf-8"
-        )
-        windows = (
-            root / "windows" / "scripts" / "ensure-codex-labels.ps1"
-        ).read_text(encoding="utf-8")
-        expected = {
-            "autodev:managed": ("1D76DB", "Human authorization for autonomous AutoDev work"),
-            "autodev:ready": ("0E8A16", "Derived: managed and currently runnable by AutoDev"),
-            "autodev:blocked": ("D93F0B", "Derived: managed but blocked by open issue dependencies"),
-            "autodev:attention": ("FBCA04", "Human attention is required before autonomous AutoDev work"),
-            "autodev:running": ("5319E7", "Active AutoDev claim/run for this issue"),
-        }
-        for name, (color, description) in expected.items():
-            with self.subTest(label=name):
-                self.assertIn(name, linux)
-                self.assertIn(name, windows)
-                self.assertIn(color, linux)
-                self.assertIn(color, windows)
-                self.assertIn(description, linux)
-                self.assertIn(description, windows)
 
 
 if __name__ == "__main__":

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from automation import claim_contract, claim_identity, claim_lease, claim_recovery, claim_repository, queue_contract, queue_github
+
 import argparse
 import json
 import os
@@ -9,14 +11,7 @@ import sys
 from pathlib import Path
 from typing import Callable, TextIO
 
-from automation import (
-    distributed_claims,
-    issue_queue,
-    opencode_entrypoint,
-    privacy,
-    queue_selection,
-    workflow_stages,
-)
+from automation import opencode_entrypoint, privacy, queue_selection, workflow_stages
 from automation.scheduler_backends import (
     _backend_state,
     _cron_command,
@@ -302,18 +297,18 @@ def run_once(
 
         worker = Path(registration.worker_repository).expanduser().resolve()
         prepared_existing = _prepare_worker(registration, runner=runner)
-        claim_policy = distributed_claims.ClaimPolicy()
+        claim_policy = claim_contract.ClaimPolicy()
         worker_id = ""
         excluded: set[int] = set()
         if claiming_enabled:
-            claim_policy = distributed_claims.load_claim_policy(worker)
-            worker_id = distributed_claims.worker_identity(home=home).worker_id
-            distributed_claims.reconcile_stale_claims(
+            claim_policy = claim_identity.load_claim_policy(worker)
+            worker_id = claim_identity.worker_identity(home=home).worker_id
+            claim_recovery.reconcile_stale_claims(
                 worker,
                 registration.github_repository,
                 runner=runner,
             )
-            shared_claims = distributed_claims.list_claims(worker, runner=runner)
+            shared_claims = claim_repository.list_claims(worker, runner=runner)
             if prepared_existing.state == "NONE":
                 excluded.update(item.issue_number for item in shared_claims)
                 if len(shared_claims) >= claim_policy.max_concurrent_issues:
@@ -327,7 +322,7 @@ def run_once(
                     )
 
         selection: queue_selection.SelectionResult
-        claim: distributed_claims.Claim | None = None
+        claim: claim_contract.Claim | None = None
         claim_state = ""
         while True:
             selection = queue_selection.select_next(
@@ -338,7 +333,7 @@ def run_once(
             )
             if selection.state != "SELECTED" or not claiming_enabled:
                 break
-            attempt = distributed_claims.acquire_claim(
+            attempt = claim_lease.acquire_claim(
                 worker,
                 registration.github_repository,
                 selection.issue_number,
@@ -352,7 +347,7 @@ def run_once(
                 claim_state = attempt.state
                 break
             excluded.add(selection.issue_number)
-            shared_claims = distributed_claims.list_claims(worker, runner=runner)
+            shared_claims = claim_repository.list_claims(worker, runner=runner)
             if len(shared_claims) >= claim_policy.max_concurrent_issues:
                 return _capacity_result(
                     registration,
@@ -397,7 +392,7 @@ def run_once(
             return 2
 
         if claiming_enabled and selection.state == "RESUME_EXISTING":
-            attempt = distributed_claims.acquire_claim(
+            attempt = claim_lease.acquire_claim(
                 worker,
                 registration.github_repository,
                 selection.issue_number,
@@ -440,7 +435,7 @@ def run_once(
             latest_claim = None
             claim_lost = False
         else:
-            with distributed_claims.HeartbeatLease(worker, claim, runner=runner) as lease:
+            with claim_lease.HeartbeatLease(worker, claim, runner=runner) as lease:
                 code = _invoke_headless(coordinate_argv, coordinator=coordinator)
             latest_claim = lease.latest_claim()
             claim_lost = lease.lost
@@ -466,7 +461,7 @@ def run_once(
         dispatch_state = _dispatch_state(coordinator_state)
         release_error = False
         if latest_claim is not None and _claim_terminal_state(coordinator_state):
-            release_error = not distributed_claims.release_claim(
+            release_error = not claim_lease.release_claim(
                 worker,
                 latest_claim,
                 runner=runner,
@@ -530,9 +525,9 @@ def doctor_state(
     if not worker.is_dir() or not (worker / ".git").exists():
         return "error", f"scheduler worker is missing: {worker}"
     try:
-        identity = distributed_claims.worker_identity(home=home)
-        policy = distributed_claims.load_claim_policy(worker)
-    except distributed_claims.ClaimError as exc:
+        identity = claim_identity.worker_identity(home=home)
+        policy = claim_identity.load_claim_policy(worker)
+    except claim_contract.ClaimError as exc:
         return "error", f"distributed claim configuration is invalid: {exc}"
     backend = _backend_state(registration, home=home, runner=runner)
     if backend != "active":
@@ -662,7 +657,7 @@ def run_cli(
         path = registration_file
         if path is None:
             source = _repo_root(Path(args.repo))
-            resolved = issue_queue.resolve_github_repo(
+            resolved = queue_github.resolve_github_repo(
                 source,
                 explicit=args.github_repo,
                 runner=runner,
@@ -678,8 +673,8 @@ def run_cli(
         )
     except (
         SchedulerError,
-        distributed_claims.ClaimError,
-        issue_queue.QueueError,
+        claim_contract.ClaimError,
+        queue_contract.QueueError,
         queue_selection.RoadmapError,
         privacy.PrivacyError,
     ) as exc:

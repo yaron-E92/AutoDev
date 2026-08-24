@@ -23,8 +23,6 @@ ROLE_TIMEOUT_SECONDS = coordination_contract.ROLE_TIMEOUT_SECONDS
 
 ROLE_TIMEOUT_ENV = "AUTODEV_ROLE_TIMEOUT_SECONDS"
 
-LEGACY_ROLE_TIMEOUT_ENV = "AUTODEV_OPENCODE_ROLE_TIMEOUT_SECONDS"
-
 MAX_TRANSITIONS = coordination_contract.MAX_TRANSITIONS
 
 class RoleCoordinatorError(RuntimeError):
@@ -42,9 +40,7 @@ class RoleCoordinatorError(RuntimeError):
 def role_timeout_seconds(role: str) -> int:
     names = (
         f"AUTODEV_{role.upper()}_ROLE_TIMEOUT_SECONDS",
-        f"AUTODEV_OPENCODE_{role.upper()}_TIMEOUT_SECONDS",
         ROLE_TIMEOUT_ENV,
-        LEGACY_ROLE_TIMEOUT_ENV,
     )
     selected = next((name for name in names if os.environ.get(name, "").strip()), "")
     if selected:

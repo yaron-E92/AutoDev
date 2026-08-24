@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import copy
-import functools
-import inspect
 import json
 import os
 import shutil
@@ -94,7 +92,6 @@ from automation.workflow_prompts import (
     commit_message,
     render_ci_repair,
     render_implementer_prompt,
-    render_legacy_verifier,
     resolve_profiles,
 )
 
@@ -419,60 +416,6 @@ def execute_stage(
 
 mark_blocked = _mark_blocked
 FAILURE_REPAIR_BUDGET_EXHAUSTED = _budget_contract.FAILURE_REPAIR_BUDGET_EXHAUSTED
-
-# The pre-refactor module was deliberately monkeypatch-friendly: tests and a few
-# extension hooks replace attributes on automation.workflow_stages. Keep that
-# public seam without making the responsibility modules depend back on this
-# facade. Before a facade entrypoint delegates, matching facade overrides are
-# copied into the modules that consume them. Production dependency direction
-# therefore remains one-way; this adapter exists only at the compatibility edge.
-_WORKFLOW_MODULES = (
-    _workflow_contract,
-    _workflow_storage,
-    _workflow_commands,
-    _workflow_workspace,
-    _workflow_prompts,
-    _workflow_diagnostics,
-    _workflow_github,
-    _workflow_preparation,
-    _workflow_verification,
-    _workflow_dispatch,
-)
-
-
-def _sync_compat_overrides() -> None:
-    facade = globals()
-    for module in _WORKFLOW_MODULES:
-        namespace = module.__dict__
-        for name in tuple(namespace):
-            if name.startswith("__") or name not in facade:
-                continue
-            namespace[name] = facade[name]
-
-
-def _compat_entrypoint(target):
-    @functools.wraps(target)
-    def invoke(*args, **kwargs):
-        _sync_compat_overrides()
-        return target(*args, **kwargs)
-
-    return invoke
-
-
-def _install_compat_entrypoints() -> None:
-    facade = globals()
-    wrapped: set[str] = set()
-    for module in _WORKFLOW_MODULES:
-        for name in tuple(module.__dict__):
-            if name in wrapped or name.startswith("__") or name not in facade:
-                continue
-            value = facade[name]
-            if inspect.isfunction(value) and value.__module__.startswith("automation."):
-                facade[name] = _compat_entrypoint(value)
-                wrapped.add(name)
-
-
-_install_compat_entrypoints()
 
 # Explicitly install the cross-cutting compatibility boundaries in the modules
 # that own the affected workflow operations. The dependency direction remains

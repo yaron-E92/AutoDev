@@ -1,11 +1,7 @@
 import json
-import tempfile
 import unittest
 from pathlib import Path
 
-from area_reader import workflow as area_runner
-from automation.model_providers import ModelConfig, MockProvider, ProviderError
-from automation.model_roles import ModelInvocationError, invoke_model, resolve_role_configs
 from automation.prompt_policies import (
     PROMPT_POLICY_VERSION,
     compose_prompt,
@@ -14,75 +10,12 @@ from automation.prompt_policies import (
 )
 
 
-class ModelRoleTests(unittest.TestCase):
-    def setUp(self):
-        self.defaults = {
-            "reader": {"provider": "mock", "model": "reader-default"},
-            "coder": {"provider": "mock", "model": "coder-default"},
-        }
+class PromptPolicyTests(unittest.TestCase):
 
-    def test_version_two_roles_are_independent(self):
-        roles = resolve_role_configs(
-            defaults=self.defaults,
-            file_config={
-                "version": 2,
-                "roles": {
-                    role: {"provider": "mock", "model": role}
-                    for role in ("reader", "synthesizer", "planner", "implementer", "fixer", "verifier")
-                },
-            },
-        )
-        self.assertEqual([roles[role].model for role in roles], [
-            "reader", "synthesizer", "planner", "implementer", "fixer", "verifier"
-        ])
 
-    def test_legacy_reader_coder_fallbacks_and_disabled_verifier(self):
-        roles = resolve_role_configs(
-            defaults=self.defaults,
-            file_config={
-                "reader": {"provider": "mock", "model": "legacy-reader"},
-                "coder": {"provider": "mock", "model": "legacy-coder"},
-            },
-        )
-        self.assertEqual(roles["reader"].model, "legacy-reader")
-        self.assertEqual(roles["synthesizer"].model, "legacy-reader")
-        self.assertEqual(roles["planner"].model, "legacy-coder")
-        self.assertEqual(roles["implementer"].model, "legacy-coder")
-        self.assertEqual(roles["fixer"].model, "legacy-coder")
-        self.assertIsNone(roles["verifier"])
 
-    def test_explicit_role_wins_over_legacy_cli_override(self):
-        roles = resolve_role_configs(
-            defaults=self.defaults,
-            file_config={
-                "version": 2,
-                "roles": {"planner": {"provider": "mock", "model": "explicit-planner"}},
-            },
-            cli_values={"coder": {"model": "cli-coder"}},
-        )
-        self.assertEqual(roles["planner"].model, "explicit-planner")
-        self.assertEqual(roles["implementer"].model, "cli-coder")
-        self.assertEqual(roles["fixer"].model, "cli-coder")
 
-    def test_unknown_config_version_is_rejected(self):
-        with self.assertRaises(ProviderError):
-            resolve_role_configs(defaults=self.defaults, file_config={"version": 3})
 
-    def test_failed_call_has_safe_role_metadata(self):
-        class FailingProvider(MockProvider):
-            def generate(self, prompt, *, model, timeout_seconds):
-                raise RuntimeError("secret failure detail")
-
-        with self.assertRaises(ModelInvocationError) as raised:
-            invoke_model(
-                FailingProvider(),
-                ModelConfig(provider="mock", model="m"),
-                "prompt",
-                role="planner",
-            )
-        self.assertEqual(raised.exception.record["role"], "planner")
-        self.assertEqual(raised.exception.record["status"], "failure")
-        self.assertNotIn("secret failure detail", json.dumps(raised.exception.record))
 
     def test_prompt_policy_defaults_match_roles(self):
         policies = resolve_prompt_policies({})
@@ -159,29 +92,6 @@ class ModelRoleTests(unittest.TestCase):
 
         self.assertTrue(effective.endswith(contract))
         self.assertLess(effective.index("Role-specific prompt policy"), effective.index("Issue:"))
-
-    def test_area_runner_records_reader_synthesizer_planner_order(self):
-        configs = {
-            role: ModelConfig(provider="mock", model=role)
-            for role in ("reader", "synthesizer", "planner")
-        }
-        original_factory = area_runner.create_provider
-        original_policies = area_runner._ACTIVE_POLICIES
-        with tempfile.TemporaryDirectory() as temp_dir:
-            area_runner._ACTIVE_CONFIGS = {**configs, "implementer": None, "fixer": None, "verifier": None}
-            area_runner._ACTIVE_POLICIES = resolve_prompt_policies({})
-            area_runner._ACTIVE_OUT = Path(temp_dir)
-            try:
-                area_runner.create_provider = lambda config: MockProvider([config.model])
-                area_runner.call_provider(None, "reader", "area", 1)
-                area_runner.call_provider(None, "reader", "synthesis", 1, model_override="legacy-alias")
-                area_runner.call_provider(None, "coder", "plan", 1)
-            finally:
-                area_runner.create_provider = original_factory
-                area_runner._ACTIVE_POLICIES = original_policies
-            records = json.loads((Path(temp_dir) / "model-invocations.json").read_text(encoding="utf-8"))
-        self.assertEqual([record["role"] for record in records], ["reader", "synthesizer", "planner"])
-        self.assertEqual([record["prompt_policy_mode"] for record in records], ["off", "lite", "lite"])
 
 
     def test_provider_metadata_records_policy_source_and_modes(self):

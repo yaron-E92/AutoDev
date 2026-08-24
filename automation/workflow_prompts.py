@@ -84,9 +84,9 @@ def resolve_profiles(
             )
         codex_tools = os.environ.get("CODEX_TOOLS_DIR", str(Path.home() / "codex-tools"))
         local_check = (
-            template.replace("{{ProfilesCsv}}", profiles_csv)
-            .replace("{{AutomationRoot}}", str(autodev_root))
-            .replace("{{CodexToolsDir}}", codex_tools)
+            template.replace("{~{ProfilesCsv}~}", profiles_csv)
+            .replace("{~{AutomationRoot}~}", str(autodev_root))
+            .replace("{~{CodexToolsDir}~}", codex_tools)
         )
     stack_context = explicit_stack_context.strip() or "\n".join(contexts)
     if not stack_context:
@@ -126,39 +126,6 @@ def render_ci_repair(current: Path, state: dict[str, object], autodev_root: Path
         },
     )
     write_text(current / "ci-repair.md", prompt)
-
-def render_legacy_verifier(
-    repo: Path,
-    current: Path,
-    state: dict[str, object],
-    autodev_root: Path,
-    *,
-    runner: Callable[..., object] = subprocess.run,
-) -> None:
-    repo_full = str(state.get("RepoFullName", ""))
-    pr_number = int(state.get("PrNumber", 0) or 0)
-    completed = gh(repo, ["pr", "diff", str(pr_number), "--repo", repo_full], runner=runner, check=False)
-    diff = _decoded_text(getattr(completed, "stdout", ""))
-    prompt = render_template(
-        read_text(autodev_root / "promptTemplates" / "verifier.md"),
-        {
-            "IssueText": read_text(current / "issue.md") or str(state.get("IssueText", "")),
-            "Plan": read_text(current / "plan.md"),
-            "Diff": diff,
-            # The shared verifier template uses the presence of these literals to
-            # select its legacy PASS/FAIL contract. Identity substitutions keep
-            # them literal under the collision-safe one-pass renderer.
-            "AcceptanceCriteria": "{{AcceptanceCriteria}}",
-            "SynthesizedHandoff": "{{SynthesizedHandoff}}",
-            "ChangedFiles": "{{ChangedFiles}}",
-            "DeterministicEvidence": "{{DeterministicEvidence}}",
-            "CrossFileRegressionEvidence": "{{CrossFileRegressionEvidence}}",
-            "UncertaintyNotes": "{{UncertaintyNotes}}",
-            "LocalCheck": str(state.get("LocalCheck", "")),
-            "StackContext": str(state.get("StackContext", "")),
-        },
-    )
-    write_text(current / "verifier.md", prompt)
 
 def commit_message(current: Path, state: dict[str, object]) -> str:
     lines = read_text(current / "commit-message.txt").splitlines()

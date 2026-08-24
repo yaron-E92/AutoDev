@@ -85,8 +85,7 @@ class OpenCodeShippedPrAndCiTests(unittest.TestCase):
                 "required_only": True,
             }
             with (
-                patch.object(workflow_stages, "wait_for_required_checks", return_value=ci),
-                patch.object(workflow_stages, "render_legacy_verifier"),
+                patch("automation.workflow_verification.wait_for_required_checks", return_value=ci),
             ):
                 passed = workflow_stages.pr_and_ci(
                     repo,

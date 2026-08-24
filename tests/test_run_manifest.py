@@ -101,7 +101,7 @@ class RunManifestTests(unittest.TestCase):
             root = Path(temp_dir)
             (root / "repo").mkdir()
             manifest_path = self._create(root)
-            plan = self._artifact(root, "coder-plan.md", "original plan")
+            plan = self._artifact(root, "plan.md", "original plan")
             complete_stage(manifest_path, "plan-created", run_root=root, artifacts=[plan])
 
             self.assertEqual(validate_artifacts(load_manifest(manifest_path), root), [])
@@ -110,7 +110,7 @@ class RunManifestTests(unittest.TestCase):
 
         self.assertEqual(len(problems), 1)
         self.assertIn("artifact drift", problems[0])
-        self.assertIn("coder-plan.md", problems[0])
+        self.assertIn("plan.md", problems[0])
 
     def test_role_fingerprint_never_depends_on_secret_value(self):
         first = build_role_snapshot(

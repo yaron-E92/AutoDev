@@ -81,8 +81,6 @@ AutoDev separates configuration, run state, and frontend integration:
 .opencode/
   commands/       # OpenCode-specific AutoDev frontend commands
   agents/         # OpenCode-specific AutoDev role agents
-  autodev.py      # temporary compatibility shim
-  autodev.ps1     # temporary compatibility shim
 
 opencode.jsonc    # user/OpenCode-owned configuration
 ```
@@ -90,14 +88,6 @@ opencode.jsonc    # user/OpenCode-owned configuration
 `opencode.json` / `opencode.jsonc` remains authoritative for OpenCode role/model settings. AutoDev does not copy those values into `.autodev`, because two copies would drift.
 
 `.autodev-run` remains execution state and is never folded into committed configuration.
-
-## Legacy `.opencode/autodev.json` migration
-
-Older target installations used `.opencode/autodev.json` to store the AutoDev checkout and Python launcher. That was generic AutoDev configuration living under the wrong namespace.
-
-The canonical repository installer now removes that file only when it matches the recognized legacy AutoDev-owned schema. It preserves unrelated `.opencode` content and preserves `opencode.json(c)`. The repository-local `.opencode/autodev.py` and `.opencode/autodev.ps1` files remain temporary compatibility shims: they prefer the installed `autodev` command and can fall back to the old configuration only for repositories that have not yet been migrated.
-
-An active `.autodev-run/current` is not deleted or reset during migration.
 
 ## Privacy and secrets
 

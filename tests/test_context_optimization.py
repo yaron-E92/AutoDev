@@ -38,14 +38,12 @@ class ContextOptimizationTests(unittest.TestCase):
             (current / "detected-facts.json").write_text("{}\n", encoding="utf-8")
             (current / "workspace-snapshot.json").write_text("{}\n", encoding="utf-8")
             (current / "recommended-command-groups.json").write_text("{}\n", encoding="utf-8")
-            (current / "coder-plan.md").write_text("prior plan\n", encoding="utf-8")
 
             context_optimization.optimize_prepared_role(repo, "planner")
 
             optimized = (current / "planner.md").read_text(encoding="utf-8")
             self.assertIn(".autodev-run/current/issue.md", optimized)
             self.assertIn(".autodev-run/current/synthesized-handoff.md", optimized)
-            self.assertIn("normally DO NOT read", optimized)
             self.assertNotIn("A" * 100, optimized)
             self.assertNotIn("B" * 100, optimized)
 
@@ -59,7 +57,6 @@ class ContextOptimizationTests(unittest.TestCase):
             components = planner["evidence"]["components"]
             by_name = {Path(item["artifact"]).name: item for item in components}
             self.assertTrue(by_name["issue.md"]["required"])
-            self.assertFalse(by_name["coder-plan.md"]["required"])
 
     def test_fixer_references_targeted_repair_instead_of_copying_it(self) -> None:
         temp, repo, current = self._repo()

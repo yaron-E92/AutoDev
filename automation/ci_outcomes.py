@@ -4,7 +4,7 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
-from automation import workflow_stages
+from automation import workflow_dispatch, workflow_github, workflow_stages, workflow_verification
 
 
 PENDING_BUCKETS = {"pending"}
@@ -129,7 +129,7 @@ def _waiting_payload(repo: Path, proof: dict[str, object]) -> dict[str, object]:
             f"after {polls} poll{'s' if polls != 1 else ''}"
         ),
         artifact=current / "ci-summary.json",
-        next_action="wait for CI to finish, then run `python3 .opencode/autodev.py coordinate --resume`",
+        next_action="wait for CI to finish, then run `autodev coordinate --resume`",
     )
     payload.update(
         {
@@ -145,7 +145,7 @@ def _waiting_payload(repo: Path, proof: dict[str, object]) -> dict[str, object]:
 
 
 def _install_waiting_guards() -> None:
-    current_wait = workflow_stages.wait_for_required_checks
+    current_wait = workflow_verification.wait_for_required_checks
     if not getattr(current_wait, "_autodev_ci_waiting_guard", False):
         original_wait = current_wait
 
@@ -170,8 +170,10 @@ def _install_waiting_guards() -> None:
 
         wait_for_required_checks._autodev_ci_waiting_guard = True  # type: ignore[attr-defined]
         workflow_stages.wait_for_required_checks = wait_for_required_checks
+        workflow_github.wait_for_required_checks = wait_for_required_checks
+        workflow_verification.wait_for_required_checks = wait_for_required_checks
 
-    current_pr_and_ci = workflow_stages.pr_and_ci
+    current_pr_and_ci = workflow_dispatch.pr_and_ci
     if not getattr(current_pr_and_ci, "_autodev_ci_waiting_guard", False):
         original_pr_and_ci = current_pr_and_ci
 
@@ -200,6 +202,8 @@ def _install_waiting_guards() -> None:
 
         pr_and_ci._autodev_ci_waiting_guard = True  # type: ignore[attr-defined]
         workflow_stages.pr_and_ci = pr_and_ci
+        workflow_verification.pr_and_ci = pr_and_ci
+        workflow_dispatch.pr_and_ci = pr_and_ci
 
     current_execute = workflow_stages.execute_stage
     if not getattr(current_execute, "_autodev_ci_waiting_guard", False):
@@ -225,15 +229,16 @@ def _install_waiting_guards() -> None:
 
 
 def install() -> None:
-    current_ci_state = workflow_stages._ci_state
+    current_ci_state = workflow_github._ci_state
     if not getattr(current_ci_state, "_autodev_ci_outcome_guard", False):
         def guarded_ci_state(checks: list[dict[str, object]]) -> str:
             return ci_state(checks)
 
         guarded_ci_state._autodev_ci_outcome_guard = True  # type: ignore[attr-defined]
         workflow_stages._ci_state = guarded_ci_state
+        workflow_github._ci_state = guarded_ci_state
 
-    current_validate_ready = workflow_stages.validate_ready_proof
+    current_validate_ready = workflow_github.validate_ready_proof
     if not getattr(current_validate_ready, "_autodev_ci_outcome_guard", False):
         original_validate_ready = current_validate_ready
 
@@ -251,5 +256,7 @@ def install() -> None:
 
         guarded_validate_ready_proof._autodev_ci_outcome_guard = True  # type: ignore[attr-defined]
         workflow_stages.validate_ready_proof = guarded_validate_ready_proof
+        workflow_github.validate_ready_proof = guarded_validate_ready_proof
+        workflow_dispatch.validate_ready_proof = guarded_validate_ready_proof
 
     _install_waiting_guards()

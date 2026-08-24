@@ -16,27 +16,6 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 class OpenCodePrivacyRoleEntrypointTests(unittest.TestCase):
-    def test_installer_replaces_standalone_role_commands_with_python_gated_runner(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            target = Path(temp_dir)
-            opencode_install.install_assets(target, REPO_ROOT, python_command="python3")
-
-            for command, role in (
-                ("autodev-read.md", "reader"),
-                ("autodev-plan.md", "planner"),
-                ("autodev-implement.md", "implementer"),
-                ("autodev-fix.md", "fixer"),
-                ("autodev-verify.md", "verifier"),
-            ):
-                text = (target / ".opencode" / "commands" / command).read_text(
-                    encoding="utf-8"
-                )
-                self.assertIn("agent: build", text)
-                self.assertIn(f"autodev role --role {role}", text)
-                self.assertNotIn(".opencode/autodev.py role", text)
-                self.assertNotIn(opencode_install.PYTHON_SHELL_PLACEHOLDER, text)
-                self.assertIn("display-only", text)
-
     def test_role_entrypoint_prepares_then_uses_runtime_role_runner(self):
         runtime = Mock()
         runtime.name = "opencode"

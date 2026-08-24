@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from automation import ci_outcomes, workflow_stages
+from automation import ci_outcomes, workflow_dispatch, workflow_github, workflow_stages, workflow_verification
 
 
 REAL_SUCCESS_CHECKS = [
@@ -22,18 +22,25 @@ REAL_SUCCESS_CHECKS = [
 class CiOutcomeTests(unittest.TestCase):
     def _install_originals(self) -> dict[str, object]:
         return {
-            "ci_state": workflow_stages._ci_state,
-            "validate_ready": workflow_stages.validate_ready_proof,
-            "wait_for_checks": workflow_stages.wait_for_required_checks,
-            "pr_and_ci": workflow_stages.pr_and_ci,
+            "ci_state": workflow_github._ci_state,
+            "validate_ready": workflow_github.validate_ready_proof,
+            "wait_for_checks": workflow_verification.wait_for_required_checks,
+            "pr_and_ci": workflow_dispatch.pr_and_ci,
             "execute_stage": workflow_stages.execute_stage,
         }
 
     def _restore_install_originals(self, originals: dict[str, object]) -> None:
         workflow_stages._ci_state = originals["ci_state"]  # type: ignore[assignment]
+        workflow_github._ci_state = originals["ci_state"]  # type: ignore[assignment]
         workflow_stages.validate_ready_proof = originals["validate_ready"]  # type: ignore[assignment]
+        workflow_github.validate_ready_proof = originals["validate_ready"]  # type: ignore[assignment]
+        workflow_dispatch.validate_ready_proof = originals["validate_ready"]  # type: ignore[assignment]
         workflow_stages.wait_for_required_checks = originals["wait_for_checks"]  # type: ignore[assignment]
+        workflow_github.wait_for_required_checks = originals["wait_for_checks"]  # type: ignore[assignment]
+        workflow_verification.wait_for_required_checks = originals["wait_for_checks"]  # type: ignore[assignment]
         workflow_stages.pr_and_ci = originals["pr_and_ci"]  # type: ignore[assignment]
+        workflow_verification.pr_and_ci = originals["pr_and_ci"]  # type: ignore[assignment]
+        workflow_dispatch.pr_and_ci = originals["pr_and_ci"]  # type: ignore[assignment]
         workflow_stages.execute_stage = originals["execute_stage"]  # type: ignore[assignment]
 
     def test_real_pass_skipping_neutral_set_is_terminal_success(self):
@@ -95,7 +102,7 @@ class CiOutcomeTests(unittest.TestCase):
                 )
 
             try:
-                workflow_stages.pr_and_ci = pending_pr_and_ci
+                workflow_dispatch.pr_and_ci = pending_pr_and_ci
                 ci_outcomes.install()
                 code, payload = workflow_stages.execute_stage(
                     "pr-and-ci",
@@ -145,9 +152,9 @@ class CiOutcomeTests(unittest.TestCase):
             try:
                 ci_outcomes.install()
                 with (
-                    patch("automation.workflow_stages._pr_head_sha", return_value="commit"),
+                    patch("automation.workflow_github._pr_head_sha", return_value="commit"),
                     patch(
-                        "automation.workflow_stages.gh_json",
+                        "automation.workflow_github.gh_json",
                         return_value={"tree": {"sha": "tree"}, "parents": [{"sha": "parent"}]},
                     ),
                 ):

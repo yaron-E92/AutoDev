@@ -31,13 +31,7 @@ The canonical installer is:
 python -m automation.opencode_install --target-repo <TARGET_REPOSITORY>
 ```
 
-Use `python3` where appropriate. The older command:
-
-```text
-python -m automation.opencode_adapter install
-```
-
-is deprecated and remains only as a compatibility shim that delegates to the canonical installer.
+Use `python3` where appropriate.
 
 If `.github/workflows/autodev-windows-verification.yml` is new or changed, commit and merge it to the target repository's default branch. GitHub requires a `workflow_dispatch` workflow to exist on the default branch before it can be dispatched. AutoDev preflight checks that Actions is enabled and that the configured workflow is visible there.
 

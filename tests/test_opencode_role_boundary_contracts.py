@@ -26,31 +26,30 @@ class OpenCodeRoleBoundaryContractTests(unittest.TestCase):
         return parts[1] if len(parts) >= 3 else ""
 
     def test_standalone_role_commands_execute_directly_and_use_exact_installed_launcher(self):
-        commands = (
-            "autodev-read.md",
-            "autodev-plan.md",
-            "autodev-implement.md",
-            "autodev-fix.md",
-            "autodev-verify.md",
-        )
-        for name in commands:
+        roles = {
+            "autodev-read.md": "reader",
+            "autodev-plan.md": "planner",
+            "autodev-implement.md": "implementer",
+            "autodev-fix.md": "fixer",
+            "autodev-verify.md": "verifier",
+        }
+        for name, role in roles.items():
             text = self._command_text(name)
             frontmatter = self._frontmatter(text)
             self.assertIn("subtask: false", frontmatter, name)
-            self.assertNotIn("subtask: true", frontmatter, name)
-            self.assertIn(".opencode/autodev.json", text, name)
-            self.assertIn("exact bridge launcher", text, name)
-            self.assertIn("Do not probe `python`/`python3`", text, name)
-            self.assertNotIn("use `python3` instead only when", text, name)
-            self.assertIn("After successful accept", text, name)
-            self.assertIn("then stop", text, name)
+            self.assertIn("agent: build", frontmatter, name)
+            self.assertIn(f"!`autodev role --role {role}", text, name)
+            self.assertIn("--interactive-consent", text, name)
+            self.assertNotIn(".opencode/autodev", text, name)
+            self.assertNotIn("python3", text, name)
 
     def test_reader_command_requires_canonical_accept_before_success(self):
         text = self._command_text("autodev-read.md")
-        accept = "python .opencode/autodev.py accept --role reader --input .autodev-run/current/reader-brief.md"
-        self.assertIn(accept, text)
-        self.assertIn("Do not claim success before this command succeeds", text)
-        self.assertIn("Do not launch Synthesizer", text)
+        self.assertIn("!`autodev role --role reader", text)
+        self.assertIn("--interactive-consent", text)
+        self.assertIn("Python role runner executes the isolated Reader", text)
+        self.assertNotIn(" accept --role reader", text)
+        self.assertIn("display-only", text)
 
     def test_model_facing_role_artifacts_are_literal_repository_relative_paths(self):
         for name in (
@@ -70,18 +69,6 @@ class OpenCodeRoleBoundaryContractTests(unittest.TestCase):
         self.assertIn("never prepend", synthesizer)
         self.assertIn("`src/`", synthesizer)
         self.assertIn("Do not request external-directory access for AutoDev artifacts", synthesizer)
-
-    def test_legacy_llm_coordinator_commands_still_fail_closed_for_manual_compatibility(self):
-        for name in ("autodev-issue-to-pr.md", "autodev-resume.md"):
-            text = self._command_text(name)
-            self.assertIn("The very next tool invocation must be exactly", text, name)
-            self.assertIn("`role-check --role <role>`", text, name)
-            self.assertIn("Do not read artifacts/manifests/state", text, name)
-            self.assertIn("issue another Task", text, name)
-            self.assertIn("`MISSING`, `STALE`", text, name)
-            self.assertIn("failed role boundary", text, name)
-            self.assertIn("Follow your installed autodev-<role> contract exactly", text, name)
-            self.assertIn("do not compose a new role procedure", text.casefold(), name)
 
     def test_missing_reader_acceptance_fails_closed(self):
         with tempfile.TemporaryDirectory() as temp_dir:

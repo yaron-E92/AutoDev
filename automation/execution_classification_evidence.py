@@ -1,20 +1,14 @@
 from __future__ import annotations
 
+from automation import queue_contract, queue_github
+
 from automation import opencode_adapter_protocol
 
 import subprocess
 from dataclasses import replace
 from pathlib import Path
 
-from automation import (
-    execution_classification as execution,
-    execution_classification_hooks as hooks,
-    issue_queue,
-    role_coordinator_flow,
-    role_resume,
-    role_runtime,
-    workflow_stages,
-)
+from automation import execution_classification as execution, execution_classification_hooks as hooks, role_coordinator_flow, role_resume, role_runtime, workflow_stages
 
 
 def _fresh_issue_text(issue_number: int, issue: dict[str, object]) -> str:
@@ -85,7 +79,7 @@ def refresh_manual_completion_evidence(
     workflow_stages.write_state(current, state)
     execution.persist_artifacts(current, refreshed)
 
-    issue_queue.ensure_queue_labels(repo, repo_full, runner=runner)
+    queue_github.ensure_queue_labels(repo, repo_full, runner=runner)
     workflow_stages.gh(
         repo,
         [
@@ -95,13 +89,13 @@ def refresh_manual_completion_evidence(
             "--repo",
             repo_full,
             "--remove-label",
-            issue_queue.ATTENTION_LABEL,
+            queue_contract.ATTENTION_LABEL,
             "--remove-label",
-            issue_queue.READY_LABEL,
+            queue_contract.READY_LABEL,
             "--remove-label",
-            issue_queue.BLOCKED_LABEL,
+            queue_contract.BLOCKED_LABEL,
             "--add-label",
-            issue_queue.RUNNING_LABEL,
+            queue_contract.RUNNING_LABEL,
         ],
         runner=runner,
     )
@@ -113,7 +107,7 @@ def _install_fail_closed_queue_evidence_cache() -> None:
     # existing queue API remains stable. Clear that ephemeral cache before every
     # authoritative refresh: if the extra body query fails, absence of fresh
     # evidence must keep `autodev:attention` rather than reusing a stale `true`.
-    current_list = issue_queue.list_issues
+    current_list = queue_github.list_issues
     if not getattr(current_list, "_autodev_manual_evidence_cache_reset", False):
         original_list = current_list
 
@@ -121,7 +115,7 @@ def _install_fail_closed_queue_evidence_cache() -> None:
             repo: Path,
             github_repo: str,
             *,
-            limit: int = issue_queue.DEFAULT_LIMIT,
+            limit: int = queue_contract.DEFAULT_LIMIT,
             runner=subprocess.run,
         ):
             hooks._MANUAL_EVIDENCE_BY_ISSUE.clear()  # type: ignore[attr-defined]
@@ -133,9 +127,9 @@ def _install_fail_closed_queue_evidence_cache() -> None:
             )
 
         list_issues._autodev_manual_evidence_cache_reset = True  # type: ignore[attr-defined]
-        issue_queue.list_issues = list_issues
+        queue_github.list_issues = list_issues
 
-    current_fetch = issue_queue.fetch_issue
+    current_fetch = queue_github.fetch_issue
     if not getattr(current_fetch, "_autodev_manual_evidence_cache_reset", False):
         original_fetch = current_fetch
 
@@ -158,7 +152,7 @@ def _install_fail_closed_queue_evidence_cache() -> None:
             )
 
         fetch_issue._autodev_manual_evidence_cache_reset = True  # type: ignore[attr-defined]
-        issue_queue.fetch_issue = fetch_issue
+        queue_github.fetch_issue = fetch_issue
 
 
 def _install_attention_prepare_manifest() -> None:

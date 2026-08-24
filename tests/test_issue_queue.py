@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from automation import queue_classification, queue_cli, queue_contract, queue_github, queue_presentation, queue_workflow
+
 import io
 import json
 import tempfile
@@ -7,16 +9,15 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from automation import issue_queue
 
 
 class FakeGitHub:
     def __init__(self):
         self.repo = "owner/repo"
         self.labels = {
-            issue_queue.READY_LABEL,
-            issue_queue.BLOCKED_LABEL,
-            issue_queue.RUNNING_LABEL,
+            queue_contract.READY_LABEL,
+            queue_contract.BLOCKED_LABEL,
+            queue_contract.RUNNING_LABEL,
         }
         self.issues: dict[int, dict[str, object]] = {}
         self.blocked_by: dict[int, list[int]] = {}
@@ -142,14 +143,14 @@ class IssueQueueTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
             fake = FakeGitHub()
-            fake.add_issue(1, labels=[issue_queue.READY_LABEL, "priority:high"])
-            fake.add_issue(2, labels=[issue_queue.MANAGED_LABEL, "area:python"])
+            fake.add_issue(1, labels=[queue_contract.READY_LABEL, "priority:high"])
+            fake.add_issue(2, labels=[queue_contract.MANAGED_LABEL, "area:python"])
 
-            states, _ = issue_queue.reconcile_queue(repo, fake.repo, runner=fake)
+            states, _ = queue_workflow.reconcile_queue(repo, fake.repo, runner=fake)
 
-            self.assertNotIn(issue_queue.READY_LABEL, fake.issues[1]["labels"])
+            self.assertNotIn(queue_contract.READY_LABEL, fake.issues[1]["labels"])
             self.assertIn("priority:high", fake.issues[1]["labels"])
-            self.assertIn(issue_queue.READY_LABEL, fake.issues[2]["labels"])
+            self.assertIn(queue_contract.READY_LABEL, fake.issues[2]["labels"])
             self.assertIn("area:python", fake.issues[2]["labels"])
             reasons = {state.issue.number: state.reason for state in states}
             self.assertEqual(reasons, {1: "unmanaged", 2: "ready"})
@@ -158,43 +159,43 @@ class IssueQueueTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
             fake = FakeGitHub()
-            fake.add_issue(10, labels=[issue_queue.MANAGED_LABEL])
+            fake.add_issue(10, labels=[queue_contract.MANAGED_LABEL])
             fake.add_issue(20)
             fake.add_issue(21)
             fake.set_blockers(10, [21, 20])
 
-            states, _ = issue_queue.reconcile_queue(repo, fake.repo, runner=fake)
+            states, _ = queue_workflow.reconcile_queue(repo, fake.repo, runner=fake)
             state = next(item for item in states if item.issue.number == 10)
             self.assertEqual([item.number for item in state.open_blockers], [20, 21])
-            self.assertIn(issue_queue.BLOCKED_LABEL, fake.issues[10]["labels"])
-            self.assertNotIn(issue_queue.READY_LABEL, fake.issues[10]["labels"])
+            self.assertIn(queue_contract.BLOCKED_LABEL, fake.issues[10]["labels"])
+            self.assertNotIn(queue_contract.READY_LABEL, fake.issues[10]["labels"])
 
             fake.issues[20]["state"] = "CLOSED"
-            states, _ = issue_queue.reconcile_queue(repo, fake.repo, runner=fake)
+            states, _ = queue_workflow.reconcile_queue(repo, fake.repo, runner=fake)
             state = next(item for item in states if item.issue.number == 10)
             self.assertEqual([item.number for item in state.open_blockers], [21])
             self.assertEqual(fake.blocked_by[10], [21])
             self.assertEqual(state.removed_closed_dependencies, (20,))
-            self.assertIn(issue_queue.BLOCKED_LABEL, fake.issues[10]["labels"])
+            self.assertIn(queue_contract.BLOCKED_LABEL, fake.issues[10]["labels"])
 
             fake.issues[21]["state"] = "CLOSED"
-            states, _ = issue_queue.reconcile_queue(repo, fake.repo, runner=fake)
+            states, _ = queue_workflow.reconcile_queue(repo, fake.repo, runner=fake)
             state = next(item for item in states if item.issue.number == 10)
             self.assertEqual(state.reason, "ready")
             self.assertEqual(fake.blocked_by[10], [])
             self.assertEqual(state.removed_closed_dependencies, (21,))
-            self.assertIn(issue_queue.READY_LABEL, fake.issues[10]["labels"])
-            self.assertNotIn(issue_queue.BLOCKED_LABEL, fake.issues[10]["labels"])
+            self.assertIn(queue_contract.READY_LABEL, fake.issues[10]["labels"])
+            self.assertNotIn(queue_contract.BLOCKED_LABEL, fake.issues[10]["labels"])
 
     def test_reconciliation_is_idempotent_after_state_converges(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
             fake = FakeGitHub()
-            fake.add_issue(1, labels=[issue_queue.MANAGED_LABEL])
+            fake.add_issue(1, labels=[queue_contract.MANAGED_LABEL])
 
-            issue_queue.reconcile_queue(repo, fake.repo, runner=fake)
+            queue_workflow.reconcile_queue(repo, fake.repo, runner=fake)
             fake.mutations.clear()
-            issue_queue.reconcile_queue(repo, fake.repo, runner=fake)
+            queue_workflow.reconcile_queue(repo, fake.repo, runner=fake)
 
             self.assertEqual(fake.mutations, [])
 
@@ -204,25 +205,25 @@ class IssueQueueTests(unittest.TestCase):
             fake = FakeGitHub()
             fake.add_issue(
                 1,
-                labels=[issue_queue.MANAGED_LABEL, issue_queue.ATTENTION_LABEL, issue_queue.READY_LABEL],
+                labels=[queue_contract.MANAGED_LABEL, queue_contract.ATTENTION_LABEL, queue_contract.READY_LABEL],
             )
             fake.add_issue(
                 2,
-                labels=[issue_queue.MANAGED_LABEL, issue_queue.RUNNING_LABEL, issue_queue.READY_LABEL],
+                labels=[queue_contract.MANAGED_LABEL, queue_contract.RUNNING_LABEL, queue_contract.READY_LABEL],
             )
             fake.add_issue(
                 3,
                 state="CLOSED",
-                labels=[issue_queue.MANAGED_LABEL, issue_queue.BLOCKED_LABEL],
+                labels=[queue_contract.MANAGED_LABEL, queue_contract.BLOCKED_LABEL],
             )
             (repo / ".autodev").mkdir()
-            (repo / issue_queue.QUEUE_CONFIG).write_text(
+            (repo / queue_contract.QUEUE_CONFIG).write_text(
                 json.dumps({"version": 1, "autonomous_execution": False}),
                 encoding="utf-8",
             )
-            fake.add_issue(4, labels=[issue_queue.MANAGED_LABEL, issue_queue.READY_LABEL])
+            fake.add_issue(4, labels=[queue_contract.MANAGED_LABEL, queue_contract.READY_LABEL])
 
-            states, _ = issue_queue.reconcile_queue(repo, fake.repo, runner=fake)
+            states, _ = queue_workflow.reconcile_queue(repo, fake.repo, runner=fake)
             reasons = {state.issue.number: state.reason for state in states}
 
             self.assertEqual(reasons[1], "attention")
@@ -230,22 +231,22 @@ class IssueQueueTests(unittest.TestCase):
             self.assertEqual(reasons[3], "closed")
             self.assertEqual(reasons[4], "policy-excluded")
             for number in (1, 2, 3, 4):
-                self.assertNotIn(issue_queue.READY_LABEL, fake.issues[number]["labels"])
-            self.assertNotIn(issue_queue.BLOCKED_LABEL, fake.issues[3]["labels"])
-            self.assertIn(issue_queue.MANAGED_LABEL, fake.issues[3]["labels"])
+                self.assertNotIn(queue_contract.READY_LABEL, fake.issues[number]["labels"])
+            self.assertNotIn(queue_contract.BLOCKED_LABEL, fake.issues[3]["labels"])
+            self.assertIn(queue_contract.MANAGED_LABEL, fake.issues[3]["labels"])
 
     def test_status_uses_authoritative_dependency_state_not_stale_labels(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
             fake = FakeGitHub()
-            fake.add_issue(1, labels=[issue_queue.MANAGED_LABEL, issue_queue.READY_LABEL])
-            fake.add_issue(2, labels=[issue_queue.MANAGED_LABEL, issue_queue.READY_LABEL])
-            fake.add_issue(3, labels=[issue_queue.MANAGED_LABEL, issue_queue.ATTENTION_LABEL])
+            fake.add_issue(1, labels=[queue_contract.MANAGED_LABEL, queue_contract.READY_LABEL])
+            fake.add_issue(2, labels=[queue_contract.MANAGED_LABEL, queue_contract.READY_LABEL])
+            fake.add_issue(3, labels=[queue_contract.MANAGED_LABEL, queue_contract.ATTENTION_LABEL])
             fake.add_issue(20)
             fake.set_blockers(2, [20])
 
-            states = issue_queue.inspect_queue(repo, fake.repo, runner=fake)
-            summary = issue_queue.queue_summary(states)
+            states = queue_workflow.inspect_queue(repo, fake.repo, runner=fake)
+            summary = queue_presentation.queue_summary(states)
 
             self.assertEqual(summary["managed"], 3)
             self.assertEqual(summary["ready"], 1)
@@ -256,18 +257,18 @@ class IssueQueueTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
             fake = FakeGitHub()
-            fake.add_issue(50, labels=[issue_queue.MANAGED_LABEL], title="Target")
+            fake.add_issue(50, labels=[queue_contract.MANAGED_LABEL], title="Target")
             fake.add_issue(2, title="Second")
             fake.add_issue(1, title="First")
             fake.set_blockers(50, [2, 1])
 
-            issue = issue_queue.fetch_issue(repo, fake.repo, 50, runner=fake)
-            blockers = issue_queue.list_blockers(repo, fake.repo, 50, runner=fake)
-            state = issue_queue.classify_issue(issue, blockers, issue_queue.QueuePolicy())
+            issue = queue_github.fetch_issue(repo, fake.repo, 50, runner=fake)
+            blockers = queue_github.list_blockers(repo, fake.repo, 50, runner=fake)
+            state = queue_classification.classify_issue(issue, blockers, queue_contract.QueuePolicy())
 
             self.assertEqual([item.number for item in blockers], [1, 2])
             self.assertEqual(
-                issue_queue.explain_state(state),
+                queue_presentation.explain_state(state),
                 "#50 blocked by: #1 First, #2 Second",
             )
 
@@ -275,24 +276,24 @@ class IssueQueueTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
             fake = FakeGitHub()
-            fake.add_issue(1, labels=[issue_queue.MANAGED_LABEL])
+            fake.add_issue(1, labels=[queue_contract.MANAGED_LABEL])
             fake.dependencies_available = False
 
-            with self.assertRaises(issue_queue.QueueError) as caught:
-                issue_queue.reconcile_queue(repo, fake.repo, runner=fake)
+            with self.assertRaises(queue_contract.QueueError) as caught:
+                queue_workflow.reconcile_queue(repo, fake.repo, runner=fake)
 
             self.assertIn("will not infer blockers from issue prose", str(caught.exception))
-            self.assertNotIn(issue_queue.READY_LABEL, fake.issues[1]["labels"])
+            self.assertNotIn(queue_contract.READY_LABEL, fake.issues[1]["labels"])
 
     def test_cli_reconcile_status_and_explain_require_only_github_operations(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
             fake = FakeGitHub()
-            fake.add_issue(1, labels=[issue_queue.MANAGED_LABEL])
+            fake.add_issue(1, labels=[queue_contract.MANAGED_LABEL])
 
             reconcile_out = io.StringIO()
             self.assertEqual(
-                issue_queue.run_cli(
+                queue_cli.run_cli(
                     ["reconcile", "--github-repo", fake.repo],
                     repo=repo,
                     runner=fake,
@@ -304,7 +305,7 @@ class IssueQueueTests(unittest.TestCase):
 
             status_out = io.StringIO()
             self.assertEqual(
-                issue_queue.run_cli(
+                queue_cli.run_cli(
                     ["status", "--github-repo", fake.repo],
                     repo=repo,
                     runner=fake,
@@ -316,7 +317,7 @@ class IssueQueueTests(unittest.TestCase):
 
             explain_out = io.StringIO()
             self.assertEqual(
-                issue_queue.run_cli(
+                queue_cli.run_cli(
                     ["explain", "1", "--github-repo", fake.repo],
                     repo=repo,
                     runner=fake,

@@ -16,8 +16,6 @@ class InstallationDocumentationTests(unittest.TestCase):
         self.assertIn("autodev repo doctor", installation)
         self.assertIn("autodev queue next", installation)
         self.assertIn("autodev queue reconcile", queue)
-        self.assertNotIn("python .opencode/autodev.py queue", queue)
-        self.assertNotIn("python3 .opencode/autodev.py queue", queue)
 
     def test_installation_docs_define_ownership_and_opencode_config_authority(self):
         installation = (REPO_ROOT / "docs" / "installation.md").read_text(encoding="utf-8")
@@ -27,7 +25,8 @@ class InstallationDocumentationTests(unittest.TestCase):
         self.assertIn(".opencode/", installation)
         self.assertIn("opencode.jsonc", installation)
         self.assertIn("remains authoritative", installation)
-        self.assertIn("temporary compatibility shim", installation)
+        self.assertNotIn("temporary compatibility shim", installation)
+        self.assertNotIn(".opencode/autodev.json", installation)
 
 
 if __name__ == "__main__":

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from automation import repair_budget_contract, repair_budget_failure, repair_budget_manifest, repair_budget_policy, repair_budget_resume
+
 from automation import opencode_resume_status
 
 import json
@@ -10,7 +12,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from automation import run_manifest, semantic_repair_budget, workflow_stages
+from automation import run_manifest, workflow_stages
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -86,8 +88,8 @@ class SemanticRepairBudgetTests(unittest.TestCase):
                 patch.dict(
                     os.environ,
                     {
-                        semantic_repair_budget.POLICY_ENV: "fixed",
-                        semantic_repair_budget.FIXED_LIMIT_ENV: "2",
+                        repair_budget_contract.POLICY_ENV: "fixed",
+                        repair_budget_contract.FIXED_LIMIT_ENV: "2",
                     },
                     clear=False,
                 ),
@@ -106,7 +108,7 @@ class SemanticRepairBudgetTests(unittest.TestCase):
         self.assertEqual(payload["state"], "BLOCKED")
         self.assertEqual(
             payload["failure_classification"],
-            semantic_repair_budget.FAILURE_REPAIR_BUDGET_EXHAUSTED,
+            repair_budget_contract.FAILURE_REPAIR_BUDGET_EXHAUSTED,
         )
         self.assertEqual(payload["root_failure_classification"], "code-repairable")
         self.assertEqual(payload["semantic_repair_attempt"], 2)
@@ -135,7 +137,7 @@ class SemanticRepairBudgetTests(unittest.TestCase):
     def test_failure_fingerprint_is_stable_for_same_result_and_source(self):
         result = json.loads(_semantic_result())
         budget = {"policy": "fixed", "formula_version": 1, "effective_limit": 2}
-        first = semantic_repair_budget.failure_details(
+        first = repair_budget_failure.failure_details(
             result,
             budget,
             attempt=2,
@@ -143,7 +145,7 @@ class SemanticRepairBudgetTests(unittest.TestCase):
             repair_artifact=Path("verification-repair.md"),
             verified_source_identity="same-source",
         )
-        second = semantic_repair_budget.failure_details(
+        second = repair_budget_failure.failure_details(
             result,
             budget,
             attempt=99,
@@ -194,16 +196,16 @@ class SemanticRepairBudgetTests(unittest.TestCase):
             with patch.dict(
                 os.environ,
                 {
-                    semantic_repair_budget.POLICY_ENV: "adaptive",
-                    semantic_repair_budget.ADAPTIVE_MIN_ENV: "1",
-                    semantic_repair_budget.ADAPTIVE_MAX_ENV: "3",
-                    semantic_repair_budget.ADAPTIVE_BASE_ENV: "1",
-                    semantic_repair_budget.LINES_PER_ATTEMPT_ENV: "10",
-                    semantic_repair_budget.FIXED_LIMIT_ENV: "2",
+                    repair_budget_contract.POLICY_ENV: "adaptive",
+                    repair_budget_contract.ADAPTIVE_MIN_ENV: "1",
+                    repair_budget_contract.ADAPTIVE_MAX_ENV: "3",
+                    repair_budget_contract.ADAPTIVE_BASE_ENV: "1",
+                    repair_budget_contract.LINES_PER_ATTEMPT_ENV: "10",
+                    repair_budget_contract.FIXED_LIMIT_ENV: "2",
                 },
                 clear=False,
             ):
-                budget = semantic_repair_budget.resolve_budget(
+                budget = repair_budget_policy.resolve_budget(
                     repo,
                     state,
                     attempt=0,
@@ -233,19 +235,19 @@ class SemanticRepairBudgetTests(unittest.TestCase):
             repo = Path(temp_dir)
             with patch.dict(
                 os.environ,
-                {semantic_repair_budget.FIXED_LIMIT_ENV: "1"},
+                {repair_budget_contract.FIXED_LIMIT_ENV: "1"},
                 clear=False,
             ):
-                unchanged = semantic_repair_budget.resolve_budget(
+                unchanged = repair_budget_policy.resolve_budget(
                     repo, state, attempt=2, fixed_default=1
                 )
             state["SemanticRepairBudget"] = unchanged
             with patch.dict(
                 os.environ,
-                {semantic_repair_budget.FIXED_LIMIT_ENV: "5"},
+                {repair_budget_contract.FIXED_LIMIT_ENV: "5"},
                 clear=False,
             ):
-                raised = semantic_repair_budget.resolve_budget(
+                raised = repair_budget_policy.resolve_budget(
                     repo, state, attempt=2, fixed_default=1
                 )
 
@@ -273,19 +275,19 @@ class SemanticRepairBudgetTests(unittest.TestCase):
             repo = Path(temp_dir)
             with patch.dict(
                 os.environ,
-                {semantic_repair_budget.FIXED_LIMIT_ENV: "2"},
+                {repair_budget_contract.FIXED_LIMIT_ENV: "2"},
                 clear=False,
             ):
-                unchanged = semantic_repair_budget.resolve_budget(
+                unchanged = repair_budget_policy.resolve_budget(
                     repo, state, attempt=1, fixed_default=2
                 )
             state["SemanticRepairBudget"] = unchanged
             with patch.dict(
                 os.environ,
-                {semantic_repair_budget.FIXED_LIMIT_ENV: "4"},
+                {repair_budget_contract.FIXED_LIMIT_ENV: "4"},
                 clear=False,
             ):
-                raised = semantic_repair_budget.resolve_budget(
+                raised = repair_budget_policy.resolve_budget(
                     repo, state, attempt=1, fixed_default=2
                 )
 
@@ -350,7 +352,7 @@ class SemanticRepairBudgetTests(unittest.TestCase):
                 "budget": state["SemanticRepairBudget"],
             }
             manifest["failure"] = {
-                "classification": semantic_repair_budget.FAILURE_REPAIR_BUDGET_EXHAUSTED,
+                "classification": repair_budget_contract.FAILURE_REPAIR_BUDGET_EXHAUSTED,
                 "root_classification": "code-repairable",
                 "reason": "budget exhausted",
                 "stage": "semantic-verified",
@@ -361,10 +363,10 @@ class SemanticRepairBudgetTests(unittest.TestCase):
 
             with patch.dict(
                 os.environ,
-                {semantic_repair_budget.FIXED_LIMIT_ENV: "4"},
+                {repair_budget_contract.FIXED_LIMIT_ENV: "4"},
                 clear=False,
             ):
-                reopened = semantic_repair_budget.maybe_reopen_exhausted_budget(repo)
+                reopened = repair_budget_resume.maybe_reopen_exhausted_budget(repo)
 
             updated_state = workflow_stages.read_state(current)
             updated_manifest = run_manifest.load_manifest(manifest_path)
@@ -387,7 +389,7 @@ class SemanticRepairBudgetTests(unittest.TestCase):
         )
 
     def test_run_manifest_failure_hook_preserves_rich_semantic_failure(self):
-        semantic_repair_budget.install_run_manifest_hooks()
+        repair_budget_manifest.install_run_manifest_hooks()
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
             current = repo / ".autodev-run" / "current"
@@ -405,7 +407,7 @@ class SemanticRepairBudgetTests(unittest.TestCase):
             )
             manifest = run_manifest.load_manifest(path)
             manifest["failure"] = {
-                "classification": semantic_repair_budget.FAILURE_REPAIR_BUDGET_EXHAUSTED,
+                "classification": repair_budget_contract.FAILURE_REPAIR_BUDGET_EXHAUSTED,
                 "root_classification": "code-repairable",
                 "reason": "rich",
                 "stage": "semantic-verified",
@@ -416,7 +418,7 @@ class SemanticRepairBudgetTests(unittest.TestCase):
 
             run_manifest.record_failure(
                 path,
-                classification=semantic_repair_budget.FAILURE_REPAIR_BUDGET_EXHAUSTED,
+                classification=repair_budget_contract.FAILURE_REPAIR_BUDGET_EXHAUSTED,
                 reason="short reason",
                 stage="semantic-verified",
             )

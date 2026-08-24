@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from automation.model_providers import ModelConfig, ModelProvider, ProviderError, load_provider_config
+from automation.provider_contract import ProviderError
 
 
 ALLOWED_VERDICTS = {"pass", "repair", "blocked"}
@@ -71,12 +71,8 @@ SEMANTIC_IGNORED_PARTS = {
     "__pycache__",
 }
 
-_TEMPLATE_PLACEHOLDER = re.compile(
-    r"\{~\{(?P<new>[A-Za-z][A-Za-z0-9_]*)\}~\}"
-    r"|\{\{(?P<legacy>[A-Za-z][A-Za-z0-9_]*)\}\}"
-)
+_TEMPLATE_PLACEHOLDER = re.compile(r"\{~\{(?P<name>[A-Za-z][A-Za-z0-9_]*)\}~\}")
 
-_LEGACY_ONLY_PLACEHOLDERS = {"LocalCheck", "StackContext"}
 
 _DECLARATION_PATTERNS = (
     re.compile(r"\b(?:class|interface|record|struct|enum|def|function|func)\s+([A-Za-z_][A-Za-z0-9_]*)"),

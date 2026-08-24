@@ -2,7 +2,6 @@ import unittest
 
 from automation.semantic_contract import SemanticVerifierError
 from automation.semantic_prompts import build_semantic_prompt
-from automation.semantic_text import render_template
 
 
 class SemanticTemplateCollisionTests(unittest.TestCase):
@@ -28,18 +27,6 @@ class SemanticTemplateCollisionTests(unittest.TestCase):
         self.assertIn("Legacy-looking literal: {{Plan}}", prompt)
         self.assertIn("New-looking literal: {~{Plan}~}", prompt)
         self.assertIn("Plan:\nActual implementation plan", prompt)
-
-    def test_legacy_known_placeholders_remain_supported_without_recursive_substitution(self):
-        rendered = render_template(
-            "Issue: {{IssueText}}\nPlan: {{Plan}}\n",
-            {
-                "IssueText": "Literal {{Plan}} and {~{Plan}~}",
-                "Plan": "Actual plan",
-            },
-        )
-
-        self.assertIn("Issue: Literal {{Plan}} and {~{Plan}~}", rendered)
-        self.assertIn("Plan: Actual plan", rendered)
 
     def test_unknown_new_template_placeholder_is_rejected(self):
         with self.assertRaises(SemanticVerifierError) as raised:

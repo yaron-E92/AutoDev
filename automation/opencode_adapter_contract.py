@@ -3,9 +3,9 @@ from __future__ import annotations
 import re
 from pathlib import Path
 from automation import workflow_stages
-from automation.prompt_runner import (
+from automation.planner_output import (
     REQUIRED_PLAN_HEADINGS,
-    PromptRunnerError,
+    PlannerOutputError,
     handle_planner_output,
 )
 
@@ -74,16 +74,16 @@ def role_contracts() -> dict[str, dict[str, object]]:
             "output_artifact": ".autodev-run/current/reader-brief.md",
             "format": "bounded text/Markdown handoff",
             "max_chars": MAX_HANDOFF_CHARS,
-            "prepare": "python .opencode/autodev.py prepare --role reader",
-            "accept": "python .opencode/autodev.py accept --role reader --input .autodev-run/current/reader-brief.md",
+            "prepare": "autodev prepare --role reader",
+            "accept": "autodev accept --role reader --input .autodev-run/current/reader-brief.md",
         },
         "synthesizer": {
             "input_artifact": ".autodev-run/current/synthesizer.md",
             "output_artifact": ".autodev-run/current/synthesized-handoff.md",
             "format": "bounded text/Markdown cross-area handoff",
             "max_chars": MAX_HANDOFF_CHARS,
-            "prepare": "python .opencode/autodev.py prepare --role synthesizer",
-            "accept": "python .opencode/autodev.py accept --role synthesizer --input .autodev-run/current/synthesized-handoff.md",
+            "prepare": "autodev prepare --role synthesizer",
+            "accept": "autodev accept --role synthesizer --input .autodev-run/current/synthesized-handoff.md",
         },
         "planner": {
             "input_artifact": ".autodev-run/current/planner.md",
@@ -92,36 +92,36 @@ def role_contracts() -> dict[str, dict[str, object]]:
             "format": "exact six-section AutoDev plan",
             "required_sections": list(REQUIRED_PLAN_HEADINGS),
             "max_chars": MAX_HANDOFF_CHARS,
-            "prepare": "python .opencode/autodev.py prepare --role planner",
-            "accept": "python .opencode/autodev.py accept --role planner --input .autodev-run/current/plan.md",
+            "prepare": "autodev prepare --role planner",
+            "accept": "autodev accept --role planner --input .autodev-run/current/plan.md",
         },
         "implementer": {
             "input_artifact": ".autodev-run/current/implementer.md",
             "output_artifact": ".autodev-run/current/commit-message.txt",
             "format": "one non-empty commit-message line, maximum 200 characters",
             "max_chars": 200,
-            "prepare": "python .opencode/autodev.py prepare --role implementer",
+            "prepare": "autodev prepare --role implementer",
             "coordinator_prepare_required": False,
             "coordinator_input_note": "stage --name render-implementer already rendered implementer.md",
-            "accept": "python .opencode/autodev.py accept --role implementer",
+            "accept": "autodev accept --role implementer",
         },
         "fixer": {
             "input_artifact": "one repair artifact selected by the explicit prepare command",
             "output_artifact": "target repository edits only",
             "format": "targeted source repair; no new AutoDev protocol artifact",
             "prepare": [
-                "python .opencode/autodev.py prepare --role fixer --arguments local",
-                "python .opencode/autodev.py prepare --role fixer --arguments semantic",
-                "python .opencode/autodev.py prepare --role fixer --arguments ci",
+                "autodev prepare --role fixer --arguments local",
+                "autodev prepare --role fixer --arguments semantic",
+                "autodev prepare --role fixer --arguments ci",
             ],
-            "accept": "python .opencode/autodev.py accept --role fixer",
+            "accept": "autodev accept --role fixer",
         },
         "verifier": {
             "input_artifact": ".autodev-run/current/verifier.md",
             "template_artifact": ".autodev-run/current/verification-result.template.json",
             "output_artifact": ".autodev-run/current/verification-result.json",
             "format": "strict semantic JSON using only parser-supported fields/enums and exact pre-populated acceptance criteria",
-            "prepare": "python .opencode/autodev.py prepare --role verifier",
-            "accept": "python .opencode/autodev.py accept --role verifier --input .autodev-run/current/verification-result.json",
+            "prepare": "autodev prepare --role verifier",
+            "accept": "autodev accept --role verifier --input .autodev-run/current/verification-result.json",
         },
     }

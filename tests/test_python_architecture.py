@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import importlib
+import re
 import unittest
 from pathlib import Path
 
@@ -13,7 +14,6 @@ REPRESENTATIVE_MODULES = (
     "automation.scheduler_registration",
     "automation.workflow_dispatch",
     "automation.semantic_invocation",
-    "automation.semantic_cli",
     "automation.privacy_grant_hooks",
     "automation.claim_lease",
     "automation.scheduler_health_lifecycle",
@@ -25,7 +25,7 @@ REPRESENTATIVE_MODULES = (
     "automation.opencode_adapter_workflow",
     "automation.coordination_state",
     "automation.role_coordinator_flow",
-    "area_reader.pipeline",
+    "automation.planner_output",
 )
 REMOVED_PATHS = (
     "automation/run_real_issue.py",
@@ -39,23 +39,69 @@ REMOVED_PATHS = (
     "automation/opencode_coordinator.py",
     "automation/eval_harness.py",
     "automation/eval_harness_core.py",
+    "automation/create_issues_from_description.py",
+    "automation/ollama_cloud_preflight.py",
+    "automation/workflow_stage_legacy.py",
+    "automation/workflow_verify_current.py",
+    "integrations/opencode/autodev.py",
+    "integrations/opencode/autodev.ps1",
+    "integrations/opencode/python-commands",
+    "linux",
+    "windows/scripts/issue-to-pr-cycle.ps1",
+    "windows/scripts/codex-common.ps1",
+    "windows/scripts/codex-finalize-current-issue.ps1",
+    "windows/scripts/codex-mark-current-issue.ps1",
+    "windows/scripts/codex-plan-current-issue.ps1",
+    "windows/scripts/codex-prepare-next-ready-issue.ps1",
+    "windows/scripts/ensure-codex-labels.ps1",
     "area_reader_v2",
+    "area_reader/cli.py",
+    "area_reader/execution.py",
+    "area_reader/pipeline.py",
+    "area_reader/provider.py",
+    "area_reader/storage.py",
+    "area_reader/workflow.py",
+    "automation/semantic_cli.py",
+    "automation/prompt_runner.py",
+    "automation/model_roles.py",
+    "promptTemplates/verifier.md",
+    "promptTemplates/verification-repair.md",
 )
 MAINTAINED_DOCS = (
+    "README.md",
     "CONTRIBUTING.md",
     "docs/headroom.md",
     "docs/model-roles.md",
     "docs/opencode.md",
+    "docs/opencode-python-coordinator.md",
+    "docs/opencode-resume.md",
+    "docs/opencode-runtime-hardening.md",
     "docs/python-architecture.md",
+    "docs/role-runtimes.md",
+    "docs/semantic-repair-budgets.md",
+    "docs/semantic-verification.md",
+    "docs/windows-verification.md",
 )
 STALE_TEXT_MARKERS = (
     "automation." + "run_real_issue",
+    "automation." + "prompt_runner",
     "automation." + "semantic_verifier",
     "automation." + "windows_verification.py",
     "automation." + "opencode_resume.py",
     "workflow_stages" + "_core.py",
     "eval_harness" + "_core.py",
     "area_reader" + "_v2",
+    ".opencode/" + "autodev.py",
+    ".opencode/" + "autodev.json",
+    "scripts/" + "run-real-issue",
+    "issue-to-pr-cycle." + "ps1",
+    "issue-to-pr-cycle." + "sh",
+    "codex-tools/" + "prompts",
+)
+DEPRECATED_PLACEHOLDER = re.compile(r"\{\{[A-Za-z][A-Za-z0-9_]*\}\}")
+MAINTAINED_TEMPLATE_PRODUCERS = (
+    "codex-profiles.json",
+    "automation/workflow_prompts.py",
 )
 
 
@@ -162,20 +208,32 @@ class PythonArchitectureTests(unittest.TestCase):
                     stale.append(f"{relative}: {marker}")
         self.assertEqual(stale, [])
 
-    def test_issue_180_migration_scaffolding_is_not_shipped(self):
+    def test_maintained_template_producers_use_only_canonical_placeholders(self):
+        stale: list[str] = []
+        paths = [ROOT / relative for relative in MAINTAINED_TEMPLATE_PRODUCERS]
+        paths.extend(sorted((ROOT / "promptTemplates").glob("*.md")))
+        for path in paths:
+            match = DEPRECATED_PLACEHOLDER.search(path.read_text(encoding="utf-8"))
+            if match:
+                stale.append(f"{path.relative_to(ROOT).as_posix()}: {match.group(0)}")
+        self.assertEqual(stale, [])
+
+    def test_issue_migration_scaffolding_is_not_shipped(self):
         leftovers: list[str] = []
         scripts = ROOT / "scripts"
         workflows = ROOT / ".github" / "workflows"
         if scripts.is_dir():
-            leftovers.extend(
-                path.relative_to(ROOT).as_posix()
-                for path in scripts.glob("issue_180_*")
-            )
+            for issue in (180, 181):
+                leftovers.extend(
+                    path.relative_to(ROOT).as_posix()
+                    for path in scripts.glob(f"issue_{issue}_*")
+                )
         if workflows.is_dir():
-            leftovers.extend(
-                path.relative_to(ROOT).as_posix()
-                for path in workflows.glob("issue-180-*")
-            )
+            for issue in (180, 181):
+                leftovers.extend(
+                    path.relative_to(ROOT).as_posix()
+                    for path in workflows.glob(f"issue-{issue}-*")
+                )
         chunks = sorted(
             path.relative_to(ROOT).as_posix()
             for path in ROOT.rglob("*.chunk*.txt")

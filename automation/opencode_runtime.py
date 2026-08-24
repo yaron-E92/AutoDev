@@ -23,7 +23,7 @@ import urllib.request
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
-from automation import workflow_stages
+from automation import workflow_dispatch, workflow_stages, workflow_verification, workflow_workspace
 
 
 SUPPORTED_ROOT_OPENCODE_CONFIG = {"opencode.json", "opencode.jsonc"}
@@ -204,7 +204,7 @@ def _recover_existing_pr(
 
 
 def _install_shipment_guards() -> None:
-    current_source_identity = workflow_stages.source_identity
+    current_source_identity = workflow_verification.source_identity
     if not getattr(current_source_identity, "_autodev_opencode_shipment_guard", False):
         original_source_identity = current_source_identity
 
@@ -214,8 +214,10 @@ def _install_shipment_guards() -> None:
 
         source_identity._autodev_opencode_shipment_guard = True  # type: ignore[attr-defined]
         workflow_stages.source_identity = source_identity
+        workflow_verification.source_identity = source_identity
+        workflow_dispatch.source_identity = source_identity
 
-    current_ensure_pr = workflow_stages.ensure_pr
+    current_ensure_pr = workflow_verification.ensure_pr
     if not getattr(current_ensure_pr, "_autodev_opencode_shipment_guard", False):
         original_ensure_pr = current_ensure_pr
 
@@ -244,8 +246,9 @@ def _install_shipment_guards() -> None:
 
         ensure_pr._autodev_opencode_shipment_guard = True  # type: ignore[attr-defined]
         workflow_stages.ensure_pr = ensure_pr
+        workflow_verification.ensure_pr = ensure_pr
 
-    current_pr_and_ci = workflow_stages.pr_and_ci
+    current_pr_and_ci = workflow_dispatch.pr_and_ci
     if not getattr(current_pr_and_ci, "_autodev_opencode_shipment_guard", False):
         original_pr_and_ci = current_pr_and_ci
 
@@ -273,6 +276,8 @@ def _install_shipment_guards() -> None:
 
         pr_and_ci._autodev_opencode_shipment_guard = True  # type: ignore[attr-defined]
         workflow_stages.pr_and_ci = pr_and_ci
+        workflow_verification.pr_and_ci = pr_and_ci
+        workflow_dispatch.pr_and_ci = pr_and_ci
 
 
 def install_workflow_guards() -> None:
@@ -291,6 +296,7 @@ def install_workflow_guards() -> None:
 
         ignored_workspace_path._autodev_opencode_guard = True  # type: ignore[attr-defined]
         workflow_stages.ignored_workspace_path = ignored_workspace_path
+        workflow_workspace.ignored_workspace_path = ignored_workspace_path
 
     current_read_json = workflow_stages.read_json
     if getattr(current_read_json, "_autodev_opencode_snapshot_guard", False):

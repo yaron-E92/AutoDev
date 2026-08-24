@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from automation import queue_classification, queue_contract, queue_github
+
 from automation import opencode_resume_status
 
 from automation import opencode_resume_execution
@@ -14,7 +16,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from automation import execution_classification as execution, issue_queue, role_coordinator_flow, role_resume, workflow_stages
+from automation import execution_classification as execution, role_coordinator_flow, role_resume, workflow_stages
 
 
 ATTENTION_STATE = "ATTENTION_REQUIRED"
@@ -33,25 +35,25 @@ class _AttentionRequired(RuntimeError):
 
 
 def _canonical_label_specs() -> None:
-    issue_queue.LABEL_SPECS.update(
+    queue_contract.LABEL_SPECS.update(
         {
-            issue_queue.MANAGED_LABEL: (
+            queue_contract.MANAGED_LABEL: (
                 "1d76db",
                 "Human authorization for autonomous AutoDev work",
             ),
-            issue_queue.READY_LABEL: (
+            queue_contract.READY_LABEL: (
                 "0e8a16",
                 "Derived: managed and currently runnable by AutoDev",
             ),
-            issue_queue.BLOCKED_LABEL: (
+            queue_contract.BLOCKED_LABEL: (
                 "d93f0b",
                 "Derived: managed but blocked by open issue dependencies",
             ),
-            issue_queue.ATTENTION_LABEL: (
+            queue_contract.ATTENTION_LABEL: (
                 "fbca04",
                 "Human attention is required before autonomous AutoDev work",
             ),
-            issue_queue.RUNNING_LABEL: (
+            queue_contract.RUNNING_LABEL: (
                 "5319e7",
                 "Active AutoDev claim/run for this issue",
             ),
@@ -61,7 +63,7 @@ def _canonical_label_specs() -> None:
 
 def _install_queue_label_bootstrap() -> None:
     _canonical_label_specs()
-    current = issue_queue.ensure_queue_labels
+    current = queue_github.ensure_queue_labels
     if getattr(current, "_autodev_execution_classification", False):
         return
 
@@ -71,7 +73,7 @@ def _install_queue_label_bootstrap() -> None:
         *,
         runner=subprocess.run,
     ) -> tuple[str, ...]:
-        result = issue_queue._run_gh(  # type: ignore[attr-defined]
+        result = queue_github._run_gh(  # type: ignore[attr-defined]
             repo,
             [
                 "label",
@@ -85,12 +87,12 @@ def _install_queue_label_bootstrap() -> None:
             ],
             runner=runner,
         )
-        raw = issue_queue._json_result(  # type: ignore[attr-defined]
+        raw = queue_github._json_result(  # type: ignore[attr-defined]
             result,
             context="gh label list",
         )
         if not isinstance(raw, list):
-            raise issue_queue.QueueError("gh label list did not return an array")
+            raise queue_contract.QueueError("gh label list did not return an array")
         existing: dict[str, tuple[str, str]] = {}
         for item in raw:
             if not isinstance(item, dict) or not item.get("name"):
@@ -101,10 +103,10 @@ def _install_queue_label_bootstrap() -> None:
             )
 
         created: list[str] = []
-        for name, (color, description) in issue_queue.LABEL_SPECS.items():
+        for name, (color, description) in queue_contract.LABEL_SPECS.items():
             actual = existing.get(name)
             if actual is None:
-                issue_queue._run_gh(  # type: ignore[attr-defined]
+                queue_github._run_gh(  # type: ignore[attr-defined]
                     repo,
                     [
                         "label",
@@ -122,7 +124,7 @@ def _install_queue_label_bootstrap() -> None:
                 created.append(name)
                 continue
             if actual != (color.casefold(), description):
-                issue_queue._run_gh(  # type: ignore[attr-defined]
+                queue_github._run_gh(  # type: ignore[attr-defined]
                     repo,
                     [
                         "label",
@@ -140,7 +142,7 @@ def _install_queue_label_bootstrap() -> None:
         return tuple(created)
 
     ensure_queue_labels._autodev_execution_classification = True  # type: ignore[attr-defined]
-    issue_queue.ensure_queue_labels = ensure_queue_labels
+    queue_github.ensure_queue_labels = ensure_queue_labels
 
 
 def _cache_issue_evidence(raw: object) -> None:
@@ -157,7 +159,7 @@ def _cache_issue_evidence(raw: object) -> None:
 
 
 def _install_queue_evidence_reconciliation() -> None:
-    current_list = issue_queue.list_issues
+    current_list = queue_github.list_issues
     if not getattr(current_list, "_autodev_execution_classification", False):
         original_list = current_list
 
@@ -165,11 +167,11 @@ def _install_queue_evidence_reconciliation() -> None:
             repo: Path,
             github_repo: str,
             *,
-            limit: int = issue_queue.DEFAULT_LIMIT,
+            limit: int = queue_contract.DEFAULT_LIMIT,
             runner=subprocess.run,
         ):
             issues = original_list(repo, github_repo, limit=limit, runner=runner)
-            result = issue_queue._run_gh(  # type: ignore[attr-defined]
+            result = queue_github._run_gh(  # type: ignore[attr-defined]
                 repo,
                 [
                     "issue",
@@ -189,19 +191,19 @@ def _install_queue_evidence_reconciliation() -> None:
             if result.returncode == 0:
                 try:
                     _cache_issue_evidence(
-                        issue_queue._json_result(  # type: ignore[attr-defined]
+                        queue_github._json_result(  # type: ignore[attr-defined]
                             result,
                             context="gh issue list evidence",
                         )
                     )
-                except issue_queue.QueueError:
+                except queue_contract.QueueError:
                     pass
             return issues
 
         list_issues._autodev_execution_classification = True  # type: ignore[attr-defined]
-        issue_queue.list_issues = list_issues
+        queue_github.list_issues = list_issues
 
-    current_fetch = issue_queue.fetch_issue
+    current_fetch = queue_github.fetch_issue
     if not getattr(current_fetch, "_autodev_execution_classification", False):
         original_fetch = current_fetch
 
@@ -213,7 +215,7 @@ def _install_queue_evidence_reconciliation() -> None:
             runner=subprocess.run,
         ):
             issue = original_fetch(repo, github_repo, issue_number, runner=runner)
-            result = issue_queue._run_gh(  # type: ignore[attr-defined]
+            result = queue_github._run_gh(  # type: ignore[attr-defined]
                 repo,
                 [
                     "issue",
@@ -230,19 +232,19 @@ def _install_queue_evidence_reconciliation() -> None:
             if result.returncode == 0:
                 try:
                     _cache_issue_evidence(
-                        issue_queue._json_result(  # type: ignore[attr-defined]
+                        queue_github._json_result(  # type: ignore[attr-defined]
                             result,
                             context="gh issue view evidence",
                         )
                     )
-                except issue_queue.QueueError:
+                except queue_contract.QueueError:
                     pass
             return issue
 
         fetch_issue._autodev_execution_classification = True  # type: ignore[attr-defined]
-        issue_queue.fetch_issue = fetch_issue
+        queue_github.fetch_issue = fetch_issue
 
-    current_classify = issue_queue.classify_issue
+    current_classify = queue_classification.classify_issue
     if not getattr(current_classify, "_autodev_execution_classification", False):
         original_classify = current_classify
 
@@ -251,10 +253,10 @@ def _install_queue_evidence_reconciliation() -> None:
             labels = set(issue.labels)
             if (
                 state.reason == "attention"
-                and issue_queue.MANAGED_LABEL in labels
+                and queue_contract.MANAGED_LABEL in labels
                 and _MANUAL_EVIDENCE_BY_ISSUE.get(issue.number, False)
             ):
-                adjusted = issue_queue.QueueIssue(
+                adjusted = queue_contract.QueueIssue(
                     number=issue.number,
                     title=issue.title,
                     url=issue.url,
@@ -262,11 +264,11 @@ def _install_queue_evidence_reconciliation() -> None:
                     labels=tuple(
                         label
                         for label in issue.labels
-                        if label != issue_queue.ATTENTION_LABEL
+                        if label != queue_contract.ATTENTION_LABEL
                     ),
                 )
                 recalculated = original_classify(adjusted, blockers, policy)
-                return issue_queue.QueueState(
+                return queue_contract.QueueState(
                     issue=issue,
                     reason=recalculated.reason,
                     open_blockers=recalculated.open_blockers,
@@ -275,9 +277,9 @@ def _install_queue_evidence_reconciliation() -> None:
             return state
 
         classify_issue._autodev_execution_classification = True  # type: ignore[attr-defined]
-        issue_queue.classify_issue = classify_issue
+        queue_classification.classify_issue = classify_issue
 
-    current_update = issue_queue._update_derived_labels  # type: ignore[attr-defined]
+    current_update = queue_classification._update_derived_labels  # type: ignore[attr-defined]
     if not getattr(current_update, "_autodev_execution_classification", False):
         original_update = current_update
 
@@ -290,13 +292,13 @@ def _install_queue_evidence_reconciliation() -> None:
         ) -> bool:
             labels = set(state.issue.labels)
             evidence_clears_attention = (
-                issue_queue.MANAGED_LABEL in labels
-                and issue_queue.ATTENTION_LABEL in labels
+                queue_contract.MANAGED_LABEL in labels
+                and queue_contract.ATTENTION_LABEL in labels
                 and _MANUAL_EVIDENCE_BY_ISSUE.get(state.issue.number, False)
             )
             effective_state = state
             if evidence_clears_attention:
-                adjusted_issue = issue_queue.QueueIssue(
+                adjusted_issue = queue_contract.QueueIssue(
                     number=state.issue.number,
                     title=state.issue.title,
                     url=state.issue.url,
@@ -304,10 +306,10 @@ def _install_queue_evidence_reconciliation() -> None:
                     labels=tuple(
                         label
                         for label in state.issue.labels
-                        if label != issue_queue.ATTENTION_LABEL
+                        if label != queue_contract.ATTENTION_LABEL
                     ),
                 )
-                effective_state = issue_queue.QueueState(
+                effective_state = queue_contract.QueueState(
                     issue=adjusted_issue,
                     reason=state.reason,
                     open_blockers=state.open_blockers,
@@ -320,7 +322,7 @@ def _install_queue_evidence_reconciliation() -> None:
                 runner=runner,
             )
             if evidence_clears_attention:
-                issue_queue._run_gh(  # type: ignore[attr-defined]
+                queue_github._run_gh(  # type: ignore[attr-defined]
                     repo,
                     [
                         "issue",
@@ -329,7 +331,7 @@ def _install_queue_evidence_reconciliation() -> None:
                         "--repo",
                         github_repo,
                         "--remove-label",
-                        issue_queue.ATTENTION_LABEL,
+                        queue_contract.ATTENTION_LABEL,
                     ],
                     runner=runner,
                 )
@@ -337,7 +339,7 @@ def _install_queue_evidence_reconciliation() -> None:
             return changed
 
         _update_derived_labels._autodev_execution_classification = True  # type: ignore[attr-defined]
-        issue_queue._update_derived_labels = _update_derived_labels  # type: ignore[attr-defined]
+        queue_classification._update_derived_labels = _update_derived_labels  # type: ignore[attr-defined]
 
 
 def _attention_payload(
@@ -383,7 +385,7 @@ def _transition_attention(
     repo_full = str(state.get("RepoFullName", "")).strip()
     issue_number = int(state.get("IssueNumber", 0) or 0)
     if repo_full and issue_number:
-        issue_queue.ensure_queue_labels(repo, repo_full, runner=runner)
+        queue_github.ensure_queue_labels(repo, repo_full, runner=runner)
         workflow_stages.gh(
             repo,
             [
@@ -393,13 +395,13 @@ def _transition_attention(
                 "--repo",
                 repo_full,
                 "--remove-label",
-                issue_queue.RUNNING_LABEL,
+                queue_contract.RUNNING_LABEL,
                 "--remove-label",
-                issue_queue.READY_LABEL,
+                queue_contract.READY_LABEL,
                 "--remove-label",
-                issue_queue.BLOCKED_LABEL,
+                queue_contract.BLOCKED_LABEL,
                 "--add-label",
-                issue_queue.ATTENTION_LABEL,
+                queue_contract.ATTENTION_LABEL,
             ],
             runner=runner,
         )

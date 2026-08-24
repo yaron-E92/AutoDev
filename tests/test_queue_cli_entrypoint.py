@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from automation import privacy_grant_hooks, queue_cli, repair_budget_resume
+
 from automation import windows_verification_hooks
 
 import unittest
@@ -13,12 +15,12 @@ class QueueCliEntrypointTests(unittest.TestCase):
         install_targets = (
             "ci_outcomes.install",
             "pr_head_sync.install",
-            "semantic_repair_budget.install_opencode_resume_hooks",
+            "repair_budget_resume.install_opencode_resume_hooks",
             "windows_verification_hooks.install_opencode_hooks",
             "windows_semantic_order.install",
             "context_optimization.install",
             "privacy_consent.install",
-            "privacy_grants.install",
+            "privacy_grant_hooks.install",
         )
         patches = [
             mock.patch(f"automation.opencode_entrypoint.{target}")
@@ -28,7 +30,7 @@ class QueueCliEntrypointTests(unittest.TestCase):
         self.addCleanup(lambda: [patch.stop() for patch in reversed(patches)])
 
         with mock.patch(
-            "automation.opencode_entrypoint.issue_queue.run_cli",
+            "automation.opencode_entrypoint.queue_cli.run_cli",
             return_value=19,
         ) as run_cli:
             result = opencode_entrypoint.run(["queue", "status", "--json"])

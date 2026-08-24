@@ -19,15 +19,12 @@ COMMON_ROOTS = (
     "promptTemplates",
     "agentFiles",
     "examples",
-    "ollama-aliases",
-    "scripts",
     "README.md",
     "CONTRIBUTING.md",
     "pyproject.toml",
     "codex-profiles.json",
 )
 PLATFORM_ROOTS = {
-    "linux": ("linux",),
     "windows": ("windows",),
 }
 
@@ -164,8 +161,8 @@ def build_release(repo: Path, out_dir: Path, version: str, commit: str = "") -> 
 
     bundle_roots = {"common": COMMON_ROOTS, **PLATFORM_ROOTS}
     bundles: dict[str, object] = {}
-    for kind in ("common", "linux", "windows"):
-        files = commit_files(repo, commit_sha, tuple(bundle_roots[kind]))
+    for kind, roots in bundle_roots.items():
+        files = commit_files(repo, commit_sha, tuple(roots))
         if not files:
             raise ReleasePackagingError(f"release bundle {kind} contains no tracked files")
         archive_path = out_dir / bundle_name(version, kind)
@@ -191,10 +188,7 @@ def build_release(repo: Path, out_dir: Path, version: str, commit: str = "") -> 
         newline="\n",
     )
 
-    subjects = [
-        out_dir / str(bundles[kind]["archive"])
-        for kind in ("common", "linux", "windows")
-    ]
+    subjects = [out_dir / str(bundle["archive"]) for bundle in bundles.values()]
     subjects.append(manifest_path)
     checksums = "".join(
         f"{sha256_file(path)}  {path.name}\n"
