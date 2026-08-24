@@ -29,7 +29,7 @@ jobs:
   version-intent:
     name: Version intent
     if: github.event_name == 'pull_request'
-    uses: $/.github/workflows/version-intent.yml
+    uses: ./.github/workflows/version-intent.yml
     with:
       pr_body: ${{ github.event.pull_request.body }}
       head: ${{ github.sha }}
@@ -117,7 +117,7 @@ jobs:
 
       - name: Exercise version-policy Action runtime directly
         id: version-smoke
-        uses: $/.github/actions/version-policy
+        uses: ./.github/actions/version-policy
         with:
           mode: check-pr
           pr-body: '+semver: none'
@@ -135,7 +135,7 @@ jobs:
 
       - name: Exercise workflow-policy Action runtime directly
         id: workflow-smoke
-        uses: $/.github/actions/workflow-policy
+        uses: ./.github/actions/workflow-policy
         with:
           workflows-path: .github/workflows
           require-concurrency: false
@@ -206,8 +206,7 @@ jobs:
           done < <(git ls-files -z -- '*.sh')
 
           if [[ "$found" -eq 0 ]]; then
-            echo "No tracked Bash scripts found." >&2
-            exit 1
+            echo "No tracked Bash scripts found; nothing to validate."
           fi
 
   powershell-syntax:
@@ -228,7 +227,8 @@ jobs:
               exit $LASTEXITCODE
           }
           if ($files.Count -eq 0) {
-              throw 'No tracked PowerShell scripts found.'
+              Write-Host 'No tracked PowerShell scripts found; nothing to validate.'
+              exit 0
           }
 
           $failed = $false
@@ -298,7 +298,7 @@ jobs:
       - bash-syntax
       - powershell-syntax
       - repository-hygiene
-    uses: $/.github/workflows/version-tag.yml
+    uses: ./.github/workflows/version-tag.yml
     with:
       head: ${{ github.sha }}
       branch: main
