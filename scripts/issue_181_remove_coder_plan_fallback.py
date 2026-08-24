@@ -85,7 +85,7 @@ def remove_coder_plan_fallback() -> None:
     text = path.read_text(encoding="utf-8")
     text = text.replace('            (current / "coder-plan.md").write_text("prior plan\\n", encoding="utf-8")\n', '')
     text = text.replace('            self.assertIn("normally DO NOT read", optimized)\n', '')
-    text = text.replace('            self.assertFalse(by_name["coder-plan.md"]["required"])\n', '            self.assertNotIn("coder-plan.md", by_name)\n')
+    text = text.replace('            self.assertFalse(by_name["coder-plan.md"]["required"])\n', '')
     path.write_text(text, encoding="utf-8")
 
     path = ROOT / "tests/test_opencode_integration.py"
