@@ -4,6 +4,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = Path(__file__).resolve()
+TEMP_WORKFLOW = (ROOT / ".github/workflows/issue-180-canonical-area-reader.yml").resolve()
 
 RENAMES = {
     "area_reader_cli.py": "cli.py",
@@ -35,6 +36,8 @@ def move(source: Path, target: Path) -> None:
 def replace_all(text: str) -> str:
     replacements = [
         ("area_reader_v2", "area_reader"),
+        ("area_reader/runner_core.py", "area_reader/workflow.py"),
+        ("area_reader/runner.py", "area_reader/workflow.py"),
         ("area_reader.area_reader_cli", "area_reader.cli"),
         ("area_reader.area_reader_context", "area_reader.context"),
         ("area_reader.area_reader_execution", "area_reader.execution"),
@@ -102,6 +105,11 @@ def patch_execution(package: Path) -> None:
     path.write_text(text, encoding="utf-8")
 
 
+def ignored(path: Path) -> bool:
+    resolved = path.resolve()
+    return resolved in {SCRIPT, TEMP_WORKFLOW}
+
+
 def main() -> None:
     old_package = ROOT / "area_reader_v2"
     package = ROOT / "area_reader"
@@ -118,7 +126,7 @@ def main() -> None:
         core.unlink()
 
     for path in ROOT.rglob("*"):
-        if path.resolve() == SCRIPT or not path.is_file() or path.suffix.lower() not in TEXT_EXTENSIONS or ".git" in path.parts:
+        if ignored(path) or not path.is_file() or path.suffix.lower() not in TEXT_EXTENSIONS or ".git" in path.parts:
             continue
         try:
             original = path.read_text(encoding="utf-8")
@@ -134,7 +142,7 @@ def main() -> None:
 
     old_refs = []
     for path in ROOT.rglob("*"):
-        if path.resolve() == SCRIPT or not path.is_file() or path.suffix.lower() not in TEXT_EXTENSIONS or ".git" in path.parts:
+        if ignored(path) or not path.is_file() or path.suffix.lower() not in TEXT_EXTENSIONS or ".git" in path.parts:
             continue
         try:
             text = path.read_text(encoding="utf-8")
