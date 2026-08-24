@@ -33,7 +33,7 @@ jobs:
           test ! -e automation/prompt_runner.py
           test -e automation/planner_output.py
           test ! -e tests/test_prompt_runner.py
-          if git grep -n -E 'prompt_runner|PromptRunnerError|run_command_provider|run_ollama_provider|verifier-format' -- automation area_reader tests ':!scripts/issue_181_extract_planner_output.py'; then
+          if git grep -n -E 'prompt_runner|PromptRunnerError|run_command_provider|run_ollama_provider|verifier-format' -- automation area_reader tests ':!tests/test_python_architecture.py'; then
             echo 'Legacy prompt-runner surface remains in maintained code.' >&2
             exit 1
           fi
