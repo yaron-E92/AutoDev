@@ -1,0 +1,63 @@
+name: Issue 181 final documentation cleanup
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Remove obsolete documentation and templates
+        run: python scripts/issue_181_final_docs_cleanup.py
+
+      - name: Compile maintained Python
+        run: python -m compileall -q automation area_reader tests
+
+      - name: Run full unit suite
+        run: python -m unittest discover -s tests -v
+
+      - name: Verify canonical CLI smoke
+        run: python -m automation.autodev_cli --help > /dev/null
+
+      - name: Reject stale retired surfaces
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e promptTemplates/verifier.md
+          test ! -e promptTemplates/verification-repair.md
+          test ! -e automation/model_roles.py
+          if git grep -n -E 'automation\.prompt_runner|python -m automation\.opencode_adapter install|\.opencode/autodev\.(py|ps1)|\.opencode/autodev\.json|scripts/run-real-issue|issue-to-pr-cycle\.(sh|ps1)|codex-tools/prompts|\{\{(IssueText|Plan|LocalCheck|StackContext|FailureLog|CiSummary)\}\}|Legacy PASS/FAIL|Legacy configuration|Legacy compatibility|Legacy mode:' -- README.md CONTRIBUTING.md docs automation area_reader integrations tests promptTemplates; then
+            echo 'stale retired architecture reference remains' >&2
+            exit 1
+          fi
+
+      - name: Verify no issue 181 artifacts are staged
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --name-only | grep -E '(^|/)(issue[_-]181|issue-181)' | grep -v 'scripts/issue_181_final_docs_cleanup.py'; then
+            echo 'unexpected issue-181 migration artifact changed' >&2
+            exit 1
+          fi
+
+      - name: Commit verified final cleanup
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add -A README.md CONTRIBUTING.md docs promptTemplates tests automation
+          git diff --cached --check
+          if git diff --cached --quiet; then exit 0; fi
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m 'docs: remove obsolete architecture instructions and templates'
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
