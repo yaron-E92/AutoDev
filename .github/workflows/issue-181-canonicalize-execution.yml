@@ -34,6 +34,7 @@ jobs:
           python scripts/issue_181_fix_canonical_tests.py
           python scripts/issue_181_fix_canonical_tests2.py
           python scripts/issue_181_fix_test_literals.py
+          python scripts/issue_181_fix_remaining_legacy_tests.py
 
       - name: Compile maintained Python
         run: python -m compileall -q automation area_reader tests
@@ -75,7 +76,7 @@ jobs:
         run: |
           set -euo pipefail
           git add -A automation integrations linux windows tests docs README.md CONTRIBUTING.md
-          git reset -- scripts/issue_181_canonicalize_execution.py scripts/issue_181_fix_canonical_product.py scripts/issue_181_fix_canonical_tests.py scripts/issue_181_fix_canonical_tests2.py scripts/issue_181_fix_test_literals.py || true
+          git reset -- scripts/issue_181_canonicalize_execution.py scripts/issue_181_fix_canonical_product.py scripts/issue_181_fix_canonical_tests.py scripts/issue_181_fix_canonical_tests2.py scripts/issue_181_fix_test_literals.py scripts/issue_181_fix_remaining_legacy_tests.py || true
           git diff --cached --check
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
