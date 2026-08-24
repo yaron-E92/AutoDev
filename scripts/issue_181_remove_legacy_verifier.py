@@ -28,6 +28,8 @@ Implementation plan:
 Current implementation diff or summary:
 {~{Diff}~}
 
+Semantic-only evidence:
+
 Detectable acceptance criteria:
 {~{AcceptanceCriteria}~}
 
@@ -45,6 +47,8 @@ Cross-file regression evidence:
 
 Relevant uncertainty or skipped-check notes:
 {~{UncertaintyNotes}~}
+
+Semantic JSON contract:
 
 Return JSON only. Do not use Markdown fences or commentary.
 
@@ -107,13 +111,7 @@ def edit_workflow_code() -> None:
         "        state[\"Status\"] = \"CiPassedVerifierPromptRendered\"\n",
         "        state[\"Status\"] = \"CiPassed\"\n",
     )
-    remove_function(
-        hooks,
-        "def install(core) -> None:\n",
-        "",
-    ) if False else None
-    # This explicit mutation installer has no caller; build_execute_stage is the
-    # canonical hook used by workflow_stages._ensure_policy_hooks.
+    # build_execute_stage is the canonical hook. The mutation installer has no caller.
     marker = "\ndef install(core) -> None:\n"
     start = text.find(marker)
     if start >= 0:
@@ -136,15 +134,17 @@ def edit_semantic_template_contract() -> None:
 
     semantic_text = ROOT / "automation/semantic_text.py"
     text = semantic_text.read_text(encoding="utf-8")
-    text = text.replace(
-        "    _LEGACY_ONLY_PLACEHOLDERS,\n",
-        "",
-    )
+    text = text.replace("    _LEGACY_ONLY_PLACEHOLDERS,\n", "")
     text = text.replace(
         "        if key not in values and key not in _LEGACY_ONLY_PLACEHOLDERS:\n",
         "        if key not in values:\n",
     )
     semantic_text.write_text(text, encoding="utf-8")
+
+
+def remove_mock_line(text: str, target: str) -> str:
+    lines = text.splitlines(keepends=True)
+    return "".join(line for line in lines if target not in line)
 
 
 def edit_tests() -> None:
@@ -164,6 +164,15 @@ def edit_tests() -> None:
         if end < 0:
             raise SystemExit("cannot bound legacy verifier workflow test")
         text = text[:start] + text[end:]
+    text = remove_mock_line(text, 'patch("automation.workflow_stages.render_legacy_verifier"')
+    text = text.replace("            render_verifier.assert_called_once()\n", "")
+    path.write_text(text, encoding="utf-8")
+
+    path = ROOT / "tests/test_opencode_shipped_pr_and_ci.py"
+    text = remove_mock_line(
+        path.read_text(encoding="utf-8"),
+        'patch.object(workflow_stages, "render_legacy_verifier")',
+    )
     path.write_text(text, encoding="utf-8")
 
 
