@@ -3,9 +3,9 @@ from __future__ import annotations
 import re
 from pathlib import Path
 from automation import workflow_stages
-from automation.prompt_runner import (
+from automation.planner_output import (
     REQUIRED_PLAN_HEADINGS,
-    PromptRunnerError,
+    PlannerOutputError,
     handle_planner_output,
 )
 

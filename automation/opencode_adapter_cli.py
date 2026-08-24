@@ -13,9 +13,9 @@ from pathlib import Path
 from automation import workflow_stages
 from automation.provider_contract import ProviderError
 from automation.provider_factory import load_provider_config
-from automation.prompt_runner import (
+from automation.planner_output import (
     REQUIRED_PLAN_HEADINGS,
-    PromptRunnerError,
+    PlannerOutputError,
     handle_planner_output,
 )
 from automation.semantic_artifacts import write_final_verdict, write_semantic_result
@@ -166,7 +166,7 @@ def run(argv: list[str] | None = None) -> int:
                 )
             except (
                 OpenCodeAdapterError,
-                PromptRunnerError,
+                PlannerOutputError,
                 SemanticVerifierError,
                 ProviderError,
                 workflow_stages.WorkflowStageError,
@@ -186,7 +186,7 @@ def run(argv: list[str] | None = None) -> int:
             return code
     except (
         OpenCodeAdapterError,
-        PromptRunnerError,
+        PlannerOutputError,
         SemanticVerifierError,
         ProviderError,
         workflow_stages.WorkflowStageError,

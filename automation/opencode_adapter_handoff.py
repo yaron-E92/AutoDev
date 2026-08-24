@@ -10,9 +10,9 @@ from area_reader import repository as area_reader_repository
 from area_reader import routing as area_reader_routing
 from area_reader import verification as area_reader_verification
 from automation.model_output_sanitizer import sanitize_model_output
-from automation.prompt_runner import (
+from automation.planner_output import (
     REQUIRED_PLAN_HEADINGS,
-    PromptRunnerError,
+    PlannerOutputError,
     handle_planner_output,
 )
 

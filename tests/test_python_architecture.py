@@ -26,6 +26,7 @@ REPRESENTATIVE_MODULES = (
     "automation.opencode_adapter_workflow",
     "automation.coordination_state",
     "automation.role_coordinator_flow",
+    "automation.planner_output",
 )
 REMOVED_PATHS = (
     "automation/run_real_issue.py",
@@ -62,6 +63,7 @@ REMOVED_PATHS = (
     "area_reader/storage.py",
     "area_reader/workflow.py",
     "automation/semantic_cli.py",
+    "automation/prompt_runner.py",
 )
 MAINTAINED_DOCS = (
     "CONTRIBUTING.md",

@@ -3,9 +3,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest import mock
 
-from automation import prompt_runner
 from automation.provider_contract import ModelConfig, ProviderError
 from automation.provider_mock import MockProvider
 from automation.prompt_policies import resolve_prompt_policies
@@ -191,56 +189,6 @@ class SemanticVerifierTests(unittest.TestCase):
         self.assertIn("previous response was rejected", provider.prompts[1].casefold())
         self.assertEqual([record["role"] for record in records], ["verifier", "verifier"])
         self.assertEqual([record["attempt"] for record in records], [0, 1])
-
-    def test_prompt_runner_semantic_mode_keeps_legacy_mode_available(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            profile = root / "profile.json"
-            prompt = root / "prompt.md"
-            semantic_output = root / "semantic.json"
-            legacy_output = root / "legacy.txt"
-            profile.write_text(
-                json.dumps(
-                    {
-                        "version": 2,
-                        "roles": {
-                            "verifier": {"transport": "mock", "model": "verifier"}
-                        },
-                    }
-                ),
-                encoding="utf-8",
-            )
-            prompt.write_text("Verify this patch.", encoding="utf-8")
-
-            with mock.patch.object(
-                prompt_runner,
-                "create_provider",
-                side_effect=[MockProvider([semantic_result()]), MockProvider(["PASS\nLooks good."])],
-            ):
-                semantic_code = prompt_runner.run(
-                    [
-                        "--role", "verifier",
-                        "--provider-profile", str(profile),
-                        "--prompt-file", str(prompt),
-                        "--output-file", str(semantic_output),
-                        "--verifier-format", "semantic-json",
-                    ]
-                )
-                legacy_code = prompt_runner.run(
-                    [
-                        "--role", "verifier",
-                        "--provider-profile", str(profile),
-                        "--prompt-file", str(prompt),
-                        "--output-file", str(legacy_output),
-                    ]
-                )
-
-            self.assertEqual(semantic_code, 0)
-            self.assertEqual(legacy_code, 0)
-            self.assertEqual(json.loads(semantic_output.read_text(encoding="utf-8"))["verdict"], "pass")
-            self.assertTrue(legacy_output.read_text(encoding="utf-8").startswith("PASS"))
-
-
 
 
 

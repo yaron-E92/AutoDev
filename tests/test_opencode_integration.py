@@ -347,7 +347,7 @@ class OpenCodeIntegrationTests(unittest.TestCase):
             self.assertIn("Bounded handoff", prompt)
             self.assertIn("Role-specific prompt policy (lite; autodev-ponytail-v1)", prompt)
             self.assertIn("# GitHub Issue #65", prompt)
-            for heading in prompt_runner.REQUIRED_PLAN_HEADINGS:
+            for heading in planner_output.REQUIRED_PLAN_HEADINGS:
                 self.assertIn(heading, template)
             self.assertEqual(contracts["protocol_correction_limit"], 1)
             self.assertEqual(set(contracts["roles"]), set(opencode_adapter_contract.ROLE_NAMES))
@@ -442,7 +442,7 @@ class OpenCodeIntegrationTests(unittest.TestCase):
             plan = current / "plan.md"
             plan.write_text("not a valid six-section plan\n", encoding="utf-8")
             (current / "plan.template.md").write_text(
-                "\n\n".join(prompt_runner.REQUIRED_PLAN_HEADINGS) + "\n",
+                "\n\n".join(planner_output.REQUIRED_PLAN_HEADINGS) + "\n",
                 encoding="utf-8",
             )
 
@@ -554,7 +554,7 @@ from automation import opencode_adapter_roles
 
 from automation import opencode_adapter_workflow
 
-from automation import prompt_runner
+from automation import planner_output
 
 from automation import semantic_contract
 

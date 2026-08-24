@@ -8,9 +8,9 @@ import json
 from pathlib import Path
 from automation.model_output_sanitizer import sanitize_model_output
 from automation.prompt_policies import compose_prompt, resolve_prompt_policies
-from automation.prompt_runner import (
+from automation.planner_output import (
     REQUIRED_PLAN_HEADINGS,
-    PromptRunnerError,
+    PlannerOutputError,
     handle_planner_output,
 )
 from automation.semantic_artifacts import write_final_verdict, write_semantic_result
@@ -171,7 +171,7 @@ def accept_role(role: str, repo: Path, input_path: Path | None = None) -> list[P
     _write_role_contracts(current)
     try:
         outputs = _accept_role_once(role, current, input_path)
-    except (OpenCodeAdapterError, PromptRunnerError, SemanticVerifierError) as exc:
+    except (OpenCodeAdapterError, PlannerOutputError, SemanticVerifierError) as exc:
         _raise_contract_rejection(current, role, input_path, exc)
     _mark_role_accepted(current, role, outputs)
     _reset_current_correction(current, role)

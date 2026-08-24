@@ -17,7 +17,7 @@ from automation import (
     role_runtime_diagnostics,
     workflow_stages,
 )
-from automation.prompt_runner import PromptRunnerError
+from automation.planner_output import PlannerOutputError
 from automation.semantic_contract import SemanticVerifierError
 from automation import coordination_contract, coordination_state
 
@@ -47,7 +47,7 @@ def _accept_role(
         outputs = opencode_adapter_roles._accept_role_once(role, current, input_path)
     except (
         opencode_adapter_contract.OpenCodeAdapterError,
-        PromptRunnerError,
+        PlannerOutputError,
         SemanticVerifierError,
     ) as exc:
         opencode_adapter_roles._raise_contract_rejection(current, role, input_path, exc)
