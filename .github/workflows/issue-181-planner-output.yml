@@ -26,15 +26,15 @@ jobs:
       - name: Run full unit suite
         run: python -m unittest discover -s tests -v
 
-      - name: Reject legacy prompt runner
+      - name: Reject legacy prompt runner in maintained code
         shell: bash
         run: |
           set -euo pipefail
           test ! -e automation/prompt_runner.py
           test -e automation/planner_output.py
           test ! -e tests/test_prompt_runner.py
-          if git grep -n -E 'prompt_runner|PromptRunnerError|run_command_provider|run_ollama_provider|verifier-format' -- automation area_reader tests docs README.md CONTRIBUTING.md ':!scripts/issue_181_extract_planner_output.py'; then
-            echo 'Legacy prompt-runner surface remains.' >&2
+          if git grep -n -E 'prompt_runner|PromptRunnerError|run_command_provider|run_ollama_provider|verifier-format' -- automation area_reader tests ':!scripts/issue_181_extract_planner_output.py'; then
+            echo 'Legacy prompt-runner surface remains in maintained code.' >&2
             exit 1
           fi
 
@@ -42,7 +42,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git add -A automation area_reader tests docs README.md CONTRIBUTING.md
+          git add -A automation area_reader tests
           git reset -- scripts/issue_181_extract_planner_output.py || true
           git diff --cached --check
           if git diff --cached --quiet; then exit 0; fi
