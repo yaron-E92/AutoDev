@@ -50,10 +50,6 @@ test_replacement = '''LEGACY_TESTS = [
     "test_role_routing_benchmark.py",
 ]'''
 text = text.replace(test_anchor, test_replacement)
-
-# The migration scripts and historical docs necessarily contain the old names while
-# performing the deletion. Production code must not retain them; the final architecture
-# pass cleans documentation references after source deletion is proven.
 text = text.replace(
     'for parent in (AUTOMATION, TESTS, ROOT / "docs", ROOT / "scripts"):',
     'for parent in (AUTOMATION,):',
@@ -78,7 +74,51 @@ integration_text = integration_text.replace(
     '"automation.opencode_adapter.workflow_stages.ensure_prepared_issue"',
     '"automation.opencode_adapter_protocol.workflow_stages.ensure_prepared_issue"',
 )
+integration_text = integration_text.replace(
+    '"automation.opencode_adapter.resolve_opencode_model_mappings"',
+    '"automation.opencode_adapter_cli.resolve_opencode_model_mappings"',
+)
+integration_text = integration_text.replace(
+    '"automation.opencode_adapter.collect_changed_files"',
+    '"automation.opencode_adapter_roles.collect_changed_files"',
+).replace(
+    '"automation.opencode_adapter.collect_current_diff"',
+    '"automation.opencode_adapter_roles.collect_current_diff"',
+).replace(
+    '"automation.opencode_adapter.collect_deterministic_evidence"',
+    '"automation.opencode_adapter_roles.collect_deterministic_evidence"',
+)
+start = integration_text.find("    def test_existing_workflow_entrypoints_do_not_depend_on_opencode_adapter(self):\n")
+if start >= 0:
+    end = integration_text.find("    def _write_state", start)
+    if end < 0:
+        raise SystemExit("cannot remove obsolete workflow-entrypoint compatibility test")
+    integration_text = integration_text[:start] + integration_text[end:]
 integration.write_text(integration_text, encoding="utf-8")
+
+privacy_test = root / "tests" / "test_opencode_privacy_role_entrypoint.py"
+privacy_text = privacy_test.read_text(encoding="utf-8")
+privacy_text = privacy_text.replace(
+    'patch.object(\n            opencode_adapter,\n            "prepare_role",',
+    'patch.object(\n            opencode_role_entrypoint.opencode_adapter_roles,\n            "prepare_role",',
+)
+privacy_test.write_text(privacy_text, encoding="utf-8")
+
+runtime_test = root / "tests" / "test_role_runtime.py"
+runtime_text = runtime_test.read_text(encoding="utf-8")
+runtime_text = runtime_text.replace(
+    'patch.object(\n            opencode_adapter,\n            "resolve_opencode_model_mappings",',
+    'patch.object(\n            opencode_role_runtime.opencode_adapter_models,\n            "resolve_opencode_model_mappings",',
+)
+runtime_test.write_text(runtime_text, encoding="utf-8")
+
+classification_test = root / "tests" / "test_execution_classification_hooks.py"
+classification_text = classification_test.read_text(encoding="utf-8")
+classification_text = classification_text.replace(
+    "role_coordinator_flow.opencode_adapter,\n                \"_ensure_opencode_protocol\"",
+    "execution_classification_evidence.opencode_adapter_protocol,\n                \"_ensure_opencode_protocol\"",
+)
+classification_test.write_text(classification_text, encoding="utf-8")
 
 for doc in (root / "docs" / "evaluation.md", root / "docs" / "role-routing-benchmark.md"):
     doc.unlink(missing_ok=True)
