@@ -7,7 +7,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_DIRS = [ROOT / "automation"]
-for candidate in (ROOT / "area_reader", ROOT / "area_reader_v2"):
+for candidate in (ROOT / "area_reader", ROOT / "area_reader"):
     if candidate.is_dir():
         PACKAGE_DIRS.append(candidate)
 

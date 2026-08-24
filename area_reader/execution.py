@@ -2,26 +2,26 @@ from __future__ import annotations
 
 import sys
 
-from area_reader_v2.area_reader_context import (
+from area_reader.context import (
     build_area_bundle,
 )
-from area_reader_v2.area_reader_prompts import (
+from area_reader.prompts import (
     build_area_reader_prompt,
 )
-from area_reader_v2.area_reader_provider import (
+from area_reader.provider import (
     build_metrics,
     call_provider,
     extract_message,
 )
-from area_reader_v2.area_reader_routing import (
+from area_reader.routing import (
     area_file_map,
 )
-from area_reader_v2.area_reader_storage import (
+from area_reader.storage import (
     write_json,
     write_text,
 )
 
-def run_area_reader(args, repo, out, area, repo_map, files):
+def run_area_reader(args, repo, out, area, repo_map, files, *, call_provider_fn=call_provider):
     area_dir = out / f"area-{area}"
     selected_files = area_file_map(files, area)
     bundle, metadata, file_map_text = build_area_bundle(
@@ -38,7 +38,7 @@ def run_area_reader(args, repo, out, area, repo_map, files):
     write_text(area_dir / "input-bundle.txt", bundle)
     write_text(area_dir / "reader-prompt.txt", reader_prompt)
 
-    raw, wall_seconds = call_provider(args, "reader", reader_prompt, args.reader_num_predict)
+    raw, wall_seconds = call_provider_fn(args, "reader", reader_prompt, args.reader_num_predict)
     brief, thinking = extract_message(raw)
     metrics = build_metrics(raw, wall_seconds, brief)
 

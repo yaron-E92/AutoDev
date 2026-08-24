@@ -6,8 +6,8 @@ import sys
 from dataclasses import replace
 from pathlib import Path
 
-from area_reader_v2 import runner_core as _core
-from area_reader_v2.runner_core import *  # noqa: F401,F403
+from area_reader import pipeline as _pipeline
+from area_reader.cli import parse_args as _base_parse_args
 from automation.model_providers import ModelConfig, create_provider, load_provider_config, ollama_command_for_model
 from automation.model_roles import (
     ModelInvocationError,
@@ -33,7 +33,7 @@ from automation.run_manifest import (
     sync_invocations,
 )
 
-_ORIGINAL_PARSE_ARGS = _core.parse_args
+_ORIGINAL_PARSE_ARGS = _base_parse_args
 _ACTIVE_CONFIGS: dict[str, ModelConfig | None] = {}
 _ACTIVE_POLICIES: dict[str, str] = resolve_prompt_policies({})
 _ACTIVE_OUT: Path | None = None
@@ -301,15 +301,11 @@ def main(argv=None):
     _ACTIVE_POLICIES = resolve_area_prompt_policies(args)
     _ACTIVE_OUT = Path(args.out).expanduser().resolve()
     _ACTIVE_MANIFEST = Path(args.resume_manifest).expanduser().resolve() if args.resume_manifest else None
-    original_parse = _core.parse_args
-    original_call = _core.call_provider
-    try:
-        _core.parse_args = parse_args
-        _core.call_provider = call_provider
-        code = _core.main(argv)
-    finally:
-        _core.parse_args = original_parse
-        _core.call_provider = original_call
+    code = _pipeline.main(
+        argv,
+        parse_args_fn=parse_args,
+        call_provider_fn=call_provider,
+    )
     if code == 0:
         summary_path = _ACTIVE_OUT / "summary.json"
         try:

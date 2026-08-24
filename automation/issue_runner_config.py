@@ -11,8 +11,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, TextIO
-from area_reader_v2 import runner as area_reader_runner
-from area_reader_v2.command_group_recommendations import documentation_only_command_groups, is_documentation_only_scope
+from area_reader import workflow as area_reader_runner
+from area_reader.recommendations import documentation_only_command_groups, is_documentation_only_scope
 from automation.model_output_sanitizer import sanitize_model_output
 from automation.model_providers import (
     ModelConfig,
@@ -101,7 +101,7 @@ def validate_inputs(args: argparse.Namespace, repo: Path) -> None:
     if "/" not in args.github_repo or args.github_repo.count("/") != 1:
         raise RunnerError("--github-repo must use owner/name format", 2)
     if not Path(area_reader_runner.__file__).is_file():
-        raise RunnerError(f"Missing area-reader v2 runner module: {area_reader_runner.__file__}", 2)
+        raise RunnerError(f"Missing area-reader runner module: {area_reader_runner.__file__}", 2)
     if args.mode == "plan-only" and args.dry_run_implementation:
         raise RunnerError("--dry-run-implementation is only valid for implement or pr mode", 2)
 

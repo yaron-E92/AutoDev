@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
-from area_reader_v2.area_reader_settings import (
+from area_reader.settings import (
     AREA_HINTS,
     EXCLUDED_DIRS,
     INCLUDED_FILENAMES,

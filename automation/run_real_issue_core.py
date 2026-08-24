@@ -14,8 +14,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, TextIO
-from area_reader_v2 import runner as area_reader_runner
-from area_reader_v2.command_group_recommendations import documentation_only_command_groups, is_documentation_only_scope
+from area_reader import workflow as area_reader_runner
+from area_reader.recommendations import documentation_only_command_groups, is_documentation_only_scope
 from automation.model_output_sanitizer import sanitize_model_output
 from automation.model_providers import (
     ModelConfig,

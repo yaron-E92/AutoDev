@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import os
 import shlex
-from area_reader_v2.command_group_recommendations import recommend_command_groups as recommend_area_reader_command_groups
+from area_reader.recommendations import recommend_command_groups as recommend_area_reader_command_groups
 
-from area_reader_v2.area_reader_settings import (
+from area_reader.settings import (
     MARKDOWN_SMOKE_SCRIPT,
     PREFERRED_SOLUTION_FILTER_MARKERS,
 )

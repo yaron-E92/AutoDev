@@ -21,7 +21,7 @@ For generic local verification and issue-to-PR readiness work, the recommended g
 
 ## Provider roles
 
-`area_reader_v2.runner` accepts the same version-2 `--provider-config` profile used by the operational runner. It resolves and invokes:
+`area_reader.workflow` accepts the same version-2 `--provider-config` profile used by the operational runner. It resolves and invokes:
 
 ```text
 repository inspection  -> reader

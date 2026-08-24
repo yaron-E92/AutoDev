@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from area_reader_v2.area_reader_settings import (
+from area_reader.settings import (
     AREA_HINTS,
     DEFAULT_AUTO_AREAS,
     SUPPORTED_AREAS,

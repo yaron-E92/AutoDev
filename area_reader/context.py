@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from area_reader_v2.area_reader_routing import (
+from area_reader.routing import (
     format_area_file_map,
 )
-from area_reader_v2.area_reader_settings import (
+from area_reader.settings import (
     AREA_HINTS,
 )
 

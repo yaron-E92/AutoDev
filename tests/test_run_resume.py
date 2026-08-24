@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from area_reader_v2 import runner as area_runner
+from area_reader import workflow as area_runner
 from automation import run_real_issue
 from automation.model_providers import ModelConfig
 from automation.run_manifest import (

@@ -5,10 +5,10 @@ import time
 from urllib import error, request
 from automation.model_providers import ModelConfig, create_provider, ollama_command_for_model
 
-from area_reader_v2.area_reader_settings import (
+from area_reader.settings import (
     OLLAMA_CHAT_URL,
 )
-from area_reader_v2.area_reader_verification import (
+from area_reader.verification import (
     command,
 )
 

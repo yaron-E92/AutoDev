@@ -3,7 +3,11 @@ from __future__ import annotations
 import hashlib
 import re
 from pathlib import Path
-from area_reader_v2 import runner_core as area_reader_core
+from area_reader import context as area_reader_context
+from area_reader import prompts as area_reader_prompts
+from area_reader import repository as area_reader_repository
+from area_reader import routing as area_reader_routing
+from area_reader import verification as area_reader_verification
 from automation.model_output_sanitizer import sanitize_model_output
 from automation.prompt_runner import (
     REQUIRED_PLAN_HEADINGS,
@@ -33,17 +37,17 @@ def _next_semantic_attempt(current: Path) -> int:
     return max(attempts, default=-1) + 1
 
 def _prepare_reader(repo: Path, current: Path, issue_text: str) -> str:
-    files, skipped_large, skipped_unreadable = area_reader_core.collect_repo_files(repo)
-    repo_map = area_reader_core.build_repo_map(repo, files, skipped_large, skipped_unreadable)
-    areas, routing = area_reader_core.route_areas(issue_text, "auto")
-    facts = area_reader_core.detect_repo_facts(repo, files, areas, routing)
-    groups = area_reader_core.build_verification_command_groups(facts, areas)
-    recommendations = area_reader_core.recommended_command_groups(
+    files, skipped_large, skipped_unreadable = area_reader_repository.collect_repo_files(repo)
+    repo_map = area_reader_repository.build_repo_map(repo, files, skipped_large, skipped_unreadable)
+    areas, routing = area_reader_routing.route_areas(issue_text, "auto")
+    facts = area_reader_repository.detect_repo_facts(repo, files, areas, routing)
+    groups = area_reader_verification.build_verification_command_groups(facts, areas)
+    recommendations = area_reader_verification.recommended_command_groups(
         groups,
         issue_text=issue_text,
         changed_paths=(),
     )
-    area_reader_core.apply_recommended_command_groups(groups, recommendations)
+    area_reader_verification.apply_recommended_command_groups(groups, recommendations)
     _write_json(current / "routed-areas.json", {"areas": areas, **routing})
     _write_json(current / "detected-facts.json", facts)
     _write_json(current / "verification-command-groups.json", groups)
@@ -57,7 +61,7 @@ def _prepare_reader(repo: Path, current: Path, issue_text: str) -> str:
         "max_chars": MAX_READER_BUNDLE_CHARS,
         "truncated": len(bundle) >= MAX_READER_BUNDLE_CHARS,
     }
-    return area_reader_core.build_area_reader_prompt(
+    return area_reader_prompts.build_area_reader_prompt(
         issue_text,
         ",".join(areas) or "repository",
         bundle,
@@ -88,7 +92,7 @@ def _bounded_reader_bundle(
         if not relative:
             continue
         try:
-            content = area_reader_core.read_file_for_bundle(repo, relative)
+            content = area_reader_context.read_file_for_bundle(repo, relative)
         except OSError:
             continue
         block = f"\n===== FILE: {relative} =====\n{content.rstrip()}\n"
@@ -109,7 +113,7 @@ def _prepare_synthesizer(current: Path, issue_text: str) -> str:
     areas = [str(value) for value in routed.get("areas", [])] if isinstance(routed, dict) else []
     facts = _read_json(current / "detected-facts.json")
     groups = _read_json(current / "verification-command-groups.json")
-    return area_reader_core.build_synthesis_prompt(
+    return area_reader_prompts.build_synthesis_prompt(
         issue_text,
         areas,
         [

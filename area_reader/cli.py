@@ -4,7 +4,7 @@ import argparse
 import os
 from pathlib import Path
 
-from area_reader_v2.area_reader_settings import (
+from area_reader.settings import (
     DEFAULT_CODER_NUM_PREDICT,
     DEFAULT_MAX_CHARS_PER_AREA,
     DEFAULT_READER_NUM_PREDICT,

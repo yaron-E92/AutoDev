@@ -131,7 +131,7 @@ def recommend_command_groups(
     user_requested_mobile_verification: bool = False,
     available_command_groups: Iterable[str] | None = None,
 ) -> dict[str, object]:
-    """Return JSON-ready command-group metadata for area-reader v2 output."""
+    """Return JSON-ready command-group metadata for area-reader output."""
 
     normalized_issue = issue_text.casefold()
     normalized_web_errors = web_build_errors.casefold()

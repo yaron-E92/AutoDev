@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from area_reader_v2 import runner as area_runner
+from area_reader import workflow as area_runner
 from automation import run_real_issue
 from automation.model_providers import ModelConfig, MockProvider, ProviderError
 from automation.model_roles import ModelInvocationError, invoke_model, resolve_role_configs

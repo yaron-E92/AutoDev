@@ -317,7 +317,7 @@ Run these commands from the AutoDev repository root.
 Python syntax, unit tests, and the explicit no-network mocked runner smoke path:
 
 ```text
-python -m compileall automation area_reader_v2 benchmarks tests
+python -m compileall automation area_reader benchmarks tests
 python -m unittest discover -s tests -v
 python -m unittest -v tests.test_run_real_issue.RunRealIssueTests.test_plan_only_uses_reader_provider_for_planning_not_coder_provider tests.test_run_real_issue.RunRealIssueTests.test_dry_run_implementation_calls_coder_and_saves_patch
 ```

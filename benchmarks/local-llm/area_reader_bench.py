@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Benchmark CLI wrapper for the shared area-reader v2 runner."""
+"""Benchmark CLI wrapper for the shared area-reader runner."""
 
 from __future__ import annotations
 
@@ -10,8 +10,8 @@ REPO_TOOL_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_TOOL_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_TOOL_ROOT))
 
-from area_reader_v2.runner import *  # re-export benchmark helpers for tests/importers
-from area_reader_v2.runner import main
+from area_reader.workflow import *  # re-export benchmark helpers for tests/importers
+from area_reader.workflow import main
 
 
 if __name__ == "__main__":

@@ -2,47 +2,47 @@ from __future__ import annotations
 
 import sys
 
-from area_reader_v2.area_reader_cli import (
+from area_reader.cli import (
     expand_user_path,
     parse_args,
 )
-from area_reader_v2.area_reader_execution import (
+from area_reader.execution import (
     run_area_reader,
 )
-from area_reader_v2.area_reader_prompts import (
+from area_reader.prompts import (
     build_coder_prompt,
     build_synthesis_prompt,
 )
-from area_reader_v2.area_reader_provider import (
+from area_reader.provider import (
     build_metrics,
     call_provider,
     extract_message,
 )
-from area_reader_v2.area_reader_repository import (
+from area_reader.repository import (
     build_repo_map,
     collect_repo_files,
     detect_repo_facts,
 )
-from area_reader_v2.area_reader_routing import (
+from area_reader.routing import (
     route_areas,
 )
-from area_reader_v2.area_reader_settings import (
+from area_reader.settings import (
     SUPPORTED_AREAS,
 )
-from area_reader_v2.area_reader_storage import (
+from area_reader.storage import (
     write_executable_text,
     write_json,
     write_text,
 )
-from area_reader_v2.area_reader_verification import (
+from area_reader.verification import (
     apply_recommended_command_groups,
     build_verification_command_groups,
     recommended_command_groups,
     render_verification_script,
 )
 
-def main(argv=None):
-    args = parse_args(argv)
+def main(argv=None, *, parse_args_fn=parse_args, call_provider_fn=call_provider):
+    args = parse_args_fn(argv)
     if args.reader_model is None:
         args.reader_model = args.reader
     if args.coder_model is None:
@@ -101,7 +101,7 @@ def main(argv=None):
     area_results = []
     for area in areas:
         try:
-            area_results.append(run_area_reader(args, repo, out, area, repo_map, files))
+            area_results.append(run_area_reader(args, repo, out, area, repo_map, files, call_provider_fn=call_provider_fn))
         except RuntimeError as exc:
             print(str(exc), file=sys.stderr)
             return 1
@@ -115,7 +115,7 @@ def main(argv=None):
     )
     write_text(out / "synthesis-prompt.txt", synthesis_prompt)
     try:
-        synthesis_raw, synthesis_wall_seconds = call_provider(
+        synthesis_raw, synthesis_wall_seconds = call_provider_fn(
             args,
             "reader",
             synthesis_prompt,
@@ -142,7 +142,7 @@ def main(argv=None):
     )
     write_text(out / "coder-prompt.txt", coder_prompt)
     try:
-        coder_raw, coder_wall_seconds = call_provider(
+        coder_raw, coder_wall_seconds = call_provider_fn(
             args,
             "coder",
             coder_prompt,

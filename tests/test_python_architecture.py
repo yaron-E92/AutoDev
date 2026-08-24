@@ -7,12 +7,11 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PRODUCTION_ROOTS = (ROOT / "automation", ROOT / "area_reader_v2")
+PRODUCTION_ROOTS = (ROOT / "automation", ROOT / "area_reader")
 MAX_MODULE_LINES = 700
 COMPATIBILITY_SHIMS = (
     ROOT / "automation" / "workflow_stages_core.py",
     ROOT / "automation" / "run_real_issue_core.py",
-    ROOT / "area_reader_v2" / "runner_core.py",
 )
 REPRESENTATIVE_MODULES = (
     "automation.scheduler_registration",
@@ -32,7 +31,7 @@ REPRESENTATIVE_MODULES = (
     "automation.coordination_state",
     "automation.role_coord_flow",
     "automation.opencode_coord_flow",
-    "area_reader_v2.area_reader_workflow",
+    "area_reader.pipeline",
 )
 
 

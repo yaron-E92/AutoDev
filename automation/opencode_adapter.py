@@ -12,7 +12,6 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from area_reader_v2 import runner_core as area_reader_core
 from automation import opencode_resume
 from automation import run_real_issue_core as run_core
 from automation import workflow_stages

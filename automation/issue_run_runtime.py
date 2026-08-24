@@ -151,13 +151,13 @@ def run_area_reader(repo, issue_text, reader_config, coder_config, out_dir, stre
         "--out", str(out_dir),
         "--resume-manifest", str(_active_manifest_path()),
     ]
-    print("Running shared area-reader v2 planner", file=stream)
+    print("Running shared area-reader planner", file=stream)
     try:
         exit_code = area_reader_runner.main(argv)  # noqa: F405
     except (ManifestError, ModelInvocationError) as exc:
         raise RunnerError(str(exc), 1) from exc  # noqa: F405
     if exit_code:
-        raise RunnerError(f"area-reader v2 planner failed with exit code {exit_code}", exit_code)  # noqa: F405
+        raise RunnerError(f"area-reader planner failed with exit code {exit_code}", exit_code)  # noqa: F405
 
 def write_operational_outputs(issue_text, area_out, out_dir, keep_debug):
     source = area_out / "model-invocations.json"

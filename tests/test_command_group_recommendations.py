@@ -1,12 +1,16 @@
-import importlib.util
 import tempfile
 import unittest
 from pathlib import Path
 
-from area_reader_v2.command_group_recommendations import (
+from area_reader.recommendations import (
     ALL_COMMAND_GROUPS,
     recommend_command_groups,
 )
+from area_reader import cli as area_reader_cli
+from area_reader import prompts as area_reader_prompts
+from area_reader import provider as area_reader_provider
+from area_reader import repository as area_reader_repository
+from area_reader import verification as area_reader_verification
 
 
 BENCHMARK_PROMPT = (
@@ -14,14 +18,6 @@ BENCHMARK_PROMPT = (
     "MAUI/mobile/desktop if present, tests, and CI. Propose the safest local "
     "verification approach for a small issue-to-PR automation run. Do not edit files."
 )
-
-
-def load_area_reader_bench():
-    path = Path(__file__).resolve().parents[1] / "benchmarks" / "local-llm" / "area_reader_bench.py"
-    spec = importlib.util.spec_from_file_location("area_reader_bench", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
 def base_facts(**overrides):
@@ -208,8 +204,7 @@ class CommandGroupRecommendationTests(unittest.TestCase):
 
         self.assertIn("api-client-generate", result["recommended_command_groups"])
 
-    def test_benchmark_recommendation_wrapper_returns_metadata_shape(self):
-        bench = load_area_reader_bench()
+    def test_recommendation_metadata_shape(self):
         command_groups = [
             {"name": "env", "recommended": True, "commands": []},
             {"name": "dotnet-solution", "recommended": True, "commands": []},
@@ -219,13 +214,13 @@ class CommandGroupRecommendationTests(unittest.TestCase):
             {"name": "maui-android-build", "recommended": True, "commands": []},
         ]
 
-        result = bench.recommended_command_groups(
+        result = area_reader_verification.recommended_command_groups(
             command_groups,
             issue_text=BENCHMARK_PROMPT,
             changed_paths=[],
             android_sdk_available=True,
         )
-        coder_prompt = bench.build_coder_prompt("Issue", "Brief", {}, result, command_groups)
+        coder_prompt = area_reader_prompts.build_coder_prompt("Issue", "Brief", {}, result, command_groups)
 
         self.assertEqual(
             result["recommended_command_groups"],
@@ -236,9 +231,8 @@ class CommandGroupRecommendationTests(unittest.TestCase):
         self.assertIn("available_command_groups", coder_prompt)
 
     def test_dotnet_solution_group_restores_builds_and_tests_solutions(self):
-        bench = load_area_reader_bench()
 
-        groups = bench.build_verification_command_groups(
+        groups = area_reader_verification.build_verification_command_groups(
             base_facts(solutions=["App.sln"]),
             ["backend"],
         )
@@ -254,9 +248,8 @@ class CommandGroupRecommendationTests(unittest.TestCase):
         )
 
     def test_markdown_smoke_group_validates_tracked_markdown_whitespace(self):
-        bench = load_area_reader_bench()
 
-        groups = bench.build_verification_command_groups(
+        groups = area_reader_verification.build_verification_command_groups(
             base_facts(markdown_file_count=2),
             ["docs"],
         )
@@ -270,10 +263,9 @@ class CommandGroupRecommendationTests(unittest.TestCase):
         self.assertIn("Markdown smoke check failed", argv[2])
 
     def test_maui_android_groups_prefer_detected_repo_helper_script(self):
-        bench = load_area_reader_bench()
         helper = "phoodab/apps/mobile/scripts/maui-android-ubuntu.sh"
 
-        groups = bench.build_verification_command_groups(
+        groups = area_reader_verification.build_verification_command_groups(
             base_facts(
                 maui_projects=[
                     {
@@ -293,7 +285,6 @@ class CommandGroupRecommendationTests(unittest.TestCase):
         self.assertEqual(build_group["commands"][0]["argv"], ["bash", helper, "build", "-c", "Debug"])
 
     def test_detect_repo_facts_records_maui_helper_scripts(self):
-        bench = load_area_reader_bench()
         helper = "phoodab/apps/mobile/scripts/maui-android-ubuntu.sh"
         project = "phoodab/apps/mobile/PHOODAB.Mobile.csproj"
 
@@ -309,7 +300,7 @@ class CommandGroupRecommendationTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            facts = bench.detect_repo_facts(
+            facts = area_reader_repository.detect_repo_facts(
                 repo,
                 [
                     {"path": helper, "areas": ["ci"]},
@@ -322,25 +313,22 @@ class CommandGroupRecommendationTests(unittest.TestCase):
         self.assertEqual(facts["maui_helper_scripts"], [helper])
 
     def test_render_verification_script_detects_repo_root_dynamically(self):
-        bench = load_area_reader_bench()
 
-        script = bench.render_verification_script(Path("/fallback/repo"), [])
+        script = area_reader_verification.render_verification_script(Path("/fallback/repo"), [])
 
         self.assertIn("if git rev-parse --show-toplevel >/dev/null 2>&1; then", script)
         self.assertIn('REPO_ROOT="$(git rev-parse --show-toplevel)"', script)
         self.assertIn("REPO_ROOT=/fallback/repo", script)
 
     def test_api_client_area_matching_excludes_generic_ts_tsx_and_cs_paths(self):
-        bench = load_area_reader_bench()
 
-        self.assertFalse(bench.area_for_file("apps/web/src/App.tsx", "api-client"))
-        self.assertFalse(bench.area_for_file("apps/api/Controllers/FooController.cs", "api-client"))
-        self.assertTrue(bench.area_for_file("packages/api-client/src/generated.ts", "api-client"))
-        self.assertTrue(bench.area_for_file("apps/api/openapi.json", "api-client"))
+        self.assertFalse(area_reader_repository.area_for_file("apps/web/src/App.tsx", "api-client"))
+        self.assertFalse(area_reader_repository.area_for_file("apps/api/Controllers/FooController.cs", "api-client"))
+        self.assertTrue(area_reader_repository.area_for_file("packages/api-client/src/generated.ts", "api-client"))
+        self.assertTrue(area_reader_repository.area_for_file("apps/api/openapi.json", "api-client"))
 
-    def test_benchmark_model_only_command_provider_uses_ollama_run(self):
-        bench = load_area_reader_bench()
-        args = bench.parse_args(
+    def test_model_only_command_provider_uses_ollama_run(self):
+        args = area_reader_cli.parse_args(
             [
                 "--repo",
                 ".",
@@ -355,8 +343,8 @@ class CommandGroupRecommendationTests(unittest.TestCase):
             ]
         )
 
-        reader = bench.model_config_from_args(args, "reader")
-        coder = bench.model_config_from_args(args, "coder")
+        reader = area_reader_provider.model_config_from_args(args, "reader")
+        coder = area_reader_provider.model_config_from_args(args, "coder")
 
         self.assertEqual(reader.command, "ollama run reader-model")
         self.assertEqual(coder.command, "ollama run coder-model")

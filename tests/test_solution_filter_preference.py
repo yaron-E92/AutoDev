@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from area_reader_v2.runner_core import (
+from area_reader.workflow import (
     PREFERRED_SOLUTION_FILTER_MARKERS,
     build_verification_command_groups,
     collect_repo_files,

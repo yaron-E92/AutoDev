@@ -97,14 +97,14 @@ Resume-budget semantics live in the repair-budget policy layer; workflow orchest
 - `windows_verification_execution.py`, `windows_verification_hooks.py` — execution and OpenCode integration.
 - `windows_workflow_hooks.py` — lazily constructs the Windows-aware workflow executor; importing workflow modules does not execute/install the Windows lane.
 
-### Area Reader v2
+### Area Reader
 
 - `area_reader_settings.py`, `area_reader_cli.py`, `area_reader_storage.py` — configuration, CLI and persistence.
 - `area_reader_repository.py`, `area_reader_routing.py`, `area_reader_context.py` — repository discovery, area routing and context bundles.
 - `area_reader_verification.py`, `area_reader_prompts.py`, `area_reader_provider.py` — recommended verification, prompts and provider calls.
 - `area_reader_execution.py`, `area_reader_workflow.py` — execution and top-level orchestration.
 
-`area_reader_v2/runner_core.py` remains a compatibility shim.
+`area_reader/workflow.py` remains a compatibility shim.
 
 ### Evaluation and privacy
 

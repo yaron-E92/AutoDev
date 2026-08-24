@@ -14,7 +14,7 @@ ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
 VERSION_RE = re.compile(r"^v[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$")
 COMMON_ROOTS = (
     "automation",
-    "area_reader_v2",
+    "area_reader",
     "integrations",
     "promptTemplates",
     "agentFiles",
