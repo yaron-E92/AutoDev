@@ -40,3 +40,23 @@ for name in ("payload_metadata", "windows_required", "proof_current"):
         f'                windows_verification_manifest,\n                "{name}",',
     )
 path.write_text(text, encoding="utf-8")
+
+# semantic_verifier used to provide the executable `python -m` boundary even
+# though semantic_cli owns the parser and command implementation. Move that
+# boundary to the owner before deleting the facade, then update both platform
+# wrappers and their regression assertion.
+path = root / "automation" / "semantic_cli.py"
+text = path.read_text(encoding="utf-8")
+if 'if __name__ == "__main__":' not in text:
+    text = text.rstrip() + '\n\n\nif __name__ == "__main__":\n    raise SystemExit(run())\n'
+path.write_text(text, encoding="utf-8")
+
+for relative in (
+    "linux/scripts/issue-to-pr-cycle.sh",
+    "windows/scripts/issue-to-pr-cycle.ps1",
+    "tests/test_semantic_verifier.py",
+):
+    path = root / relative
+    text = path.read_text(encoding="utf-8")
+    text = text.replace("automation.semantic_verifier", "automation.semantic_cli")
+    path.write_text(text, encoding="utf-8")
