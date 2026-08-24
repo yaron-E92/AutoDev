@@ -37,7 +37,7 @@ class InstallationDocumentationTests(unittest.TestCase):
         self.assertIn("AUTODEV_ROLE_RUNTIME", installation)
         self.assertIn("autodev models", installation)
         self.assertIn("## Contributor development", installation)
-        self.assertIn("source-development checks", installation)
+        self.assertIn("Source-development checks", installation)
         self.assertIn("python -m unittest discover -s tests -v", installation)
 
 
