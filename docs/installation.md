@@ -156,7 +156,7 @@ Use `autodev scheduler --help` for backend choices, cadence defaults, health, no
 
 Contributors may work directly from a repository checkout. That is intentionally distinct from the end-user release-bundle installation above.
 
-Validate a source checkout with:
+Source-development checks for a source checkout are:
 
 ```text
 python -m compileall -q automation area_reader tests
