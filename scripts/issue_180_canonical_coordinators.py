@@ -63,7 +63,6 @@ def patch_role_consumers() -> None:
     path = AUTOMATION / "opencode_github_entrypoint.py"
     text = path.read_text(encoding="utf-8")
     text = text.replace("    role_coordinator as opencode_coordinator,\n", "")
-    anchor = "from automation import (\n"
     extra = '''from automation import (\n    role_coordinator_cli,\n    role_coordinator_contract,\n    role_coordinator_flow,\n    role_coordinator_stages,\n)\n\n'''
     close = ")\n\n\nSUCCESSFUL_TERMINAL_STATES"
     if extra not in text:
@@ -120,6 +119,14 @@ def patch_role_consumers() -> None:
         raise SystemExit("role_workflow_hooks still uses coordinator facade")
     path.write_text(text, encoding="utf-8")
 
+    path = AUTOMATION / "opencode_entrypoint.py"
+    text = path.read_text(encoding="utf-8")
+    text = text.replace(
+        "    # Existing workflow policy hooks historically wrapped opencode_coordinator.\n    # Bridge their runtime-neutral behavior into the canonical role coordinator\n    # only after those hooks have installed their underlying workflow patches.\n",
+        "    # Install runtime-neutral workflow policy on the canonical coordinator\n    # after the underlying workflow patches are active.\n",
+    )
+    path.write_text(text, encoding="utf-8")
+
 
 def remove_specialized_opencode_hooks() -> None:
     path = AUTOMATION / "ci_outcomes.py"
@@ -150,6 +157,33 @@ def remove_specialized_opencode_hooks() -> None:
     path.write_text(text, encoding="utf-8")
 
 
+def patch_privacy_tests() -> None:
+    path = TESTS / "test_privacy_consent.py"
+    text = path.read_text(encoding="utf-8")
+    text = text.replace(
+        "from automation import opencode_coordinator, privacy, privacy_consent, run_manifest, workflow_stages\n",
+        "from automation import opencode_resume, privacy, privacy_consent, run_manifest, workflow_stages\n",
+    )
+    text = text.replace(
+        "    def _originals(self) -> tuple[object, object, object]:\n        return privacy._consent_or_block, privacy._audit, opencode_coordinator._run_agent_process\n\n    @staticmethod\n    def _restore(originals: tuple[object, object, object]) -> None:\n        privacy._consent_or_block = originals[0]  # type: ignore[assignment]\n        privacy._audit = originals[1]  # type: ignore[assignment]\n        opencode_coordinator._run_agent_process = originals[2]  # type: ignore[assignment]\n",
+        "    def _originals(self) -> tuple[object, object]:\n        return privacy._consent_or_block, privacy._audit\n\n    @staticmethod\n    def _restore(originals: tuple[object, object]) -> None:\n        privacy._consent_or_block = originals[0]  # type: ignore[assignment]\n        privacy._audit = originals[1]  # type: ignore[assignment]\n",
+    )
+    text = text.replace("path = opencode_coordinator.opencode_resume.manifest_path(repo)", "path = opencode_resume.manifest_path(repo)")
+    if "opencode_coordinator" in text:
+        raise SystemExit("privacy consent tests still use obsolete coordinator")
+    path.write_text(text, encoding="utf-8")
+
+    path = TESTS / "test_privacy_consent_tty.py"
+    text = path.read_text(encoding="utf-8")
+    text = text.replace(
+        "from automation import opencode_coordinator, privacy, privacy_consent, run_manifest, workflow_stages\n",
+        "from automation import privacy, privacy_consent, run_manifest, workflow_stages\n",
+    )
+    if "opencode_coordinator" in text:
+        raise SystemExit("TTY consent tests still use obsolete coordinator")
+    path.write_text(text, encoding="utf-8")
+
+
 def patch_tests() -> None:
     obsolete_test = TESTS / "test_opencode_coordinator.py"
     obsolete_test.unlink(missing_ok=True)
@@ -174,6 +208,28 @@ def patch_tests() -> None:
         raise SystemExit("test_role_runtime still uses coordinator facade")
     path.write_text(text, encoding="utf-8")
 
+    path = TESTS / "test_role_runtime_diagnostics.py"
+    text = path.read_text(encoding="utf-8")
+    text = text.replace(
+        "    opencode_coordinator,\n",
+        "    opencode_role_runtime,\n    role_coordinator_contract,\n    role_coordinator_runtime,\n    role_runtime,\n",
+    )
+    text = text.replace("opencode_coordinator.OpenCodeCoordinatorError", "role_coordinator_contract.RoleCoordinatorError")
+    text = text.replace("opencode_coordinator.run_role", "role_coordinator_runtime.run_role")
+    # The old specialized coordinator constructed its own OpenCode subprocess. The
+    # canonical coordinator now receives that behavior through OpenCodeRoleRuntime.
+    text = text.replace(
+        "                    opencode_coordinator.run_role(\n                        repo,\n                        \"reader\",\n                        runner=lambda *args, **kwargs: completed,\n                        which=lambda _: \"/usr/bin/opencode\",\n                    )",
+        "                    runtime = opencode_role_runtime.OpenCodeRoleRuntime()\n                    snapshots = {\"reader\": role_runtime.build_role_snapshot(runtime=\"opencode\", role=\"reader\", configured={})}\n                    role_coordinator_runtime.run_role(\n                        repo,\n                        \"reader\",\n                        runtime,\n                        snapshots,\n                        runner=lambda *args, **kwargs: completed,\n                        which=lambda _: \"/usr/bin/opencode\",\n                    )",
+    )
+    # Retarget facade-level preparation/acceptance patches to the owning modules.
+    text = text.replace("patch.object(opencode_adapter, \"prepare_role\")", "patch.object(role_coordinator_runtime, \"_prepare_role\")")
+    text = text.replace("patch.object(\n                opencode_adapter,\n                \"accept_role\",", "patch.object(\n                role_coordinator_runtime,\n                \"_accept_role\",")
+    text = text.replace("patch.object(\n                opencode_coordinator,\n                \"role_acceptance\",", "patch.object(\n                role_coordinator_runtime,\n                \"role_acceptance\",")
+    if "opencode_coordinator" in text:
+        raise SystemExit("role runtime diagnostics tests still use obsolete coordinator")
+    path.write_text(text, encoding="utf-8")
+
     path = TESTS / "test_ci_outcomes.py"
     text = path.read_text(encoding="utf-8")
     text = text.replace("from automation import ci_outcomes, opencode_coordinator, workflow_stages\n", "from automation import ci_outcomes, workflow_stages\n")
@@ -187,7 +243,6 @@ def patch_tests() -> None:
         text = text[:start] + text[end:]
     path.write_text(text, encoding="utf-8")
 
-    # Remaining generic coordinator tests patch the public flow module rather than a facade.
     for name in ("test_role_workflow_hooks.py", "test_execution_classification_hooks.py"):
         path = TESTS / name
         text = path.read_text(encoding="utf-8")
@@ -200,6 +255,14 @@ def patch_tests() -> None:
     text = text.replace("role_coordinator,", "role_coordinator_runtime,")
     text = text.replace("role_coordinator.", "role_coordinator_runtime.")
     path.write_text(text, encoding="utf-8")
+
+    path = TESTS / "test_python_architecture.py"
+    text = path.read_text(encoding="utf-8")
+    text = text.replace('    "automation.role_coord_flow",\n', '    "automation.role_coordinator_flow",\n')
+    text = text.replace('    "automation.opencode_coord_flow",\n', "")
+    path.write_text(text, encoding="utf-8")
+
+    patch_privacy_tests()
 
 
 def delete_facades_and_specialized_stack() -> None:
