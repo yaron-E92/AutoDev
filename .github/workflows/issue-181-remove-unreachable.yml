@@ -23,7 +23,7 @@ jobs:
           python - <<'PY'
           from pathlib import Path
 
-          for relative in (
+          removed = (
               'area_reader/cli.py',
               'area_reader/execution.py',
               'area_reader/pipeline.py',
@@ -31,7 +31,8 @@ jobs:
               'area_reader/storage.py',
               'area_reader/workflow.py',
               'automation/semantic_cli.py',
-          ):
+          )
+          for relative in removed:
               path = Path(relative)
               if path.exists():
                   path.unlink()
@@ -48,6 +49,31 @@ jobs:
               if end < 0:
                   raise SystemExit('cannot bound standalone area-reader test')
               text = text[:start] + text[end:]
+          path.write_text(text, encoding='utf-8')
+
+          path = Path('tests/test_command_group_recommendations.py')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace('from area_reader import cli as area_reader_cli\n', '')
+          text = text.replace('from area_reader import provider as area_reader_provider\n', '')
+          marker = '    def test_model_only_command_provider_uses_ollama_run(self):\n'
+          start = text.find(marker)
+          if start >= 0:
+              end = text.find('\nif __name__', start)
+              if end < 0:
+                  raise SystemExit('cannot bound standalone provider test')
+              text = text[:start] + text[end:]
+          path.write_text(text, encoding='utf-8')
+
+          path = Path('tests/test_python_architecture.py')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace('    "automation.semantic_cli",\n', '')
+          text = text.replace('    "area_reader.pipeline",\n', '')
+          marker = '    "area_reader_v2",\n'
+          additions = ''.join(f'    "{item}",\n' for item in removed)
+          if additions not in text:
+              if marker not in text:
+                  raise SystemExit('architecture removed-path marker missing')
+              text = text.replace(marker, marker + additions, 1)
           path.write_text(text, encoding='utf-8')
 
           Path('area_reader/README.md').write_text(
