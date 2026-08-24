@@ -119,3 +119,17 @@ text = text.replace(
 if "opencode_resume." in text or "_autodev_windows_hooks_installed" in text:
     raise SystemExit("windows verification resume facade seam remains")
 path.write_text(text, encoding="utf-8")
+
+# A regression test patched run_manifest through the resume facade merely because
+# the facade imported that module. Import the real dependency directly; the generic
+# retargeter can then move _resume_problems to its owner normally.
+path = root / "tests" / "test_opencode_post_shipment_identity.py"
+text = path.read_text(encoding="utf-8")
+text = text.replace(
+    "from automation import opencode_resume, opencode_runtime, workflow_stages\n",
+    "from automation import opencode_resume, opencode_runtime, run_manifest, workflow_stages\n",
+)
+text = text.replace("opencode_resume.run_manifest", "run_manifest")
+if "opencode_resume.run_manifest" in text:
+    raise SystemExit("nested run_manifest resume facade use remains")
+path.write_text(text, encoding="utf-8")
