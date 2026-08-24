@@ -39,6 +39,8 @@ REMOVED_PATHS = (
     "automation/opencode_coordinator.py",
     "automation/eval_harness.py",
     "automation/eval_harness_core.py",
+    "automation/create_issues_from_description.py",
+    "automation/ollama_cloud_preflight.py",
     "area_reader_v2",
 )
 MAINTAINED_DOCS = (

@@ -113,38 +113,9 @@ ollama signin
 
 Ensure the local Ollama service is running. Windows normally starts it in the background. On Linux, use the installed service or run `ollama serve`.
 
-### Run the preflight
+### Validate access
 
-The preflight checks the executable, minimum version, local API, sign-in/access status, and each unique cloud model. It uses `ollama pull` and does not select an issue, change labels, create a branch, modify a target repository, or contact GitHub.
-
-Linux:
-
-```bash
-python -m automation.ollama_cloud_preflight \
-  --profile examples/providers/ollama-cloud-nemotron-minimax.json \
-  --out .autodev-run/ollama-cloud-preflight.json
-```
-
-Windows PowerShell:
-
-```powershell
-python -m automation.ollama_cloud_preflight `
-  --profile examples/providers/ollama-cloud-nemotron-minimax.json `
-  --out .autodev-run/ollama-cloud-preflight.json
-```
-
-The JSON result records the selected profile path, Ollama version, role/model mapping, local-service result, and per-model access result. Authentication tokens and environment-variable values are not recorded.
-
-Failure messages distinguish:
-
-```text
-missing Ollama
-outdated Ollama
-unreachable local service
-sign-in required
-plan upgrade required
-generic model access failure
-```
+Use Ollama's normal CLI to confirm the configured cloud models are available before running AutoDev. AutoDev no longer ships a separate Ollama-specific preflight command; provider/runtime failures are handled by the canonical execution path.
 
 ### Use the profile
 

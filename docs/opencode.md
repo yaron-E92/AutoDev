@@ -27,13 +27,6 @@ cd C:\source\repos\TARGET_REPOSITORY
 opencode
 ```
 
-The existing convenience wrapper remains available:
-
-```powershell
-pwsh -File .\scripts\install-opencode.ps1 `
-  -TargetRepository C:\source\repos\TARGET_REPOSITORY
-```
-
 ### Linux
 
 ```bash
