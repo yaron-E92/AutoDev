@@ -12,7 +12,32 @@ def replace_required(path: Path, old: str, new: str) -> None:
     path.write_text(text.replace(old, new), encoding="utf-8")
 
 
-def main() -> None:
+def migrate_live_prompt_templates() -> None:
+    for name in ("planner.md", "implementer.md", "local-repair.md", "ci-repair.md"):
+        path = ROOT / "promptTemplates" / name
+        text = path.read_text(encoding="utf-8")
+        replacements = {
+            "{{StackContext}}": "{~{StackContext}~}",
+            "{{LocalCheck}}": "{~{LocalCheck}~}",
+            "{{Plan}}": "{~{Plan}~}",
+            "{{IssueText}}": "{~{IssueText}~}",
+            "{{FailureLog}}": "{~{FailureLog}~}",
+            "{{CiSummary}}": "{~{CiSummary}~}",
+        }
+        for old, new in replacements.items():
+            text = text.replace(old, new)
+        path.write_text(text, encoding="utf-8")
+
+    path = ROOT / "tests/test_semantic_verifier.py"
+    text = path.read_text(encoding="utf-8")
+    text = text.replace(
+        'template="Issue: {{IssueText}}\\nMissing: {{MissingRequiredEvidence}}\\n",',
+        'template="Issue: {~{IssueText}~}\\nMissing: {~{MissingRequiredEvidence}~}\\n",',
+    )
+    path.write_text(text, encoding="utf-8")
+
+
+def remove_coder_plan_fallback() -> None:
     path = ROOT / "automation/context_optimization.py"
     text = path.read_text(encoding="utf-8")
     text = text.replace(
@@ -81,6 +106,11 @@ def main() -> None:
         '- **Planner** reads `issue.md` and `synthesized-handoff.md` by default. Facts, command groups, and the workspace snapshot are consulted only to validate a concrete path/fact.\n',
     )
     path.write_text(text, encoding="utf-8")
+
+
+def main() -> None:
+    migrate_live_prompt_templates()
+    remove_coder_plan_fallback()
 
 
 if __name__ == "__main__":
