@@ -24,7 +24,7 @@ from automation.model_providers import (
     validate_safe_headers,
 )
 from automation.model_roles import invoke_model, resolve_role_configs
-from automation.semantic_verifier import build_semantic_prompt
+from automation.semantic_prompts import build_semantic_prompt
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]

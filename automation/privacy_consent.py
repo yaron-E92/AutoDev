@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from automation import opencode_resume_contract
+
 import copy
 import hashlib
 import json
@@ -10,7 +12,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from automation import opencode_resume, privacy, run_manifest, workflow_stages
+from automation import privacy, run_manifest, workflow_stages
 
 
 LEDGER_NAME = "privacy-consent.json"
@@ -157,7 +159,7 @@ def _ledger_path(repo: Path) -> Path:
 
 
 def _manifest(repo: Path) -> dict[str, object]:
-    path = opencode_resume.manifest_path(repo)
+    path = opencode_resume_contract.manifest_path(repo)
     if not path.is_file():
         return {}
     try:

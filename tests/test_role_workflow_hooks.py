@@ -1,19 +1,13 @@
 from __future__ import annotations
 
+from automation import windows_verification_contract
+
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from automation import (
-    opencode_resume,
-    role_coordinator_flow,
-    role_resume,
-    role_workflow_hooks,
-    semantic_repair_budget,
-    windows_verification,
-    workflow_stages,
-)
+from automation import opencode_resume_status, role_coordinator_flow, role_resume, role_workflow_hooks, semantic_repair_budget, windows_verification_manifest, workflow_stages
 
 
 class RoleWorkflowHookTests(unittest.TestCase):
@@ -75,19 +69,19 @@ class RoleWorkflowHookTests(unittest.TestCase):
                 "load_manifest",
                 return_value={},
             ), patch.object(
-                opencode_resume,
+                opencode_resume_status,
                 "repair_attempts",
                 return_value={"local": 0, "semantic": 0, "ci": 0, "windows": 2},
             ), patch.object(
-                windows_verification,
+                windows_verification_manifest,
                 "payload_metadata",
                 return_value={"windows_verification_required": True},
             ), patch.object(
-                windows_verification,
+                windows_verification_manifest,
                 "windows_required",
                 return_value=True,
             ), patch.object(
-                windows_verification,
+                windows_verification_manifest,
                 "proof_current",
                 return_value=False,
             ):
@@ -100,7 +94,7 @@ class RoleWorkflowHookTests(unittest.TestCase):
             self.assertTrue(payload["windows_verification_required"])
             self.assertEqual(
                 payload["next_stage"],
-                windows_verification.MANIFEST_STAGE,
+                windows_verification_contract.MANIFEST_STAGE,
             )
 
     def test_install_extends_generic_repair_vocabulary_with_windows(self):

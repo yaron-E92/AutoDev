@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from automation import windows_verification_contract
+
+from automation import windows_verification_config
+
 from automation import opencode_adapter_contract
 
 from automation import opencode_adapter_assets
@@ -9,7 +13,6 @@ import json
 import os
 from pathlib import Path
 
-from automation import windows_verification
 
 
 PYTHON_COMMAND_TEMPLATES = (
@@ -225,8 +228,8 @@ def install_assets(
             f"Windows verification caller template must contain exactly one setup placeholder: {workflow_template}"
         )
     try:
-        windows_config = windows_verification.load_config(target_repo)
-    except windows_verification.WindowsVerificationError as exc:
+        windows_config = windows_verification_config.load_config(target_repo)
+    except windows_verification_contract.WindowsVerificationError as exc:
         raise opencode_adapter_contract.OpenCodeAdapterError(str(exc)) from exc
     workflow_target = target_repo / WINDOWS_CALLER_TARGET
     workflow_target.parent.mkdir(parents=True, exist_ok=True)

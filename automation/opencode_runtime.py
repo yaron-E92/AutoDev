@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from automation import opencode_resume_contract
+
+from automation import opencode_resume_checkpoint
+
 from automation import opencode_adapter_models
 
 from automation import opencode_adapter_contract
@@ -19,7 +23,7 @@ import urllib.request
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
-from automation import opencode_resume, workflow_stages
+from automation import workflow_stages
 
 
 SUPPORTED_ROOT_OPENCODE_CONFIG = {"opencode.json", "opencode.jsonc"}
@@ -418,8 +422,8 @@ def _terminal_failed(args) -> int:
         payload["branch"] = str(persisted["branch"])
     if persisted.get("completed_stage"):
         payload["completed_stage"] = str(persisted["completed_stage"])
-    if opencode_resume.has_manifest(repo):
-        opencode_resume.checkpoint_stage(repo, "failed", payload, 0)
+    if opencode_resume_contract.has_manifest(repo):
+        opencode_resume_checkpoint.checkpoint_stage(repo, "failed", payload, 0)
     print(json.dumps(payload, sort_keys=True))
     return 0
 

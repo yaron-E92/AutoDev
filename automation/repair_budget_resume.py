@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from automation import opencode_resume_status
+
+from automation import opencode_resume_execution
+
 from pathlib import Path
 from automation import run_manifest
 
@@ -87,12 +91,11 @@ def maybe_reopen_exhausted_budget(repo: Path, *, fixed_default: int = 2) -> bool
     return True
 
 def install_opencode_resume_hooks() -> None:
-    from automation import opencode_resume
 
-    if getattr(opencode_resume.resume, "_autodev_semantic_budget_hook", False):
+    if getattr(opencode_resume_execution.resume, "_autodev_semantic_budget_hook", False):
         return
-    original_resume = opencode_resume.resume
-    original_status = opencode_resume.status_text
+    original_resume = opencode_resume_execution.resume
+    original_status = opencode_resume_status.status_text
 
     def resume(repo: Path, mappings: dict[str, dict[str, str]], **kwargs):
         maybe_reopen_exhausted_budget(Path(repo))
@@ -107,8 +110,8 @@ def install_opencode_resume_hooks() -> None:
 
     setattr(resume, "_autodev_semantic_budget_hook", True)
     setattr(status_text, "_autodev_semantic_budget_hook", True)
-    opencode_resume.resume = resume
-    opencode_resume.status_text = status_text
+    opencode_resume_execution.resume = resume
+    opencode_resume_status.status_text = status_text
 
 def _append_resume_metadata(repo: Path, payload: dict[str, object]) -> None:
     current = repo.expanduser().resolve() / ".autodev-run" / "current"

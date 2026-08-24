@@ -1,3 +1,4 @@
+from automation import opencode_resume_contract
 import io
 import json
 import tempfile
@@ -82,7 +83,7 @@ class OpenCodeRuntimeTests(unittest.TestCase):
             output = io.StringIO()
             with (
                 patch("automation.opencode_runtime.workflow_stages.mark_blocked"),
-                patch("automation.opencode_runtime.opencode_resume.has_manifest", return_value=False),
+                patch("automation.opencode_runtime.opencode_resume_contract.has_manifest", return_value=False),
                 redirect_stdout(output),
             ):
                 code = opencode_runtime._terminal_failed(args)

@@ -20,21 +20,32 @@ from automation.windows_verification_manifest import (
     windows_required,
 )
 
-def install_opencode_hooks() -> None:
-    install_manifest_hooks()
-    from automation import opencode_resume, run_manifest, workflow_stages
+_OPENCODE_HOOKS_INSTALLED = False
 
-    if getattr(opencode_resume, "_autodev_windows_hooks_installed", False):
+def install_opencode_hooks() -> None:
+    global _OPENCODE_HOOKS_INSTALLED
+
+    install_manifest_hooks()
+    from automation import (
+        opencode_resume_checkpoint,
+        opencode_resume_contract,
+        opencode_resume_execution,
+        opencode_resume_status,
+        run_manifest,
+        workflow_stages,
+    )
+
+    if _OPENCODE_HOOKS_INSTALLED:
         return
 
-    opencode_resume.REPAIR_STAGE_KIND[MANIFEST_STAGE] = "windows"
+    opencode_resume_contract.REPAIR_STAGE_KIND[MANIFEST_STAGE] = "windows"
 
-    original_repair_kind = opencode_resume._repair_kind
+    original_repair_kind = opencode_resume_checkpoint._repair_kind
     original_fixer_source = opencode_adapter_handoff._fixer_source
-    original_resume_action = opencode_resume.resume_action
-    original_checkpoint_stage = opencode_resume.checkpoint_stage
-    original_status_text = opencode_resume.status_text
-    original_resume = opencode_resume.resume
+    original_resume_action = opencode_resume_status.resume_action
+    original_checkpoint_stage = opencode_resume_checkpoint.checkpoint_stage
+    original_status_text = opencode_resume_status.status_text
+    original_resume = opencode_resume_execution.resume
 
     def repair_kind(arguments: str) -> str:
         if "windows" in (arguments or "").casefold():
@@ -65,7 +76,7 @@ def install_opencode_hooks() -> None:
             original_checkpoint_stage(repo, name, payload, attempt)
             return
 
-        path = opencode_resume.manifest_path(repo)
+        path = opencode_resume_contract.manifest_path(repo)
         current = repo.expanduser().resolve() / workflow_stages.CURRENT_DIR
         state = workflow_stages.read_state(current)
         outcome = str(payload.get("state", ""))
@@ -147,18 +158,18 @@ def install_opencode_hooks() -> None:
     def resume(repo: Path, mappings: dict[str, dict[str, str]], **kwargs) -> dict[str, object]:
         payload = original_resume(repo, mappings, **kwargs)
         state = workflow_stages.read_state(repo.expanduser().resolve() / workflow_stages.CURRENT_DIR)
-        manifest = run_manifest.load_manifest(opencode_resume.manifest_path(repo))
-        attempts = opencode_resume.repair_attempts(manifest)
+        manifest = run_manifest.load_manifest(opencode_resume_contract.manifest_path(repo))
+        attempts = opencode_resume_status.repair_attempts(manifest)
         payload["windows_repair_attempt"] = int(attempts.get("windows", 0) or 0)
         payload.update(payload_metadata(state))
         if payload.get("next_action") == "pr-and-ci" and windows_required(state) and run_manifest.stage_completed(manifest, "pr-created"):
             payload["next_stage"] = MANIFEST_STAGE
         return payload
 
-    opencode_resume._repair_kind = repair_kind
+    opencode_resume_checkpoint._repair_kind = repair_kind
     opencode_adapter_handoff._fixer_source = fixer_source
-    opencode_resume.resume_action = resume_action
-    opencode_resume.checkpoint_stage = checkpoint_stage
-    opencode_resume.status_text = status_text
-    opencode_resume.resume = resume
-    opencode_resume._autodev_windows_hooks_installed = True
+    opencode_resume_status.resume_action = resume_action
+    opencode_resume_checkpoint.checkpoint_stage = checkpoint_stage
+    opencode_resume_status.status_text = status_text
+    opencode_resume_execution.resume = resume
+    _OPENCODE_HOOKS_INSTALLED = True

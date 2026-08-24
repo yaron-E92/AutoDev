@@ -1,3 +1,8 @@
+from automation import opencode_resume_status
+from automation import opencode_resume_manifest
+from automation import opencode_resume_execution
+from automation import opencode_resume_contract
+from automation import opencode_resume_checkpoint
 import json
 import tempfile
 import unittest
@@ -5,7 +10,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from automation import opencode_resume, run_manifest, workflow_stages
+from automation import run_manifest, workflow_stages
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -52,7 +57,7 @@ class OpenCodeResumeTests(unittest.TestCase):
         (current / "state.json").write_text(json.dumps(state), encoding="utf-8")
         (current / "issue.md").write_text("# Issue 63\n", encoding="utf-8")
         (current / "workspace-snapshot.json").write_text("{}\n", encoding="utf-8")
-        opencode_resume.create_open_code_manifest(repo, state)
+        opencode_resume_manifest.create_open_code_manifest(repo, state)
         return repo, current, state
 
     def _resume_patches(self, *, source_identity="source-one", workspace_changes=None):
@@ -60,15 +65,15 @@ class OpenCodeResumeTests(unittest.TestCase):
             workspace_changes = []
         return (
             patch(
-                "automation.opencode_resume.workflow_stages.git",
+                "automation.workflow_stages.git",
                 return_value=SimpleNamespace(stdout="base-sha\n", returncode=0),
             ),
             patch(
-                "automation.opencode_resume.workflow_stages.workspace_changes",
+                "automation.workflow_stages.workspace_changes",
                 return_value=workspace_changes,
             ),
             patch(
-                "automation.opencode_resume.workflow_stages.source_identity",
+                "automation.workflow_stages.source_identity",
                 return_value={
                     "identity": source_identity,
                     "parent_sha": "base-sha",
@@ -82,15 +87,15 @@ class OpenCodeResumeTests(unittest.TestCase):
             repo, current, _ = self._repo(temp_dir)
             active = mappings()
             (current / "reader-brief.md").write_text("reader\n", encoding="utf-8")
-            opencode_resume.checkpoint_role(repo, "reader", [current / "reader-brief.md"], active)
+            opencode_resume_checkpoint.checkpoint_role(repo, "reader", [current / "reader-brief.md"], active)
             (current / "synthesized-handoff.md").write_text("handoff\n", encoding="utf-8")
-            opencode_resume.checkpoint_role(repo, "synthesizer", [current / "synthesized-handoff.md"], active)
+            opencode_resume_checkpoint.checkpoint_role(repo, "synthesizer", [current / "synthesized-handoff.md"], active)
             (current / "plan.md").write_text("plan\n", encoding="utf-8")
-            opencode_resume.checkpoint_role(repo, "planner", [current / "plan.md"], active)
+            opencode_resume_checkpoint.checkpoint_role(repo, "planner", [current / "plan.md"], active)
 
             git_patch, changes_patch, source_patch = self._resume_patches()
             with git_patch, changes_patch, source_patch:
-                payload = opencode_resume.resume(repo, active)
+                payload = opencode_resume_execution.resume(repo, active)
 
             self.assertEqual(payload["next_stage"], "implementation-generated")
             self.assertEqual(payload["next_action"], "implementer")
@@ -101,8 +106,8 @@ class OpenCodeResumeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo, current, _ = self._repo(temp_dir)
             active = mappings()
-            opencode_resume.reconcile_models(repo, active)
-            manifest_path = opencode_resume.manifest_path(repo)
+            opencode_resume_manifest.reconcile_models(repo, active)
+            manifest_path = opencode_resume_contract.manifest_path(repo)
             for stage in ("repository-read", "handoff-synthesized", "plan-created"):
                 run_manifest.complete_stage(manifest_path, stage, run_root=current)
             (current / "commit-message.txt").write_text("Implement issue 63\n", encoding="utf-8")
@@ -111,12 +116,12 @@ class OpenCodeResumeTests(unittest.TestCase):
                 "parent_sha": "base-sha",
                 "changes": [{"path": "file.py", "status": "modified", "sha256": "abc"}],
             }
-            with patch("automation.opencode_resume.workflow_stages.source_identity", return_value=proof):
-                opencode_resume.checkpoint_role(repo, "implementer", [current / "commit-message.txt"], active)
+            with patch("automation.workflow_stages.source_identity", return_value=proof):
+                opencode_resume_checkpoint.checkpoint_role(repo, "implementer", [current / "commit-message.txt"], active)
 
             git_patch, changes_patch, source_patch = self._resume_patches(source_identity="source-one")
             with git_patch, changes_patch, source_patch:
-                payload = opencode_resume.resume(repo, active)
+                payload = opencode_resume_execution.resume(repo, active)
 
             self.assertEqual(payload["next_stage"], "deterministic-verified")
             self.assertEqual(payload["next_action"], "local-check")
@@ -125,8 +130,8 @@ class OpenCodeResumeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo, current, _ = self._repo(temp_dir)
             active = mappings()
-            opencode_resume.reconcile_models(repo, active)
-            manifest_path = opencode_resume.manifest_path(repo)
+            opencode_resume_manifest.reconcile_models(repo, active)
+            manifest_path = opencode_resume_contract.manifest_path(repo)
             for stage in (
                 "repository-read",
                 "handoff-synthesized",
@@ -159,7 +164,7 @@ class OpenCodeResumeTests(unittest.TestCase):
 
             git_patch, changes_patch, source_patch = self._resume_patches(source_identity="source-one")
             with git_patch, changes_patch, source_patch:
-                payload = opencode_resume.resume(repo, active)
+                payload = opencode_resume_execution.resume(repo, active)
 
             self.assertEqual(payload["next_stage"], "pr-created")
             self.assertEqual(payload["next_action"], "pr-and-ci")
@@ -167,7 +172,7 @@ class OpenCodeResumeTests(unittest.TestCase):
     def test_repair_required_state_persists_counter_and_resumes_at_fixer(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo, _, _ = self._repo(temp_dir)
-            path = opencode_resume.manifest_path(repo)
+            path = opencode_resume_contract.manifest_path(repo)
             run_manifest.record_stage_state(
                 path,
                 "deterministic-verified",
@@ -176,15 +181,15 @@ class OpenCodeResumeTests(unittest.TestCase):
             )
             manifest = run_manifest.load_manifest(path)
 
-            self.assertEqual(opencode_resume.resume_action(manifest, {}), "fixer-local")
-            self.assertEqual(opencode_resume.repair_attempts(manifest)["local"], 2)
+            self.assertEqual(opencode_resume_status.resume_action(manifest, {}), "fixer-local")
+            self.assertEqual(opencode_resume_status.repair_attempts(manifest)["local"], 2)
 
     def test_resume_rejects_patch_identity_drift(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo, current, _ = self._repo(temp_dir)
             active = mappings()
-            opencode_resume.reconcile_models(repo, active)
-            path = opencode_resume.manifest_path(repo)
+            opencode_resume_manifest.reconcile_models(repo, active)
+            path = opencode_resume_contract.manifest_path(repo)
             for stage in (
                 "repository-read",
                 "handoff-synthesized",
@@ -201,8 +206,8 @@ class OpenCodeResumeTests(unittest.TestCase):
 
             git_patch, changes_patch, source_patch = self._resume_patches(source_identity="different-source")
             with git_patch, changes_patch, source_patch:
-                with self.assertRaises(opencode_resume.OpenCodeResumeError) as raised:
-                    opencode_resume.resume(repo, active)
+                with self.assertRaises(opencode_resume_contract.OpenCodeResumeError) as raised:
+                    opencode_resume_execution.resume(repo, active)
 
             self.assertIn("source/worktree drift", str(raised.exception))
 
@@ -210,29 +215,29 @@ class OpenCodeResumeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo, current, _ = self._repo(temp_dir)
             original = mappings()
-            opencode_resume.reconcile_models(repo, original)
-            path = opencode_resume.manifest_path(repo)
+            opencode_resume_manifest.reconcile_models(repo, original)
+            path = opencode_resume_contract.manifest_path(repo)
             for stage in ("repository-read", "handoff-synthesized", "plan-created"):
                 run_manifest.complete_stage(path, stage, run_root=current)
             changed = mappings(planner="provider/new-planner")
 
             git_patch, changes_patch, source_patch = self._resume_patches()
             with git_patch, changes_patch, source_patch:
-                with self.assertRaises(opencode_resume.OpenCodeResumeError) as raised:
-                    opencode_resume.resume(repo, changed)
+                with self.assertRaises(opencode_resume_contract.OpenCodeResumeError) as raised:
+                    opencode_resume_execution.resume(repo, changed)
             self.assertIn("--invalidate-role", str(raised.exception))
 
             git_patch, changes_patch, source_patch = self._resume_patches()
             with git_patch, changes_patch, source_patch:
-                payload = opencode_resume.resume(repo, changed, invalidated_roles={"planner"})
+                payload = opencode_resume_execution.resume(repo, changed, invalidated_roles={"planner"})
             self.assertEqual(payload["next_action"], "planner")
 
     def test_completed_pr_resume_is_idempotent_and_finishes_without_new_work(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo, current, state = self._repo(temp_dir)
             active = mappings()
-            opencode_resume.reconcile_models(repo, active)
-            path = opencode_resume.manifest_path(repo)
+            opencode_resume_manifest.reconcile_models(repo, active)
+            path = opencode_resume_contract.manifest_path(repo)
             for stage in run_manifest.PRIMARY_STAGES[:-1]:
                 run_manifest.complete_stage(path, stage, run_root=current)
             (current / "ci-summary.json").write_text('{"state":"terminal-success"}\n', encoding="utf-8")
@@ -262,9 +267,9 @@ class OpenCodeResumeTests(unittest.TestCase):
 
             git_patch, changes_patch, source_patch = self._resume_patches(source_identity="source-one")
             with git_patch, changes_patch, source_patch, patch(
-                "automation.opencode_resume.workflow_stages.validate_ready_proof"
+                "automation.workflow_stages.validate_ready_proof"
             ) as ready_proof:
-                payload = opencode_resume.resume(repo, active)
+                payload = opencode_resume_execution.resume(repo, active)
 
             self.assertEqual(payload["state"], "COMPLETE")
             self.assertEqual(payload["next_action"], "complete")

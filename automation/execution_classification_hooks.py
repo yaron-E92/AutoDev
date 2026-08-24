@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from automation import opencode_resume_status
+
+from automation import opencode_resume_execution
+
 from automation import opencode_adapter_roles
 
 from automation import opencode_adapter_handoff
@@ -10,14 +14,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from automation import (
-    execution_classification as execution,
-    issue_queue,
-    opencode_resume,
-    role_coordinator_flow,
-    role_resume,
-    workflow_stages,
-)
+from automation import execution_classification as execution, issue_queue, role_coordinator_flow, role_resume, workflow_stages
 
 
 ATTENTION_STATE = "ATTENTION_REQUIRED"
@@ -581,7 +578,7 @@ def _attention_resume_payload(
 
 
 def _install_resume_gates() -> None:
-    current_opencode_resume = opencode_resume.resume
+    current_opencode_resume = opencode_resume_execution.resume
     if not getattr(current_opencode_resume, "_autodev_execution_classification", False):
         original_opencode_resume = current_opencode_resume
 
@@ -596,9 +593,9 @@ def _install_resume_gates() -> None:
             return attention or payload
 
         resume._autodev_execution_classification = True  # type: ignore[attr-defined]
-        opencode_resume.resume = resume
+        opencode_resume_execution.resume = resume
 
-    current_status = opencode_resume.status_text
+    current_status = opencode_resume_status.status_text
     if not getattr(current_status, "_autodev_execution_classification", False):
         original_status = current_status
 
@@ -622,7 +619,7 @@ def _install_resume_gates() -> None:
             return text.rstrip() + "\n" + "\n".join(extra) + "\n"
 
         status_text._autodev_execution_classification = True  # type: ignore[attr-defined]
-        opencode_resume.status_text = status_text
+        opencode_resume_status.status_text = status_text
 
     current_role_resume = role_resume.resume
     if not getattr(current_role_resume, "_autodev_execution_classification", False):

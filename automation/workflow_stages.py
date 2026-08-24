@@ -25,13 +25,11 @@ from automation import workflow_prompts as _workflow_prompts
 from automation import workflow_storage as _workflow_storage
 from automation import workflow_verification as _workflow_verification
 from automation import workflow_workspace as _workflow_workspace
-from automation.semantic_verifier import (
-    SemanticVerifierError,
-    extract_acceptance_criteria,
-    parse_semantic_output,
-    prepare_semantic_repair_prompt,
-    render_template,
-)
+from automation.semantic_contract import SemanticVerifierError
+from automation.semantic_invocation import prepare_semantic_repair_prompt
+from automation.semantic_prompts import extract_acceptance_criteria
+from automation.semantic_schema import parse_semantic_output
+from automation.semantic_text import render_template
 
 from automation.workflow_contract import (
     AUTODEV_ROOT,

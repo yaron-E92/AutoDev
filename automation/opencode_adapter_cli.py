@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+from automation import opencode_resume_status
+
+from automation import opencode_resume_execution
+
+from automation import opencode_resume_checkpoint
+
 import argparse
 import json
 import os
 import sys
 from pathlib import Path
-from automation import opencode_resume
 from automation import workflow_stages
 from automation.model_providers import ProviderError, load_provider_config
 from automation.prompt_runner import (
@@ -13,21 +18,12 @@ from automation.prompt_runner import (
     PromptRunnerError,
     handle_planner_output,
 )
-from automation.semantic_verifier import (
-    SemanticVerifierError,
-    build_schema_repair_prompt,
-    build_semantic_prompt,
-    collect_changed_files,
-    collect_cross_file_regression_evidence,
-    collect_current_diff,
-    collect_deterministic_evidence,
-    extract_acceptance_criteria,
-    parse_semantic_output,
-    render_template,
-    semantic_result_template,
-    write_final_verdict,
-    write_semantic_result,
-)
+from automation.semantic_artifacts import write_final_verdict, write_semantic_result
+from automation.semantic_contract import SemanticVerifierError
+from automation.semantic_evidence import collect_changed_files, collect_cross_file_regression_evidence, collect_current_diff, collect_deterministic_evidence
+from automation.semantic_prompts import build_schema_repair_prompt, build_semantic_prompt, extract_acceptance_criteria
+from automation.semantic_schema import parse_semantic_output, semantic_result_template
+from automation.semantic_text import render_template
 
 from automation.opencode_adapter_contract import (
     AUTODEV_ROOT,
@@ -125,7 +121,7 @@ def run(argv: list[str] | None = None) -> int:
             repo = Path(args.repo).expanduser().resolve()
             mappings = resolve_opencode_model_mappings(repo)
             print(
-                opencode_resume.status_text(
+                opencode_resume_status.status_text(
                     repo,
                     mappings,
                     requested_invalidations=args.invalidate_role,
@@ -136,7 +132,7 @@ def run(argv: list[str] | None = None) -> int:
         if args.command == "resume":
             repo = Path(args.repo).expanduser().resolve()
             mappings = resolve_opencode_model_mappings(repo)
-            payload = opencode_resume.resume(
+            payload = opencode_resume_execution.resume(
                 repo,
                 mappings,
                 invalidated_roles=set(args.invalidate_role),
@@ -187,7 +183,7 @@ def run(argv: list[str] | None = None) -> int:
                     exc,
                     requested_issue=issue_number_from_arguments(args.arguments),
                 )
-                opencode_resume.checkpoint_failure(repo, args.name, exc)
+                opencode_resume_checkpoint.checkpoint_failure(repo, args.name, exc)
                 print(json.dumps(payload, sort_keys=True))
                 return 1
             print(json.dumps(payload, sort_keys=True))

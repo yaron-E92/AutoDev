@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from automation import opencode_resume_contract
+
 import json
 import tempfile
 import unittest
@@ -7,7 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from automation import opencode_resume, privacy, privacy_consent, run_manifest, workflow_stages
+from automation import privacy, privacy_consent, run_manifest, workflow_stages
 
 
 class PrivacyConsentTests(unittest.TestCase):
@@ -214,7 +216,7 @@ class PrivacyConsentTests(unittest.TestCase):
                     "approvals": [privacy_consent._approval_record(repo, policy, decision, mode="batch")],
                 },
             )
-            path = opencode_resume.manifest_path(repo)
+            path = opencode_resume_contract.manifest_path(repo)
             manifest = run_manifest.load_manifest(path)
             manifest["run_id"] = "new-run-id"
             run_manifest.save_manifest(path, manifest)

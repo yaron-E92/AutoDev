@@ -18,7 +18,7 @@ from automation import (
     workflow_stages,
 )
 from automation.prompt_runner import PromptRunnerError
-from automation.semantic_verifier import SemanticVerifierError
+from automation.semantic_contract import SemanticVerifierError
 from automation import coordination_contract, coordination_state
 
 from automation.role_coordinator_contract import (

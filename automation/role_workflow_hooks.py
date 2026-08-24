@@ -1,17 +1,14 @@
 from __future__ import annotations
 
+from automation import windows_verification_manifest
+
+from automation import windows_verification_contract
+
+from automation import opencode_resume_status
+
 from pathlib import Path
 
-from automation import (
-    opencode_resume,
-    role_coordinator_contract,
-    role_coordinator_flow,
-    role_resume,
-    run_manifest,
-    semantic_repair_budget,
-    windows_verification,
-    workflow_stages,
-)
+from automation import role_coordinator_contract, role_coordinator_flow, role_resume, run_manifest, semantic_repair_budget, workflow_stages
 
 
 class _CiWaiting(RuntimeError):
@@ -77,15 +74,15 @@ def _install_resume_bridge() -> None:
         ):
             return payload
 
-        attempts = opencode_resume.repair_attempts(manifest)
+        attempts = opencode_resume_status.repair_attempts(manifest)
         payload["windows_repair_attempt"] = int(attempts.get("windows", 0) or 0)
-        payload.update(windows_verification.payload_metadata(state))
+        payload.update(windows_verification_manifest.payload_metadata(state))
         if (
             payload.get("next_action") == "pr-and-ci"
-            and windows_verification.windows_required(state)
-            and not windows_verification.proof_current(state)
+            and windows_verification_manifest.windows_required(state)
+            and not windows_verification_manifest.proof_current(state)
         ):
-            payload["next_stage"] = windows_verification.MANIFEST_STAGE
+            payload["next_stage"] = windows_verification_contract.MANIFEST_STAGE
         return payload
 
     resume._autodev_role_resume_hooks = True  # type: ignore[attr-defined]

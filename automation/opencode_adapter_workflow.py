@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+from automation import opencode_resume_manifest
+
+from automation import opencode_resume_contract
+
+from automation import opencode_resume_checkpoint
+
 import shutil
 import subprocess
 from pathlib import Path
-from automation import opencode_resume
 from automation import workflow_stages
 
 from automation.opencode_adapter_contract import (
@@ -50,7 +55,7 @@ def workflow_stage(
         if name == "preflight" and payload.get("state") == "CONTINUE":
             resolve_opencode_model_mappings(repo, runner=runner)
     except workflow_stages.WorkflowStageError as exc:
-        opencode_resume.checkpoint_failure(repo, name, exc)
+        opencode_resume_checkpoint.checkpoint_failure(repo, name, exc)
         raise OpenCodeAdapterError(
             str(exc),
             classification=exc.classification,
@@ -59,10 +64,10 @@ def workflow_stage(
     current = repo / CURRENT_DIR
     if name == "prepare" and payload.get("state") == "CONTINUE" and current.is_dir():
         _ensure_opencode_protocol(current)
-        opencode_resume.create_open_code_manifest(repo, _read_state(current))
+        opencode_resume_manifest.create_open_code_manifest(repo, _read_state(current))
     elif name == "render-implementer" and payload.get("state") == "CONTINUE" and current.is_dir():
         _ensure_opencode_protocol(current)
         _begin_role_invocation(current, "implementer")
-    if name != "prepare" and opencode_resume.has_manifest(repo):
-        opencode_resume.checkpoint_stage(repo, name, payload, attempt)
+    if name != "prepare" and opencode_resume_contract.has_manifest(repo):
+        opencode_resume_checkpoint.checkpoint_stage(repo, name, payload, attempt)
     return code, payload

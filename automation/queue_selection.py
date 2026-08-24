@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from automation import opencode_resume_status
+
+from automation import opencode_resume_contract
+
 import json
 import re
 import subprocess
@@ -7,7 +11,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Callable
 
-from automation import opencode_resume, run_manifest, workflow_stages
+from automation import run_manifest, workflow_stages
 from automation.queue_contract import DEFAULT_LIMIT, QueueError, QueueIssue, QueueState
 from automation.queue_github import _json_result, _run_gh
 from automation.queue_workflow import inspect_queue, reconcile_queue
@@ -297,9 +301,9 @@ def inspect_existing_run(repo: Path) -> ExistingRun:
             reason=f"existing AutoDev run is terminal/non-runnable with status {state.get('Status', '')}",
         )
     try:
-        action = opencode_resume.resume_action(manifest, state)
+        action = opencode_resume_status.resume_action(manifest, state)
         next_stage = run_manifest.next_stage(manifest)
-    except (run_manifest.ManifestError, opencode_resume.OpenCodeResumeError, ValueError) as exc:
+    except (run_manifest.ManifestError, opencode_resume_contract.OpenCodeResumeError, ValueError) as exc:
         return ExistingRun(
             "RUN_HEALTH_BLOCKED",
             issue_number=issue_number,

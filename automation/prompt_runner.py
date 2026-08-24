@@ -32,7 +32,9 @@ from automation.model_roles import (
     resolve_role_configs,
 )
 from automation.prompt_policies import compose_prompt, resolve_prompt_policies, role_policy_metadata
-from automation.semantic_verifier import SemanticVerifierError, build_schema_repair_prompt, parse_semantic_output
+from automation.semantic_contract import SemanticVerifierError
+from automation.semantic_prompts import build_schema_repair_prompt
+from automation.semantic_schema import parse_semantic_output
 
 
 PATCH_START = "BEGIN_UNIFIED_DIFF"

@@ -13,13 +13,11 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
-from automation.semantic_verifier import (
-    SemanticVerifierError,
-    extract_acceptance_criteria,
-    parse_semantic_output,
-    prepare_semantic_repair_prompt,
-    render_template,
-)
+from automation.semantic_contract import SemanticVerifierError
+from automation.semantic_invocation import prepare_semantic_repair_prompt
+from automation.semantic_prompts import extract_acceptance_criteria
+from automation.semantic_schema import parse_semantic_output
+from automation.semantic_text import render_template
 from automation.workflow_commands import (
     _decoded_text,
     _run_captured,

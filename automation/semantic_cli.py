@@ -95,3 +95,7 @@ def run(argv: list[str] | None = None) -> int:
         print(str(exc), file=sys.stderr)
         return 2
     return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(run())

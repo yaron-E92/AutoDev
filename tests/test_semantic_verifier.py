@@ -8,16 +8,12 @@ from unittest import mock
 from automation import prompt_runner
 from automation.model_providers import ModelConfig, MockProvider, ProviderError
 from automation.prompt_policies import resolve_prompt_policies
-from automation.semantic_verifier import (
-    SemanticSettings,
-    SemanticVerifierError,
-    build_semantic_prompt,
-    collect_cross_file_regression_evidence,
-    extract_acceptance_criteria,
-    invoke_semantic_verifier,
-    parse_semantic_output,
-    resolve_semantic_settings,
-)
+from automation.semantic_configuration import resolve_semantic_settings
+from automation.semantic_contract import SemanticSettings, SemanticVerifierError
+from automation.semantic_evidence import collect_cross_file_regression_evidence
+from automation.semantic_invocation import invoke_semantic_verifier
+from automation.semantic_prompts import build_semantic_prompt, extract_acceptance_criteria
+from automation.semantic_schema import parse_semantic_output
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -251,12 +247,12 @@ class SemanticVerifierTests(unittest.TestCase):
         linux = (REPO_ROOT / "linux" / "scripts" / "issue-to-pr-cycle.sh").read_text(encoding="utf-8")
 
         self.assertIn('VerifierFormat "semantic-json"', windows)
-        self.assertIn("automation.semantic_verifier", windows)
+        self.assertIn("automation.semantic_cli", windows)
         self.assertLess(windows.index("Invoke-SemanticGate"), windows.index("Invoke-PrAndCiWithRepairs"))
         self.assertIn("$semanticCode = Invoke-SemanticGate", windows)
 
         self.assertIn("semantic-json", linux)
-        self.assertIn("automation.semantic_verifier", linux)
+        self.assertIn("automation.semantic_cli", linux)
         self.assertLess(linux.index("semantic_gate"), linux.index("pr_and_ci_with_repairs"))
         self.assertIn("semantic_gate || return", linux)
 

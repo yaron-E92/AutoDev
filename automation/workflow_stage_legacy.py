@@ -4,11 +4,9 @@ import argparse
 from pathlib import Path
 
 from automation import workflow_stages
-from automation.semantic_verifier import (
-    extract_acceptance_criteria,
-    parse_semantic_output,
-    render_template,
-)
+from automation.semantic_prompts import extract_acceptance_criteria
+from automation.semantic_schema import parse_semantic_output
+from automation.semantic_text import render_template
 
 
 MODES = (

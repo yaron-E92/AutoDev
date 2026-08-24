@@ -1,5 +1,21 @@
 from __future__ import annotations
 
+from automation import windows_verification_storage
+
+from automation import windows_verification_obligations
+
+from automation import windows_verification_hooks
+
+from automation import windows_verification_execution
+
+from automation import windows_verification_contract
+
+from automation import windows_verification_config
+
+from automation import windows_verification_actions
+
+from automation import opencode_resume_status
+
 from automation import opencode_adapter_handoff
 
 import json
@@ -10,7 +26,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from automation import opencode_resume, run_manifest, windows_verification, workflow_stages
+from automation import run_manifest, workflow_stages
 
 
 HEAD = "a" * 40
@@ -19,7 +35,7 @@ SOURCE = "verified-source-identity"
 
 
 def _config(repo: Path, *, when: str = "deferred-windows") -> None:
-    path = repo / windows_verification.CONFIG_PATH
+    path = repo / windows_verification_contract.CONFIG_PATH
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(
@@ -27,7 +43,7 @@ def _config(repo: Path, *, when: str = "deferred-windows") -> None:
                 "version": 1,
                 "enabled": True,
                 "when": when,
-                "workflow": windows_verification.DEFAULT_CALLER_WORKFLOW,
+                "workflow": windows_verification_contract.DEFAULT_CALLER_WORKFLOW,
                 "commands": [
                     {"name": "publish", "command": "dotnet publish App.csproj"},
                     {"name": "smoke", "command": "pwsh -File smoke.ps1"},
@@ -102,9 +118,9 @@ class WindowsVerificationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
             _config(repo)
-            config = windows_verification.load_config(repo)
+            config = windows_verification_config.load_config(repo)
 
-        self.assertEqual(config["workflow"], windows_verification.DEFAULT_CALLER_WORKFLOW)
+        self.assertEqual(config["workflow"], windows_verification_contract.DEFAULT_CALLER_WORKFLOW)
         self.assertNotIn("runner", config)
         self.assertEqual([item["name"] for item in config["commands"]], ["publish", "smoke"])
 
@@ -122,7 +138,7 @@ class WindowsVerificationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
             _config(repo)
-            path = repo / windows_verification.CONFIG_PATH
+            path = repo / windows_verification_contract.CONFIG_PATH
             value = json.loads(path.read_text(encoding="utf-8"))
             value["setup"] = {
                 "name": "Configure packages",
@@ -130,8 +146,8 @@ class WindowsVerificationTests(unittest.TestCase):
                 "secret_env": {"NUGET_TOKEN": "PRIVATE_PACKAGE_TOKEN"},
             }
             path.write_text(json.dumps(value), encoding="utf-8")
-            config = windows_verification.load_config(repo)
-            metadata = windows_verification.safe_config_metadata(config)
+            config = windows_verification_config.load_config(repo)
+            metadata = windows_verification_config.safe_config_metadata(config)
 
         self.assertEqual(config["setup"]["secret_env"], {"NUGET_TOKEN": "PRIVATE_PACKAGE_TOKEN"})
         self.assertEqual(metadata["setup"]["secret_environment_names"], ["NUGET_TOKEN"])
@@ -141,7 +157,7 @@ class WindowsVerificationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
             _config(repo)
-            path = repo / windows_verification.CONFIG_PATH
+            path = repo / windows_verification_contract.CONFIG_PATH
             value = json.loads(path.read_text(encoding="utf-8"))
             value["setup"] = {
                 "command": "pwsh -File setup.ps1",
@@ -149,8 +165,8 @@ class WindowsVerificationTests(unittest.TestCase):
             }
             path.write_text(json.dumps(value), encoding="utf-8")
 
-            with self.assertRaises(windows_verification.WindowsVerificationError):
-                windows_verification.load_config(repo)
+            with self.assertRaises(windows_verification_contract.WindowsVerificationError):
+                windows_verification_config.load_config(repo)
 
     def test_local_deferred_lines_are_durable_and_only_explicit_windows_requires_lane(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -159,7 +175,7 @@ class WindowsVerificationTests(unittest.TestCase):
             current.mkdir(parents=True)
             _config(repo)
             state: dict[str, object] = {}
-            metadata = windows_verification.record_local_deferred_obligations(
+            metadata = windows_verification_obligations.record_local_deferred_obligations(
                 repo,
                 current,
                 state,
@@ -179,7 +195,7 @@ class WindowsVerificationTests(unittest.TestCase):
         )
         self.assertEqual(
             persisted["windows_config"]["workflow"],
-            windows_verification.DEFAULT_CALLER_WORKFLOW,
+            windows_verification_contract.DEFAULT_CALLER_WORKFLOW,
         )
 
     def test_always_policy_creates_windows_obligation_without_fake_linux_pass(self):
@@ -189,7 +205,7 @@ class WindowsVerificationTests(unittest.TestCase):
             current.mkdir(parents=True)
             _config(repo, when="always")
             state: dict[str, object] = {}
-            windows_verification.record_local_deferred_obligations(repo, current, state, "LOCAL_CHECK_PASSED\n")
+            windows_verification_obligations.record_local_deferred_obligations(repo, current, state, "LOCAL_CHECK_PASSED\n")
 
         self.assertTrue(state["WindowsVerificationRequired"])
         obligations = state["DeferredVerificationObligations"]
@@ -201,15 +217,15 @@ class WindowsVerificationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
             _config(repo)
-            config = windows_verification.load_config(repo)
+            config = windows_verification_config.load_config(repo)
 
             def runner(command, **kwargs):
                 if command[:2] == ["gh", "api"]:
                     return SimpleNamespace(returncode=0, stdout='{"enabled":true}', stderr="")
                 return SimpleNamespace(returncode=1, stdout="", stderr="workflow not found")
 
-            with self.assertRaises(windows_verification.WindowsVerificationError) as caught:
-                windows_verification.validate_actions_installation(
+            with self.assertRaises(windows_verification_contract.WindowsVerificationError) as caught:
+                windows_verification_actions.validate_actions_installation(
                     repo,
                     repo_full="example/repo",
                     config=config,
@@ -229,7 +245,7 @@ class WindowsVerificationTests(unittest.TestCase):
             state = _state()
             runner = FakeActionsRunner()
             with mock.patch.dict(os.environ, {"AUTODEV_WINDOWS_ACTIONS_POLL_SECONDS": "0"}):
-                result = windows_verification.run_after_push(
+                result = windows_verification_execution.run_after_push(
                     repo,
                     current,
                     state,
@@ -237,7 +253,7 @@ class WindowsVerificationTests(unittest.TestCase):
                     runner=runner,
                 )
             proof = state["WindowsVerificationProof"]
-            request = json.loads((current / windows_verification.REQUEST_FILE).read_text(encoding="utf-8"))
+            request = json.loads((current / windows_verification_contract.REQUEST_FILE).read_text(encoding="utf-8"))
 
         self.assertEqual(result["state"], "CONTINUE")
         self.assertEqual(proof["transport"], "github-actions")
@@ -270,17 +286,17 @@ class WindowsVerificationTests(unittest.TestCase):
             )
             state = _state()
             with mock.patch.dict(os.environ, {"AUTODEV_WINDOWS_ACTIONS_POLL_SECONDS": "0"}):
-                result = windows_verification.run_after_push(
+                result = windows_verification_execution.run_after_push(
                     repo,
                     current,
                     state,
                     max_repair_attempts=3,
                     runner=runner,
                 )
-            repair_exists = (current / windows_verification.REPAIR_FILE).is_file()
+            repair_exists = (current / windows_verification_contract.REPAIR_FILE).is_file()
 
         self.assertEqual(result["state"], "REPAIR")
-        self.assertEqual(result["failure_classification"], windows_verification.FAILURE_CODE_REPAIRABLE)
+        self.assertEqual(result["failure_classification"], windows_verification_contract.FAILURE_CODE_REPAIRABLE)
         self.assertTrue(repair_exists)
 
     def test_actions_setup_failure_is_infrastructure_not_code_repair(self):
@@ -295,7 +311,7 @@ class WindowsVerificationTests(unittest.TestCase):
             )
             state = _state()
             with mock.patch.dict(os.environ, {"AUTODEV_WINDOWS_ACTIONS_POLL_SECONDS": "0"}):
-                result = windows_verification.run_after_push(
+                result = windows_verification_execution.run_after_push(
                     repo,
                     current,
                     state,
@@ -304,13 +320,13 @@ class WindowsVerificationTests(unittest.TestCase):
                 )
 
         self.assertEqual(result["state"], "FAILED")
-        self.assertEqual(result["failure_classification"], windows_verification.FAILURE_TRANSIENT)
-        self.assertFalse((current / windows_verification.REPAIR_FILE).exists())
+        self.assertEqual(result["failure_classification"], windows_verification_contract.FAILURE_TRANSIENT)
+        self.assertFalse((current / windows_verification_contract.REPAIR_FILE).exists())
 
     def test_ready_rejects_stale_or_drifted_actions_proof(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             current = Path(temp_dir)
-            result_path = current / windows_verification.RESULT_FILE
+            result_path = current / windows_verification_contract.RESULT_FILE
             result_path.write_text(
                 json.dumps(
                     {
@@ -329,24 +345,24 @@ class WindowsVerificationTests(unittest.TestCase):
                 "head_sha": HEAD,
                 "source_identity": SOURCE,
                 "run_id": 321,
-                "result_sha256": windows_verification._sha256_file(result_path),
+                "result_sha256": windows_verification_storage._sha256_file(result_path),
             }
             state = _state()
             state["PrHeadSha"] = HEAD
             state["WindowsVerificationProof"] = proof
-            windows_verification.validate_ready(current, state)
+            windows_verification_execution.validate_ready(current, state)
 
             state["PrHeadSha"] = "c" * 40
-            with self.assertRaises(windows_verification.WindowsVerificationError):
-                windows_verification.validate_ready(current, state)
+            with self.assertRaises(windows_verification_contract.WindowsVerificationError):
+                windows_verification_execution.validate_ready(current, state)
 
             state["PrHeadSha"] = HEAD
             result_path.write_text("{}\n", encoding="utf-8")
-            with self.assertRaises(windows_verification.WindowsVerificationError):
-                windows_verification.validate_ready(current, state)
+            with self.assertRaises(windows_verification_contract.WindowsVerificationError):
+                windows_verification_execution.validate_ready(current, state)
 
     def test_opencode_resume_and_fixer_hooks_keep_windows_as_durable_repair_boundary(self):
-        windows_verification.install_opencode_hooks()
+        windows_verification_hooks.install_opencode_hooks()
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
             current = repo / workflow_stages.CURRENT_DIR
@@ -373,9 +389,9 @@ class WindowsVerificationTests(unittest.TestCase):
             state["PrHeadSha"] = HEAD
             state["Status"] = "CiPassedVerifierPromptRendered"
 
-            self.assertEqual(opencode_resume.resume_action(manifest, state), "pr-and-ci")
+            self.assertEqual(opencode_resume_status.resume_action(manifest, state), "pr-and-ci")
 
-            result_path = current / windows_verification.RESULT_FILE
+            result_path = current / windows_verification_contract.RESULT_FILE
             result_path.write_text(
                 json.dumps(
                     {
@@ -394,22 +410,22 @@ class WindowsVerificationTests(unittest.TestCase):
                 "head_sha": HEAD,
                 "source_identity": SOURCE,
                 "run_id": 321,
-                "result_sha256": windows_verification._sha256_file(result_path),
+                "result_sha256": windows_verification_storage._sha256_file(result_path),
             }
-            manifest["completed_stages"].append(windows_verification.MANIFEST_STAGE)
-            manifest["stages"][windows_verification.MANIFEST_STAGE] = {
+            manifest["completed_stages"].append(windows_verification_contract.MANIFEST_STAGE)
+            manifest["stages"][windows_verification_contract.MANIFEST_STAGE] = {
                 "status": "completed",
                 "details": {"attempt": 0},
             }
             run_manifest.save_manifest(manifest_path, manifest)
-            self.assertEqual(opencode_resume.resume_action(manifest, state), "ready")
+            self.assertEqual(opencode_resume_status.resume_action(manifest, state), "ready")
 
-            repair_path = current / windows_verification.REPAIR_FILE
+            repair_path = current / windows_verification_contract.REPAIR_FILE
             repair_path.write_text("repair windows\n", encoding="utf-8")
             self.assertEqual(opencode_adapter_handoff._fixer_source(current, "100 windows"), repair_path)
 
             affected = run_manifest.invalidated_stages_for_role(manifest, "implementer")
-            self.assertIn(windows_verification.MANIFEST_STAGE, affected)
+            self.assertIn(windows_verification_contract.MANIFEST_STAGE, affected)
 
 
 if __name__ == "__main__":

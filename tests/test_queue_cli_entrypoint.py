@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from automation import windows_verification_hooks
+
 import unittest
 from unittest import mock
 
@@ -12,7 +14,7 @@ class QueueCliEntrypointTests(unittest.TestCase):
             "ci_outcomes.install",
             "pr_head_sync.install",
             "semantic_repair_budget.install_opencode_resume_hooks",
-            "windows_verification.install_opencode_hooks",
+            "windows_verification_hooks.install_opencode_hooks",
             "windows_semantic_order.install",
             "context_optimization.install",
             "privacy_consent.install",

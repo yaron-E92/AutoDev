@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from automation import opencode_resume_status
+
 import hashlib
 import tempfile
 import unittest
@@ -7,7 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from automation import opencode_resume, opencode_runtime, workflow_stages
+from automation import opencode_runtime, run_manifest, workflow_stages
 
 
 class OpenCodePostShipmentIdentityTests(unittest.TestCase):
@@ -90,14 +92,14 @@ class OpenCodePostShipmentIdentityTests(unittest.TestCase):
                 return SimpleNamespace(returncode=0, stdout="base-sha\n", stderr="")
 
             with (
-                patch.object(opencode_resume.run_manifest, "validate_artifacts", return_value=[]),
+                patch.object(run_manifest, "validate_artifacts", return_value=[]),
                 patch.object(
-                    opencode_resume.run_manifest,
+                    run_manifest,
                     "stage_completed",
                     side_effect=lambda _manifest, stage: stage == "patch-applied",
                 ),
             ):
-                problems = opencode_resume._resume_problems(
+                problems = opencode_resume_status._resume_problems(
                     repo,
                     current,
                     manifest,
@@ -110,14 +112,14 @@ class OpenCodePostShipmentIdentityTests(unittest.TestCase):
 
             (repo / "source.txt").write_text("real drift\n", encoding="utf-8")
             with (
-                patch.object(opencode_resume.run_manifest, "validate_artifacts", return_value=[]),
+                patch.object(run_manifest, "validate_artifacts", return_value=[]),
                 patch.object(
-                    opencode_resume.run_manifest,
+                    run_manifest,
                     "stage_completed",
                     side_effect=lambda _manifest, stage: stage == "patch-applied",
                 ),
             ):
-                problems = opencode_resume._resume_problems(
+                problems = opencode_resume_status._resume_problems(
                     repo,
                     current,
                     manifest,

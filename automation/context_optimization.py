@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from automation import semantic_evidence
+
 from automation import opencode_adapter_storage
 
 from automation import opencode_adapter_roles
@@ -17,7 +19,7 @@ import math
 from datetime import datetime, timezone
 from pathlib import Path
 
-from automation import headroom, semantic_verifier, workflow_stages
+from automation import headroom, workflow_stages
 from automation.model_providers import load_provider_config
 from automation.prompt_policies import compose_prompt
 
@@ -200,13 +202,13 @@ Independently decide whether the implementation satisfies the issue. Use only ve
 
 
 def _write_verifier_evidence(repo: Path, current: Path) -> None:
-    changed_files = semantic_verifier.collect_changed_files(repo)
-    diff = semantic_verifier.collect_current_diff(repo, changed_files)
+    changed_files = semantic_evidence.collect_changed_files(repo)
+    diff = semantic_evidence.collect_current_diff(repo, changed_files)
     evidence = {
         "schema_version": SCHEMA_VERSION,
         "changed_files": changed_files,
-        "deterministic_evidence": semantic_verifier.collect_deterministic_evidence(current),
-        "cross_file_regression_evidence": semantic_verifier.collect_cross_file_regression_evidence(
+        "deterministic_evidence": semantic_evidence.collect_deterministic_evidence(current),
+        "cross_file_regression_evidence": semantic_evidence.collect_cross_file_regression_evidence(
             repo, changed_files, diff
         ),
     }
