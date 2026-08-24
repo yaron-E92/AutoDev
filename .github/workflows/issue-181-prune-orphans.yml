@@ -1,0 +1,72 @@
+name: Issue 181 prune orphan artifacts
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: issue-181-prune-orphans-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out PR branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Remove orphan artifacts
+        run: python scripts/issue_181_prune_orphans.py
+
+      - name: Compile maintained Python
+        run: python -m compileall -q automation area_reader tests
+
+      - name: Run full unit suite
+        run: python -m unittest discover -s tests -v
+
+      - name: Reject references to deleted orphan paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          forbidden=(
+            'automation.create_issues_from_description'
+            'automation.ollama_cloud_preflight'
+            'docs/create-issues-from-description.md'
+            'create-issues-from-description.sh'
+            'create-issues-from-description.ps1'
+            'scripts/install-opencode.ps1'
+            'ollama-aliases/'
+            'tests/fixtures/eval/'
+            'linux/systemd/codex-automation@.service'
+            'linux/systemd/codex-automation@.timer'
+          )
+          for needle in "${forbidden[@]}"; do
+            if git grep -n -F "$needle" -- ':!scripts/issue_181_*' ':!.github/workflows/issue-181-*'; then
+              echo "Obsolete reference remains: $needle" >&2
+              exit 1
+            fi
+          done
+
+      - name: Commit verified orphan cleanup
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add -A automation docs tests linux windows ollama-aliases README.md scripts/install-opencode.ps1 2>/dev/null || true
+          git reset -- scripts/issue_181_prune_orphans.py || true
+          git diff --cached --check
+          if git diff --cached --quiet; then
+            echo 'No source changes to commit.'
+            exit 0
+          fi
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m 'refactor: remove orphan architecture artifacts'
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
