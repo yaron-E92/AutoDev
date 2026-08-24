@@ -20,6 +20,15 @@ PUBLIC_DOCS = (
     "examples/opencode/README.md",
 )
 LOCAL_LINK = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
+OPENCODE_AGENTS = (
+    "autodev-coordinator",
+    "autodev-reader",
+    "autodev-synthesizer",
+    "autodev-planner",
+    "autodev-implementer",
+    "autodev-fixer",
+    "autodev-verifier",
+)
 
 
 class DocumentationContractTests(unittest.TestCase):
@@ -54,17 +63,14 @@ class DocumentationContractTests(unittest.TestCase):
             opencode,
         )
 
-    def test_model_role_guide_lists_every_model_backed_role(self) -> None:
+    def test_model_docs_list_every_opencode_agent_mapping(self) -> None:
         roles = self._read("docs/model-roles.md")
-        for role in (
-            "autodev-reader",
-            "autodev-synthesizer",
-            "autodev-planner",
-            "autodev-implementer",
-            "autodev-fixer",
-            "autodev-verifier",
-        ):
-            self.assertIn(role, roles)
+        opencode = self._read("docs/opencode.md")
+        for agent in OPENCODE_AGENTS:
+            self.assertIn(agent, roles)
+            self.assertIn(agent, opencode)
+        self.assertIn("six model-backed **workflow roles**", roles)
+        self.assertIn("Python remains authoritative", roles)
         self.assertIn("autodev models", roles)
         self.assertNotIn("`automation.opencode_adapter_models`", roles)
 
