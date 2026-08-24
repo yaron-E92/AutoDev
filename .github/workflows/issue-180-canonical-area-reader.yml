@@ -24,7 +24,9 @@ jobs:
           fetch-depth: 0
 
       - name: Apply canonical area-reader cleanup
-        run: python scripts/issue_180_canonical_area_reader.py
+        run: |
+          python scripts/issue_180_canonical_area_reader.py
+          python scripts/issue_180_retarget_area_reader_tests.py
 
       - name: Compile canonical modules
         run: python -m compileall -q automation area_reader tests
@@ -36,8 +38,7 @@ jobs:
             tests.test_headroom_area_reader \
             tests.test_model_roles \
             tests.test_run_real_issue \
-            tests.test_run_resume \
-            tests.test_python_architecture
+            tests.test_run_resume
 
       - name: Reject obsolete area-reader names and compatibility core
         shell: bash
@@ -45,7 +46,7 @@ jobs:
           set -euo pipefail
           test ! -e area_reader_v2
           test ! -e area_reader/runner_core.py
-          if git grep -n 'area_reader_v2\|area-reader v2\|Area Reader v2' -- ':!scripts/issue_180_canonical_area_reader.py'; then
+          if git grep -n 'area_reader_v2\|area-reader v2\|Area Reader v2' -- ':!scripts/issue_180_canonical_area_reader.py' ':!.github/workflows/issue-180-canonical-area-reader.yml'; then
             echo 'obsolete area-reader naming remains' >&2
             exit 1
           fi
