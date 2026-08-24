@@ -70,9 +70,9 @@ class SemanticRepairDefaultTests(unittest.TestCase):
 
             with (
                 patch.dict(os.environ, {"MAX_SEMANTIC_REPAIR_ATTEMPTS": "2"}, clear=False),
-                patch("automation.workflow_stages._require_accepted_role"),
+                patch("automation.workflow_dispatch._require_accepted_role"),
                 patch(
-                    "automation.workflow_stages.prepare_semantic_repair_prompt",
+                    "automation.workflow_dispatch.prepare_semantic_repair_prompt",
                     side_effect=render_repair,
                 ),
             ):
@@ -122,7 +122,7 @@ class SemanticRepairDefaultTests(unittest.TestCase):
 
             with (
                 patch.dict(os.environ, {"MAX_SEMANTIC_REPAIR_ATTEMPTS": "2"}, clear=False),
-                patch("automation.workflow_stages._require_accepted_role"),
+                patch("automation.workflow_dispatch._require_accepted_role"),
             ):
                 _, blocked = workflow_stages.execute_stage(
                     "semantic", repo, autodev_root=REPO_ROOT, attempt=2

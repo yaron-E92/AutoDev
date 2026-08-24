@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 from typing import Callable
 
-from automation import workflow_stages
+from automation import workflow_stages, workflow_verification
 
 
 DEFAULT_PR_HEAD_SYNC_ATTEMPTS = 6
@@ -72,7 +72,7 @@ def ensure_pr_with_convergence(
 
 
 def install() -> None:
-    current = workflow_stages.ensure_pr
+    current = workflow_verification.ensure_pr
     if getattr(current, "_autodev_pr_head_sync", False):
         return
     original = current
@@ -94,3 +94,4 @@ def install() -> None:
 
     ensure_pr._autodev_pr_head_sync = True  # type: ignore[attr-defined]
     workflow_stages.ensure_pr = ensure_pr
+    workflow_verification.ensure_pr = ensure_pr

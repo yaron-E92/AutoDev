@@ -78,9 +78,9 @@ class WorkflowStageTests(unittest.TestCase):
                     },
                     clear=False,
                 ),
-                patch("automation.workflow_stages.gh_json", side_effect=[issue, base_ref, base_commit]),
-                patch("automation.workflow_stages.validate_prepared_worktree", return_value="base-sha"),
-                patch("automation.workflow_stages.gh") as gh,
+                patch("automation.workflow_preparation.gh_json", side_effect=[issue, base_ref, base_commit]),
+                patch("automation.workflow_preparation.validate_prepared_worktree", return_value="base-sha"),
+                patch("automation.workflow_preparation.gh") as gh,
             ):
                 current = workflow_stages.ensure_prepared_issue(repo, "65", autodev_root=REPO_ROOT)
 
@@ -119,10 +119,10 @@ class WorkflowStageTests(unittest.TestCase):
                     clear=False,
                 ),
                 patch(
-                    "automation.workflow_stages.gh_json",
+                    "automation.workflow_preparation.gh_json",
                     side_effect=[issue, {"object": {"sha": "base-sha"}}, {"tree": {}, "sha": "base-sha"}],
                 ),
-                patch("automation.workflow_stages.gh") as gh,
+                patch("automation.workflow_preparation.gh") as gh,
             ):
                 with self.assertRaises(workflow_stages.WorkflowStageError) as raised:
                     workflow_stages.ensure_prepared_issue(repo, "67", autodev_root=REPO_ROOT)
@@ -158,7 +158,7 @@ class WorkflowStageTests(unittest.TestCase):
             repo = Path(temp_dir)
             current = self._write_state(repo, IssueNumber=65)
 
-            with patch("automation.workflow_stages.gh", side_effect=AssertionError("unexpected mutation")):
+            with patch("automation.workflow_preparation.gh", side_effect=AssertionError("unexpected mutation")):
                 actual = workflow_stages.ensure_prepared_issue(repo, "65", autodev_root=REPO_ROOT)
 
             self.assertTrue(actual.samefile(current))
@@ -351,7 +351,7 @@ class WorkflowStageTests(unittest.TestCase):
 
             with (
                 patch.dict(os.environ, {"MAX_SEMANTIC_REPAIR_ATTEMPTS": "1"}, clear=False),
-                patch("automation.workflow_stages.prepare_semantic_repair_prompt", side_effect=fake_prepare),
+                patch("automation.workflow_dispatch.prepare_semantic_repair_prompt", side_effect=fake_prepare),
             ):
                 result.write_text(json.dumps(repair), encoding="utf-8")
                 _, repair_payload = workflow_stages.execute_stage("semantic", repo, autodev_root=REPO_ROOT, attempt=0)
@@ -421,7 +421,7 @@ class WorkflowStageTests(unittest.TestCase):
             state = workflow_stages.read_state(current)
             with (
                 patch(
-                    "automation.workflow_stages.gh_json",
+                    "automation.workflow_github.gh_json",
                     side_effect=[
                         {"tree": {"sha": "resolved-base-tree"}},
                         {"sha": "new-tree"},
@@ -429,7 +429,7 @@ class WorkflowStageTests(unittest.TestCase):
                     ],
                 ),
                 patch(
-                    "automation.workflow_stages.gh",
+                    "automation.workflow_github.gh",
                     side_effect=[
                         SimpleNamespace(returncode=1, stdout="", stderr="not found"),
                         SimpleNamespace(returncode=0, stdout="", stderr=""),
@@ -460,7 +460,7 @@ class WorkflowStageTests(unittest.TestCase):
                 BranchName="autodev/issue-67",
             )
             with patch(
-                "automation.workflow_stages.gh_json",
+                "automation.workflow_github.gh_json",
                 return_value={"sha": "base-sha", "tree": {}, "message": "malformed fixture"},
             ):
                 with self.assertRaises(workflow_stages.WorkflowStageError) as raised:
@@ -528,7 +528,7 @@ class WorkflowStageTests(unittest.TestCase):
 
             with (
                 patch(
-                    "automation.workflow_stages.gh_json",
+                    "automation.workflow_github.gh_json",
                     side_effect=[
                         {"sha": "blob-sha"},
                         {"sha": "tree-new"},
@@ -537,7 +537,7 @@ class WorkflowStageTests(unittest.TestCase):
                     ],
                 ),
                 patch(
-                    "automation.workflow_stages.gh",
+                    "automation.workflow_github.gh",
                     side_effect=[
                         SimpleNamespace(returncode=1, stdout="", stderr="not found"),
                         SimpleNamespace(returncode=0, stdout="", stderr=""),
@@ -594,9 +594,9 @@ class WorkflowStageTests(unittest.TestCase):
             (repo / "changed.txt").write_text("changed\n", encoding="utf-8")
 
             with (
-                patch("automation.workflow_stages.create_api_commit", return_value="commit-sha") as create_commit,
-                patch("automation.workflow_stages.ensure_pr"),
-                patch("automation.workflow_stages.wait_for_required_checks", return_value=ci_success),
+                patch("automation.workflow_verification.create_api_commit", return_value="commit-sha") as create_commit,
+                patch("automation.workflow_verification.ensure_pr"),
+                patch("automation.workflow_verification.wait_for_required_checks", return_value=ci_success),
             ):
                 passed = workflow_stages.pr_and_ci(
                     repo,
@@ -640,9 +640,9 @@ class WorkflowStageTests(unittest.TestCase):
                 workflow_stages.write_state(current_arg, state_arg)
 
             with (
-                patch("automation.workflow_stages.create_api_commit", return_value="commit-sha"),
-                patch("automation.workflow_stages.ensure_pr", side_effect=create_pr) as ensure_pr,
-                patch("automation.workflow_stages.wait_for_required_checks", return_value=ci_success),
+                patch("automation.workflow_verification.create_api_commit", return_value="commit-sha"),
+                patch("automation.workflow_verification.ensure_pr", side_effect=create_pr) as ensure_pr,
+                patch("automation.workflow_verification.wait_for_required_checks", return_value=ci_success),
             ):
                 passed = workflow_stages.pr_and_ci(
                     repo,
@@ -662,8 +662,8 @@ class WorkflowStageTests(unittest.TestCase):
             repo = Path(temp_dir)
             current = self._write_state(repo, RepoFullName="owner/repo", PrUrl="https://example.test/pr/1", PrNumber=1)
             with (
-                patch("automation.workflow_stages.gh", side_effect=AssertionError("pr create must not run")),
-                patch("automation.workflow_stages.gh_json", return_value={"number": 1, "headRefOid": "head"}) as view,
+                patch("automation.workflow_github.gh", side_effect=AssertionError("pr create must not run")),
+                patch("automation.workflow_github.gh_json", return_value={"number": 1, "headRefOid": "head"}) as view,
             ):
                 workflow_stages.ensure_pr(repo, current, workflow_stages.read_state(current))
             view.assert_called_once()
@@ -674,8 +674,8 @@ class WorkflowStageTests(unittest.TestCase):
             self._write_state(repo, RepoFullName="owner/repo", PrNumber=1, LastCommitSha="head")
             with (
                 patch.dict(os.environ, {"CI_CHECK_POLL_ATTEMPTS": "1", "CI_CHECK_POLL_SECONDS": "0"}, clear=False),
-                patch("automation.workflow_stages._pr_head_sha", return_value="head"),
-                patch("automation.workflow_stages._query_pr_checks", return_value=[]),
+                patch("automation.workflow_github._pr_head_sha", return_value="head"),
+                patch("automation.workflow_github._query_pr_checks", return_value=[]),
             ):
                 with self.assertRaises(workflow_stages.WorkflowStageError) as empty:
                     workflow_stages.wait_for_required_checks(repo, workflow_stages.read_state(repo / ".autodev-run" / "current"))
@@ -684,8 +684,8 @@ class WorkflowStageTests(unittest.TestCase):
             pending = [{"name": "build", "bucket": "pending", "state": "IN_PROGRESS"}]
             with (
                 patch.dict(os.environ, {"CI_CHECK_POLL_ATTEMPTS": "1", "CI_CHECK_POLL_SECONDS": "0"}, clear=False),
-                patch("automation.workflow_stages._pr_head_sha", return_value="head"),
-                patch("automation.workflow_stages._query_pr_checks", return_value=pending),
+                patch("automation.workflow_github._pr_head_sha", return_value="head"),
+                patch("automation.workflow_github._query_pr_checks", return_value=pending),
             ):
                 with self.assertRaises(workflow_stages.WorkflowStageError):
                     workflow_stages.wait_for_required_checks(repo, workflow_stages.read_state(repo / ".autodev-run" / "current"))
@@ -694,15 +694,15 @@ class WorkflowStageTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
             current = self._write_state(repo, RepoFullName="owner/repo", PrNumber=1, LastCommitSha="head-new")
-            with patch("automation.workflow_stages._pr_head_sha", return_value="head-old"):
+            with patch("automation.workflow_github._pr_head_sha", return_value="head-old"):
                 with self.assertRaises(workflow_stages.WorkflowStageError) as old:
                     workflow_stages.wait_for_required_checks(repo, workflow_stages.read_state(current))
             self.assertIn("head-old", str(old.exception))
 
             checks = [{"name": "build", "bucket": "pass", "state": "SUCCESS"}]
             with (
-                patch("automation.workflow_stages._pr_head_sha", return_value="head-new"),
-                patch("automation.workflow_stages._query_pr_checks", return_value=checks),
+                patch("automation.workflow_github._pr_head_sha", return_value="head-new"),
+                patch("automation.workflow_github._query_pr_checks", return_value=checks),
             ):
                 proof = workflow_stages.wait_for_required_checks(repo, workflow_stages.read_state(current))
             self.assertEqual(proof["state"], "terminal-success")
@@ -716,7 +716,7 @@ class WorkflowStageTests(unittest.TestCase):
             (current / "workspace-snapshot.json").write_text("{}\n", encoding="utf-8")
 
             with (
-                patch("automation.workflow_stages.pr_and_ci", return_value=False),
+                patch("automation.workflow_dispatch.pr_and_ci", return_value=False),
                 patch.dict(os.environ, {"MAX_REPAIR_ATTEMPTS": "1"}, clear=False),
             ):
                 _, repair = workflow_stages.execute_stage("pr-and-ci", repo, autodev_root=REPO_ROOT, attempt=0)
@@ -757,9 +757,9 @@ class WorkflowStageTests(unittest.TestCase):
             state["CiProof"] = self._ci_success("commit")
             workflow_stages.write_state(current, state)
             with (
-                patch("automation.workflow_stages._pr_head_sha", return_value="commit"),
+                patch("automation.workflow_github._pr_head_sha", return_value="commit"),
                 patch(
-                    "automation.workflow_stages.gh_json",
+                    "automation.workflow_github.gh_json",
                     return_value={"tree": {"sha": "tree"}, "parents": [{"sha": "parent"}]},
                 ),
             ):
@@ -775,7 +775,7 @@ class WorkflowStageTests(unittest.TestCase):
             )
             (current / "workspace-snapshot.json").write_text("{}\n", encoding="utf-8")
 
-            with patch("automation.workflow_stages.gh") as gh:
+            with patch("automation.workflow_github.gh") as gh:
                 _, ready = workflow_stages.execute_stage("ready", repo)
                 self.assertEqual(ready["state"], "PR_READY")
                 self.assertEqual(workflow_stages.read_state(current)["Status"], "ReadyForReview")
