@@ -10,9 +10,6 @@ TESTS = ROOT / "tests"
 def fix_role_runtime_tests() -> None:
     path = TESTS / "test_role_runtime.py"
     text = path.read_text(encoding="utf-8")
-    # The migration intentionally imports both flow and runtime modules. When the
-    # old facade occurred as a patch.object target, the initial textual import
-    # rewrite could leave the second import token in the call. Remove that token.
     text = text.replace(
         "role_coordinator_flow,\n    role_coordinator_runtime,\n            \"",
         "role_coordinator_flow,\n            \"",
@@ -32,7 +29,7 @@ def fix_diagnostics_tests() -> None:
         "opencode_role_runtime,\n    role_coordinator_contract,\n    role_coordinator_runtime,\n    role_runtime,\n                \"role_acceptance\"",
         "role_coordinator_runtime,\n                \"role_acceptance\"",
     )
-    helper = '''\n\nclass _DiagnosticRuntime:\n    name = "opencode"\n\n    def invoke(self, context, *, runner, which=None):\n        completed = runner(["opencode-test-role"], capture_output=True)\n        return role_runtime.RoleInvocationResult(\n            runtime=self.name,\n            role=context.role,\n            phase=context.phase,\n            returncode=int(getattr(completed, "returncode", 1)),\n            elapsed_ms=1,\n            stdout=str(getattr(completed, "stdout", "") or ""),\n            stderr=str(getattr(completed, "stderr", "") or ""),\n            termination="completed",\n            model="test/model",\n        )\n\n\ndef _diagnostic_snapshots():\n    return {\n        "reader": role_runtime.build_role_snapshot(\n            runtime="opencode",\n            role="reader",\n            configured={"model": "test/model"},\n        )\n    }\n'''
+    helper = '''\n\nclass _DiagnosticRuntime:\n    name = "opencode"\n\n    def invoke(self, context, *, runner, which=None):\n        completed = runner(["opencode-test-role"], capture_output=True)\n        returncode = int(getattr(completed, "returncode", 1))\n        return role_runtime.RoleInvocationResult(\n            runtime=self.name,\n            role=context.role,\n            phase=context.phase,\n            returncode=returncode,\n            elapsed_ms=1,\n            stdout=str(getattr(completed, "stdout", "") or ""),\n            stderr=str(getattr(completed, "stderr", "") or ""),\n            termination="completed" if returncode == 0 else "runtime-nonzero",\n            model="test/model",\n        )\n\n\ndef _diagnostic_snapshots():\n    return {\n        "reader": role_runtime.build_role_snapshot(\n            runtime="opencode",\n            role="reader",\n            configured={"model": "test/model"},\n        )\n    }\n'''
     marker = "\n\nclass RoleRuntimeDiagnosticsTests(unittest.TestCase):"
     if helper not in text:
         if marker not in text:
