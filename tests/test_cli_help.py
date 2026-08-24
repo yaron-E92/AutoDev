@@ -24,6 +24,13 @@ class CliHelpTests(unittest.TestCase):
         self.assertEqual(short[0], 0)
         self.assertIn("Common workflows:", short[1])
         self.assertIn("issue-to-pr ISSUE", short[1])
+        self.assertIn("Configuration:", short[1])
+        self.assertIn("Runtime precedence", short[1])
+        self.assertIn("AUTODEV_ROLE_RUNTIME", short[1])
+        self.assertIn("opencode.json / opencode.jsonc", short[1])
+        self.assertIn("Contributors:", short[1])
+        self.assertIn("source-development checks", short[1])
+        self.assertIn("python -m unittest discover -s tests -v", short[1])
         self.assertIn("Run 'autodev <command> --help'", short[1])
 
     def test_help_command_is_equivalent_to_nested_long_help(self):
