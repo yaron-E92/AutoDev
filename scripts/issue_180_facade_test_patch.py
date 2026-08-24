@@ -44,7 +44,8 @@ path.write_text(text, encoding="utf-8")
 # semantic_verifier used to provide the executable `python -m` boundary even
 # though semantic_cli owns the parser and command implementation. Move that
 # boundary to the owner before deleting the facade, then update both platform
-# wrappers and their regression assertion.
+# wrappers. Keep the semantic verifier unit-test imports untouched so the generic
+# migration can still route each facade symbol to its real responsibility owner.
 path = root / "automation" / "semantic_cli.py"
 text = path.read_text(encoding="utf-8")
 if 'if __name__ == "__main__":' not in text:
@@ -54,9 +55,20 @@ path.write_text(text, encoding="utf-8")
 for relative in (
     "linux/scripts/issue-to-pr-cycle.sh",
     "windows/scripts/issue-to-pr-cycle.ps1",
-    "tests/test_semantic_verifier.py",
 ):
     path = root / relative
     text = path.read_text(encoding="utf-8")
     text = text.replace("automation.semantic_verifier", "automation.semantic_cli")
     path.write_text(text, encoding="utf-8")
+
+path = root / "tests" / "test_semantic_verifier.py"
+text = path.read_text(encoding="utf-8")
+text = text.replace(
+    'self.assertIn("automation.semantic_verifier", windows)',
+    'self.assertIn("automation.semantic_cli", windows)',
+)
+text = text.replace(
+    'self.assertIn("automation.semantic_verifier", linux)',
+    'self.assertIn("automation.semantic_cli", linux)',
+)
+path.write_text(text, encoding="utf-8")
