@@ -21,8 +21,10 @@ For OpenCode runs, OpenCode configuration is authoritative. Configure role model
 {
   "agent": {
     "autodev-reader": { "model": "provider/reader-model" },
+    "autodev-synthesizer": { "model": "provider/synthesizer-model" },
     "autodev-planner": { "model": "provider/planner-model" },
     "autodev-implementer": { "model": "provider/implementer-model" },
+    "autodev-fixer": { "model": "provider/fixer-model" },
     "autodev-verifier": { "model": "provider/verifier-model" }
   }
 }
@@ -30,7 +32,11 @@ For OpenCode runs, OpenCode configuration is authoritative. Configure role model
 
 Roles may be mapped independently. Unspecified roles use normal OpenCode inheritance. AutoDev does not duplicate this mapping in `.autodev` and does not support ad-hoc per-run model override flags that would create a competing routing layer.
 
-`automation.opencode_adapter_models` resolves and validates the effective OpenCode mapping without exposing secrets.
+Inspect the effective safe role/model mapping with:
+
+```text
+autodev models
+```
 
 ## Prompt policy
 
@@ -53,16 +59,16 @@ A provider-profile JSON may still carry the current `prompt_policy` and Headroom
 
 Headroom is optional. AutoDev's context-optimization layer can use Headroom settings to describe/compress eligible evidence while preserving issue requirements, role policy, patch markers, and verifier output contracts. Direct OpenCode transport remains owned by OpenCode.
 
-See `docs/headroom.md` for the current configuration and diagnostic model.
+See [`headroom.md`](headroom.md) for the current configuration and diagnostic model.
 
 ## Privacy
 
 Runtime authorization occurs before model work. AutoDev records safe route/policy metadata but does not persist prompt content or credential values in privacy audit records. Persistent consent grants are explicit and scoped.
 
-See `docs/privacy.md`.
+See [`privacy.md`](privacy.md).
 
 ## Role boundaries
 
 Each role has a bounded preparation/acceptance contract under `.autodev-run/current`. The runtime must produce an accepted durable artifact before Python advances. A zero process exit without a valid accepted artifact is not success.
 
-See `docs/opencode.md`, `docs/role-runtimes.md`, and `docs/python-architecture.md`.
+See [`opencode.md`](opencode.md), [`role-runtimes.md`](role-runtimes.md), and [`python-architecture.md`](python-architecture.md).
