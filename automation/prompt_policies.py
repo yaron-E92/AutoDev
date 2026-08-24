@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from automation.model_providers import ProviderError
+from automation.provider_contract import ProviderError
 from automation.model_roles import MODEL_ROLES
 
 

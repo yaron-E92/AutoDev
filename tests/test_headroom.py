@@ -1,3 +1,5 @@
+
+from automation import headroom
 import json
 import tempfile
 import unittest
@@ -12,17 +14,11 @@ from automation.headroom import (
     prepare_prompt,
     resolve_headroom_values,
 )
-from automation.model_providers import (
-    HeadroomProvider,
-    ModelConfig,
-    ModelProvider,
-    ProviderError,
-    ProviderResponse,
-    create_provider,
-    model_config_from_values,
-    proxy_headers,
-    validate_safe_headers,
-)
+from automation.headroom import proxy_headers
+from automation.provider_contract import ModelConfig, ModelProvider, ProviderError, ProviderResponse
+from automation.provider_factory import create_provider, model_config_from_values
+from automation.provider_headroom import HeadroomProvider
+from automation.provider_requests import validate_safe_headers
 from automation.model_roles import invoke_model, resolve_role_configs
 from automation.semantic_prompts import build_semantic_prompt
 
@@ -154,7 +150,7 @@ class HeadroomTests(unittest.TestCase):
         provider = HeadroomProvider(direct, transport_failure, config, "https://upstream.invalid/v1")
         prepared = HeadroomPromptResult("effective", {"status": "compressed"})
 
-        with mock.patch("automation.model_providers.prepare_prompt", return_value=prepared):
+        with mock.patch("automation.headroom.prepare_prompt", return_value=prepared):
             result = provider.invoke("original", model="m", timeout_seconds=5)
 
         self.assertEqual(result.text, "direct")
@@ -170,7 +166,7 @@ class HeadroomTests(unittest.TestCase):
             )
         )
         provider = HeadroomProvider(direct, upstream_failure, config, "https://upstream.invalid/v1")
-        with mock.patch("automation.model_providers.prepare_prompt", return_value=prepared):
+        with mock.patch("automation.headroom.prepare_prompt", return_value=prepared):
             with self.assertRaises(ProviderError) as raised:
                 provider.invoke("original", model="m", timeout_seconds=5)
 

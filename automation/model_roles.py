@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from automation import headroom
+
 import json
 import time
 from datetime import datetime, timezone
@@ -7,15 +9,8 @@ from pathlib import Path
 
 from automation import privacy
 from automation.headroom import HeadroomError, resolve_headroom_values
-from automation.model_providers import (
-    ModelConfig,
-    ModelProvider,
-    ProviderError,
-    ProviderResponse,
-    model_config_from_values,
-    normalize_provider_name,
-    ollama_command_for_model,
-)
+from automation.provider_contract import ModelConfig, ModelProvider, ProviderError, ProviderResponse
+from automation.provider_factory import model_config_from_values, normalize_provider_name, ollama_command_for_model
 
 MODEL_ROLES = ("reader", "synthesizer", "planner", "implementer", "fixer", "verifier")
 ROLE_FALLBACKS = {

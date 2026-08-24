@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest import mock
 
 from automation import prompt_runner
-from automation.model_providers import ModelProvider, ProviderResponse
+from automation.provider_contract import ModelProvider, ProviderResponse
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -13,9 +13,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 def six_section_plan():
     return """1) Where to look
-- automation/model_providers.py
+- automation/provider_factory.py
 2) Files / areas likely to touch
-- automation/model_providers.py
+- automation/provider_factory.py
 3) Assumptions
 - Shared provider path.
 4) Plan

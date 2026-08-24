@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+from automation import queue_github
+
 import argparse
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 from typing import Callable, TextIO
-from automation import issue_queue, privacy, privacy_grants, queue_selection, scheduler, workflow_stages
+from automation import privacy, queue_selection, scheduler, workflow_stages
 
 from automation.scheduler_health_contract import (
     HealthSnapshot,
@@ -43,7 +45,7 @@ def _resolve_registration(
         path = Path(registration).expanduser().resolve()
     else:
         source = scheduler._repo_root(repo)  # type: ignore[attr-defined]
-        resolved = issue_queue.resolve_github_repo(source, explicit=github_repo, runner=runner)
+        resolved = queue_github.resolve_github_repo(source, explicit=github_repo, runner=runner)
         path = scheduler.registration_path(resolved, home=home)
     loaded = scheduler._load_registration(path)  # type: ignore[attr-defined]
     if loaded is None:

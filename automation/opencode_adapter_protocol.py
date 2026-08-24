@@ -4,7 +4,8 @@ import json
 import subprocess
 from pathlib import Path
 from automation import workflow_stages
-from automation.model_providers import ProviderError, load_provider_config
+from automation.provider_contract import ProviderError
+from automation.provider_factory import load_provider_config
 from automation.prompt_policies import compose_prompt, resolve_prompt_policies
 
 from automation.opencode_adapter_contract import (

@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from automation import headroom, workflow_stages
-from automation.model_providers import load_provider_config
+from automation.provider_factory import load_provider_config
 from automation.prompt_policies import compose_prompt
 
 

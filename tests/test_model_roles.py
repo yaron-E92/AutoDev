@@ -4,7 +4,8 @@ import unittest
 from pathlib import Path
 
 from area_reader import workflow as area_runner
-from automation.model_providers import ModelConfig, MockProvider, ProviderError
+from automation.provider_contract import ModelConfig, ProviderError
+from automation.provider_mock import MockProvider
 from automation.model_roles import ModelInvocationError, invoke_model, resolve_role_configs
 from automation.prompt_policies import (
     PROMPT_POLICY_VERSION,

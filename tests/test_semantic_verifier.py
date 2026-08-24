@@ -6,7 +6,8 @@ from pathlib import Path
 from unittest import mock
 
 from automation import prompt_runner
-from automation.model_providers import ModelConfig, MockProvider, ProviderError
+from automation.provider_contract import ModelConfig, ProviderError
+from automation.provider_mock import MockProvider
 from automation.prompt_policies import resolve_prompt_policies
 from automation.semantic_configuration import resolve_semantic_settings
 from automation.semantic_contract import SemanticSettings, SemanticVerifierError

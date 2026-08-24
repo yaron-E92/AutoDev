@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Callable
-from automation.model_providers import ModelConfig, ModelProvider, ProviderError, load_provider_config
+from automation.provider_contract import ModelConfig, ModelProvider, ProviderError
+from automation.provider_factory import load_provider_config
 from automation.model_roles import (
     ModelInvocationError,
     append_invocation_metadata,

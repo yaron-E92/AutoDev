@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from automation import queue_contract
+
 import json
 import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, TextIO
-from automation import issue_queue
 
 from automation.claim_contract import (
     ClaimError,
@@ -84,7 +85,7 @@ def _set_running_label(
         "--repo",
         github_repo,
         action,
-        issue_queue.RUNNING_LABEL,
+        queue_contract.RUNNING_LABEL,
     ]
     result = _run(repo, argv, runner=runner)
     return _returncode(result) == 0

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from automation import queue_contract, queue_policy
+
 import json
 import os
 import uuid
 from pathlib import Path
-from automation import issue_queue
 
 from automation.claim_contract import (
     ClaimError,
@@ -66,8 +67,8 @@ def load_claim_policy(repo: Path) -> ClaimPolicy:
     repo = repo.expanduser().resolve()
     # Keep the queue parser authoritative for core policy validity while allowing
     # the distributed-claim extension to remain backwards-compatible with v1 files.
-    issue_queue.load_policy(repo)
-    path = repo / issue_queue.QUEUE_CONFIG
+    queue_policy.load_policy(repo)
+    path = repo / queue_contract.QUEUE_CONFIG
     if not path.is_file():
         return ClaimPolicy()
     try:

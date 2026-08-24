@@ -17,22 +17,6 @@ from automation.queue_github import _json_result, _run_gh
 from automation.queue_workflow import inspect_queue, reconcile_queue
 
 
-class _IssueQueueCompat:
-    """Legacy monkeypatch surface backed by the new queue layers, not the facade module."""
-
-    DEFAULT_LIMIT = DEFAULT_LIMIT
-    QueueError = QueueError
-    QueueIssue = QueueIssue
-    QueueState = QueueState
-    _run_gh = staticmethod(_run_gh)
-    _json_result = staticmethod(_json_result)
-    inspect_queue = staticmethod(inspect_queue)
-    reconcile_queue = staticmethod(reconcile_queue)
-
-
-issue_queue = _IssueQueueCompat()
-
-
 ROADMAP_PATH = Path(".autodev") / "roadmap.yaml"
 ROADMAP_VERSION = 1
 DEFAULT_FALLBACK = "oldest"
@@ -328,7 +312,7 @@ def active_autodev_prs(
     *,
     runner: Callable[..., object] = subprocess.run,
 ) -> dict[int, str]:
-    result = issue_queue._run_gh(  # type: ignore[attr-defined]
+    result = _run_gh(  # type: ignore[attr-defined]
         repo,
         [
             "pr",
@@ -344,7 +328,7 @@ def active_autodev_prs(
         ],
         runner=runner,
     )
-    raw = issue_queue._json_result(result, context="gh pr list")  # type: ignore[attr-defined]
+    raw = _json_result(result, context="gh pr list")  # type: ignore[attr-defined]
     if not isinstance(raw, list):
         raise QueueError("gh pr list did not return an array")
     active: dict[int, str] = {}
@@ -419,9 +403,9 @@ def select_next(
     repo = repo.expanduser().resolve()
     excluded = frozenset(int(item) for item in excluded_issue_numbers if int(item) > 0)
     if dry_run:
-        states = issue_queue.inspect_queue(repo, github_repo, limit=limit, runner=runner)
+        states = inspect_queue(repo, github_repo, limit=limit, runner=runner)
     else:
-        states, _created = issue_queue.reconcile_queue(
+        states, _created = reconcile_queue(
             repo,
             github_repo,
             limit=limit,

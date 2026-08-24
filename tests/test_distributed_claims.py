@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import automation.claim_recovery as claim_recovery
+
+from automation import claim_contract, claim_identity, claim_lease, claim_recovery, claim_repository
+
 import json
 import subprocess
 import tempfile
@@ -9,7 +13,6 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-from automation import distributed_claims
 
 
 NOW = datetime(2026, 8, 23, 8, 0, tzinfo=timezone.utc)
@@ -59,20 +62,20 @@ class DistributedClaimGitTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             _origin, worker_a, worker_b = make_remote(Path(temp_dir))
             barrier = threading.Barrier(2)
-            results: list[distributed_claims.ClaimAttempt] = []
+            results: list[claim_contract.ClaimAttempt] = []
             errors: list[BaseException] = []
 
             def attempt(worker: Path, worker_id: str) -> None:
                 try:
                     barrier.wait(timeout=5)
                     results.append(
-                        distributed_claims.acquire_claim(
+                        claim_lease.acquire_claim(
                             worker,
                             "owner/repo",
                             42,
                             worker_id,
                             "origin/main",
-                            policy=distributed_claims.ClaimPolicy(
+                            policy=claim_contract.ClaimPolicy(
                                 max_concurrent_issues=2,
                                 lease_minutes=30,
                             ),
@@ -94,15 +97,15 @@ class DistributedClaimGitTests(unittest.TestCase):
             self.assertEqual(len(results), 2)
             self.assertEqual(sum(item.state == "ACQUIRED" for item in results), 1)
             self.assertEqual(sum(item.state == "BUSY" for item in results), 1)
-            winner = distributed_claims.get_claim(worker_a, 42)
+            winner = claim_repository.get_claim(worker_a, 42)
             self.assertIsNotNone(winner)
             self.assertIn(winner.worker_id, {"mega-beast", "laptop"})
 
     def test_losing_worker_can_claim_another_ready_issue(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             _origin, worker_a, worker_b = make_remote(Path(temp_dir))
-            policy = distributed_claims.ClaimPolicy(max_concurrent_issues=2, lease_minutes=30)
-            first = distributed_claims.acquire_claim(
+            policy = claim_contract.ClaimPolicy(max_concurrent_issues=2, lease_minutes=30)
+            first = claim_lease.acquire_claim(
                 worker_a,
                 "owner/repo",
                 1,
@@ -112,7 +115,7 @@ class DistributedClaimGitTests(unittest.TestCase):
                 now=NOW,
                 evidence_checker=lambda *_args: (),
             )
-            lost = distributed_claims.acquire_claim(
+            lost = claim_lease.acquire_claim(
                 worker_b,
                 "owner/repo",
                 1,
@@ -122,7 +125,7 @@ class DistributedClaimGitTests(unittest.TestCase):
                 now=NOW,
                 evidence_checker=lambda *_args: (),
             )
-            second = distributed_claims.acquire_claim(
+            second = claim_lease.acquire_claim(
                 worker_b,
                 "owner/repo",
                 2,
@@ -140,8 +143,8 @@ class DistributedClaimGitTests(unittest.TestCase):
     def test_same_worker_resume_renews_and_reuses_claim_identity(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             _origin, worker_a, _worker_b = make_remote(Path(temp_dir))
-            policy = distributed_claims.ClaimPolicy(lease_minutes=30)
-            first = distributed_claims.acquire_claim(
+            policy = claim_contract.ClaimPolicy(lease_minutes=30)
+            first = claim_lease.acquire_claim(
                 worker_a,
                 "owner/repo",
                 7,
@@ -151,7 +154,7 @@ class DistributedClaimGitTests(unittest.TestCase):
                 now=NOW,
                 evidence_checker=lambda *_args: (),
             )
-            second = distributed_claims.acquire_claim(
+            second = claim_lease.acquire_claim(
                 worker_a,
                 "owner/repo",
                 7,
@@ -171,8 +174,8 @@ class DistributedClaimGitTests(unittest.TestCase):
     def test_heartbeat_renewal_prevents_stale_takeover(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             _origin, worker_a, worker_b = make_remote(Path(temp_dir))
-            policy = distributed_claims.ClaimPolicy(lease_minutes=15)
-            first = distributed_claims.acquire_claim(
+            policy = claim_contract.ClaimPolicy(lease_minutes=15)
+            first = claim_lease.acquire_claim(
                 worker_a,
                 "owner/repo",
                 8,
@@ -182,12 +185,12 @@ class DistributedClaimGitTests(unittest.TestCase):
                 now=NOW,
                 evidence_checker=lambda *_args: (),
             )
-            renewed = distributed_claims.renew_claim(
+            renewed = claim_lease.renew_claim(
                 worker_a,
                 first.claim,
                 now=NOW + timedelta(minutes=10),
             )
-            attempted = distributed_claims.acquire_claim(
+            attempted = claim_lease.acquire_claim(
                 worker_b,
                 "owner/repo",
                 8,
@@ -205,8 +208,8 @@ class DistributedClaimGitTests(unittest.TestCase):
     def test_stale_claim_can_be_recovered_with_exact_ref_lease(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             _origin, worker_a, worker_b = make_remote(Path(temp_dir))
-            policy = distributed_claims.ClaimPolicy(lease_minutes=15)
-            first = distributed_claims.acquire_claim(
+            policy = claim_contract.ClaimPolicy(lease_minutes=15)
+            first = claim_lease.acquire_claim(
                 worker_a,
                 "owner/repo",
                 9,
@@ -216,7 +219,7 @@ class DistributedClaimGitTests(unittest.TestCase):
                 now=NOW,
                 evidence_checker=lambda *_args: (),
             )
-            recovered = distributed_claims.acquire_claim(
+            recovered = claim_lease.acquire_claim(
                 worker_b,
                 "owner/repo",
                 9,
@@ -235,8 +238,8 @@ class DistributedClaimGitTests(unittest.TestCase):
     def test_stale_recovery_refuses_existing_branch_or_pr_evidence(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             _origin, worker_a, worker_b = make_remote(Path(temp_dir))
-            policy = distributed_claims.ClaimPolicy(lease_minutes=15)
-            first = distributed_claims.acquire_claim(
+            policy = claim_contract.ClaimPolicy(lease_minutes=15)
+            first = claim_lease.acquire_claim(
                 worker_a,
                 "owner/repo",
                 10,
@@ -246,7 +249,7 @@ class DistributedClaimGitTests(unittest.TestCase):
                 now=NOW,
                 evidence_checker=lambda *_args: (),
             )
-            protected = distributed_claims.acquire_claim(
+            protected = claim_lease.acquire_claim(
                 worker_b,
                 "owner/repo",
                 10,
@@ -259,14 +262,14 @@ class DistributedClaimGitTests(unittest.TestCase):
 
             self.assertEqual(first.state, "ACQUIRED")
             self.assertEqual(protected.state, "STALE_PROTECTED")
-            current = distributed_claims.get_claim(worker_b, 10)
+            current = claim_repository.get_claim(worker_b, 10)
             self.assertEqual(current.claim_id, first.claim.claim_id)
 
     def test_release_is_compare_and_swap_and_does_not_delete_another_claim(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             _origin, worker_a, worker_b = make_remote(Path(temp_dir))
-            policy = distributed_claims.ClaimPolicy(lease_minutes=15)
-            first = distributed_claims.acquire_claim(
+            policy = claim_contract.ClaimPolicy(lease_minutes=15)
+            first = claim_lease.acquire_claim(
                 worker_a,
                 "owner/repo",
                 11,
@@ -276,7 +279,7 @@ class DistributedClaimGitTests(unittest.TestCase):
                 now=NOW,
                 evidence_checker=lambda *_args: (),
             )
-            second = distributed_claims.acquire_claim(
+            second = claim_lease.acquire_claim(
                 worker_b,
                 "owner/repo",
                 11,
@@ -288,22 +291,22 @@ class DistributedClaimGitTests(unittest.TestCase):
             )
 
             self.assertEqual(second.state, "ACQUIRED")
-            self.assertFalse(distributed_claims.release_claim(worker_a, first.claim))
-            self.assertEqual(distributed_claims.get_claim(worker_a, 11).worker_id, "worker-b")
-            self.assertTrue(distributed_claims.release_claim(worker_b, second.claim))
-            self.assertIsNone(distributed_claims.get_claim(worker_a, 11))
+            self.assertFalse(claim_lease.release_claim(worker_a, first.claim))
+            self.assertEqual(claim_repository.get_claim(worker_a, 11).worker_id, "worker-b")
+            self.assertTrue(claim_lease.release_claim(worker_b, second.claim))
+            self.assertIsNone(claim_repository.get_claim(worker_a, 11))
 
     def test_claim_metadata_is_secret_free_and_contains_required_identity(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             _origin, worker_a, _worker_b = make_remote(root)
-            attempt = distributed_claims.acquire_claim(
+            attempt = claim_lease.acquire_claim(
                 worker_a,
                 "owner/repo",
                 12,
                 "mega-beast",
                 "origin/main",
-                policy=distributed_claims.ClaimPolicy(lease_minutes=30),
+                policy=claim_contract.ClaimPolicy(lease_minutes=30),
                 now=NOW,
                 evidence_checker=lambda *_args: (),
             )
@@ -325,9 +328,9 @@ class DistributedClaimPolicyTests(unittest.TestCase):
     def test_worker_identity_is_generated_stably_without_hostname_or_home_path(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             home = Path(temp_dir)
-            first = distributed_claims.worker_identity(home=home)
-            second = distributed_claims.worker_identity(home=home)
-            text = distributed_claims.worker_state_path(home=home).read_text(encoding="utf-8")
+            first = claim_identity.worker_identity(home=home)
+            second = claim_identity.worker_identity(home=home)
+            text = claim_identity.worker_state_path(home=home).read_text(encoding="utf-8")
 
             self.assertEqual(first, second)
             self.assertRegex(first.worker_id, r"^worker-[0-9a-f]{12}$")
@@ -335,7 +338,7 @@ class DistributedClaimPolicyTests(unittest.TestCase):
 
     def test_worker_identity_can_be_configured_explicitly(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            identity = distributed_claims.set_worker_identity(
+            identity = claim_identity.set_worker_identity(
                 "mega-beast",
                 home=Path(temp_dir),
             )
@@ -357,7 +360,7 @@ class DistributedClaimPolicyTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            policy = distributed_claims.load_claim_policy(repo)
+            policy = claim_identity.load_claim_policy(repo)
 
             self.assertEqual(policy.max_concurrent_issues, 3)
             self.assertEqual(policy.lease_minutes, 45)
@@ -366,12 +369,12 @@ class DistributedClaimPolicyTests(unittest.TestCase):
                 json.dumps({"version": 1, "autonomous_execution": True}),
                 encoding="utf-8",
             )
-            legacy = distributed_claims.load_claim_policy(repo)
+            legacy = claim_identity.load_claim_policy(repo)
             self.assertEqual(legacy.max_concurrent_issues, 1)
             self.assertEqual(legacy.lease_minutes, 120)
 
     def test_stale_reconcile_restores_running_label_when_claim_cas_loses(self):
-        stale = distributed_claims.Claim(
+        stale = claim_contract.Claim(
             repository="owner/repo",
             issue_number=13,
             worker_id="worker-a",
@@ -380,20 +383,16 @@ class DistributedClaimPolicyTests(unittest.TestCase):
             acquired_at="2026-08-23T07:00:00Z",
             heartbeat_at="2026-08-23T07:00:00Z",
             lease_seconds=900,
-            ref=distributed_claims.claim_ref(13),
+            ref=claim_contract.claim_ref(13),
             sha="a" * 40,
         )
         label_calls: list[bool] = []
-        with patch.object(distributed_claims, "list_claims", return_value=(stale,)), patch.object(
-            distributed_claims,
-            "_delete_with_lease",
+        with patch.object(claim_recovery, "list_claims", return_value=(stale,)), patch.object(claim_repository, "_delete_with_lease",
             return_value=False,
-        ), patch.object(
-            distributed_claims,
-            "_set_running_label",
+        ), patch.object(claim_recovery, "_set_running_label",
             side_effect=lambda *_args, enabled, **_kwargs: label_calls.append(enabled) or True,
         ):
-            result = distributed_claims.reconcile_stale_claims(
+            result = claim_recovery.reconcile_stale_claims(
                 Path("."),
                 "owner/repo",
                 now=NOW,

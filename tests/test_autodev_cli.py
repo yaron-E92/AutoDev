@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from automation import claim_cli, scheduler_health_cli
+
 import io
 import os
 import unittest
@@ -43,14 +45,14 @@ class AutoDevCliTests(unittest.TestCase):
         run_cli.assert_called_once_with(["doctor", "--json"])
 
     def test_scheduler_routes_through_health_wrapper(self):
-        with patch("automation.scheduler_health.run_cli", return_value=6) as run_cli:
+        with patch("automation.scheduler_health_cli.run_cli", return_value=6) as run_cli:
             code = autodev_cli.run(["scheduler", "status", "--json"])
 
         self.assertEqual(code, 6)
         run_cli.assert_called_once_with(["status", "--json"])
 
     def test_scheduler_worker_identity_routes_to_claim_core(self):
-        with patch("automation.distributed_claims.run_worker_cli", return_value=4) as run_cli:
+        with patch("automation.claim_cli.run_worker_cli", return_value=4) as run_cli:
             code = autodev_cli.run(["scheduler", "worker-id", "--set", "mega-beast"])
 
         self.assertEqual(code, 4)

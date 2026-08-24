@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from automation import queue_contract
+
 import argparse
 import json
 import shutil
@@ -7,7 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Callable, TextIO
-from automation import issue_queue, privacy, privacy_grants, queue_selection, scheduler, workflow_stages
+from automation import privacy, queue_selection, scheduler, workflow_stages
 
 from automation.scheduler_health_contract import (
     NOTIFICATION_NATIVE,
@@ -61,7 +63,7 @@ def run_status(
         snapshot = current_health(registration_file, registration, runner=runner, which=which)
         policy = load_notification_policy(registration_file)
         observe_health(registration_file, snapshot, policy=NotificationPolicy())
-    except (SchedulerHealthError, scheduler.SchedulerError, issue_queue.QueueError, privacy.PrivacyError) as exc:
+    except (SchedulerHealthError, scheduler.SchedulerError, queue_contract.QueueError, privacy.PrivacyError) as exc:
         print(str(exc), file=stderr)
         return 2
     if args.json:
@@ -106,7 +108,7 @@ def run_health(
         )
         snapshot = current_health(registration_file, registration, runner=runner, which=which)
         observe_health(registration_file, snapshot, policy=NotificationPolicy())
-    except (SchedulerHealthError, scheduler.SchedulerError, issue_queue.QueueError, privacy.PrivacyError) as exc:
+    except (SchedulerHealthError, scheduler.SchedulerError, queue_contract.QueueError, privacy.PrivacyError) as exc:
         print(str(exc), file=stderr)
         return 2
     print(json.dumps(snapshot.to_json(), sort_keys=True) if args.json else render_health(snapshot), file=stdout)
@@ -150,7 +152,7 @@ def run_notifications(
             save_notification_policy(registration_file, policy)
         else:
             policy = load_notification_policy(registration_file)
-    except (SchedulerHealthError, scheduler.SchedulerError, issue_queue.QueueError) as exc:
+    except (SchedulerHealthError, scheduler.SchedulerError, queue_contract.QueueError) as exc:
         print(str(exc), file=stderr)
         return 2
     if args.json:

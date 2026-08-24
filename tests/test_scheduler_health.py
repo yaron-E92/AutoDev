@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import automation.queue_workflow as queue_workflow
+import automation.queue_github as queue_github
+
+from automation import queue_contract, scheduler_health_contract, scheduler_health_lifecycle, scheduler_health_notifications, scheduler_health_probes, scheduler_health_storage
+
 import io
 import json
 import tempfile
@@ -8,14 +13,14 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-from automation import issue_queue, queue_selection, scheduler, scheduler_health
+from automation import queue_selection, scheduler
 
 
 NOW = datetime(2026, 8, 23, 7, 30, tzinfo=timezone.utc)
 
 
-def qissue(number: int, *, labels: tuple[str, ...] = (), state: str = "open") -> issue_queue.QueueIssue:
-    return issue_queue.QueueIssue(
+def qissue(number: int, *, labels: tuple[str, ...] = (), state: str = "open") -> queue_contract.QueueIssue:
+    return queue_contract.QueueIssue(
         number=number,
         title=f"Issue {number}",
         url=f"https://github.test/owner/repo/issues/{number}",
@@ -25,21 +30,21 @@ def qissue(number: int, *, labels: tuple[str, ...] = (), state: str = "open") ->
     )
 
 
-def qstate(number: int, reason: str, *, blockers: tuple[int, ...] = ()) -> issue_queue.QueueState:
-    labels = [issue_queue.MANAGED_LABEL]
+def qstate(number: int, reason: str, *, blockers: tuple[int, ...] = ()) -> queue_contract.QueueState:
+    labels = [queue_contract.MANAGED_LABEL]
     if reason == "ready":
-        labels.append(issue_queue.READY_LABEL)
+        labels.append(queue_contract.READY_LABEL)
     if reason == "blocked":
-        labels.append(issue_queue.BLOCKED_LABEL)
+        labels.append(queue_contract.BLOCKED_LABEL)
     if reason == "attention":
-        labels.append(issue_queue.ATTENTION_LABEL)
+        labels.append(queue_contract.ATTENTION_LABEL)
     if reason == "running":
-        labels.append(issue_queue.RUNNING_LABEL)
-    return issue_queue.QueueState(
+        labels.append(queue_contract.RUNNING_LABEL)
+    return queue_contract.QueueState(
         issue=qissue(number, labels=tuple(labels)),
         reason=reason,
         open_blockers=tuple(
-            issue_queue.Blocker(
+            queue_contract.Blocker(
                 id=1000 + item,
                 number=item,
                 title=f"Blocker {item}",
@@ -52,7 +57,7 @@ def qstate(number: int, reason: str, *, blockers: tuple[int, ...] = ()) -> issue
 
 
 def compute(
-    states: list[issue_queue.QueueState],
+    states: list[queue_contract.QueueState],
     *,
     existing: queue_selection.ExistingRun | None = None,
     privacy_blocked: bool = False,
@@ -61,23 +66,21 @@ def compute(
     raw_issue: int = 0,
     force_error: bool = False,
     last_outcome: str = "",
-) -> scheduler_health.HealthSnapshot:
+) -> scheduler_health_contract.HealthSnapshot:
     all_issues = [state.issue for state in states]
     all_issues.append(qissue(99, labels=()))
-    with patch.object(scheduler_health.issue_queue, "inspect_queue", return_value=states), patch.object(
-        scheduler_health.issue_queue,
+    with patch.object(queue_workflow, "inspect_queue", return_value=states), patch.object(
+        queue_github,
         "list_issues",
         return_value=all_issues,
     ), patch.object(
-        scheduler_health.queue_selection,
+        queue_selection,
         "inspect_existing_run",
         return_value=existing or queue_selection.ExistingRun("NONE"),
-    ), patch.object(
-        scheduler_health,
-        "_raw_run_status",
+    ), patch.object(scheduler_health_probes, "_raw_run_status",
         return_value=(raw_status, raw_issue),
     ):
-        return scheduler_health.compute_health(
+        return scheduler_health_probes.compute_health(
             Path("."),
             "owner/repo",
             now=NOW,
@@ -117,7 +120,7 @@ class SchedulerHealthComputationTests(unittest.TestCase):
 
         self.assertEqual(snapshot.state, "ALL_MANAGED_WORK_BLOCKED")
         self.assertEqual(snapshot.blocker_counts, {"50": 3, "60": 1})
-        self.assertIn("Top blocker #50 blocks 3", scheduler_health.render_health(snapshot))
+        self.assertIn("Top blocker #50 blocks 3", scheduler_health_probes.render_health(snapshot))
 
     def test_resumable_run_is_distinct_from_terminal_failure(self):
         resumable = compute(
@@ -159,7 +162,7 @@ class SchedulerHealthComputationTests(unittest.TestCase):
         self.assertEqual(snapshot.attention_kind, "privacy-consent")
         self.assertEqual(snapshot.issue_number, 57)
         self.assertEqual(snapshot.privacy_grants["expired"], 1)
-        self.assertIn("privacy consent", scheduler_health.render_health(snapshot))
+        self.assertIn("privacy consent", scheduler_health_probes.render_health(snapshot))
         coordinator.assert_not_called()
 
     def test_queue_attention_beats_plain_no_ready_work(self):
@@ -174,32 +177,32 @@ class SchedulerHealthNotificationTests(unittest.TestCase):
     def test_transition_into_empty_queue_notifies_once_then_stays_quiet(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             registration = registration_file(Path(temp_dir))
-            policy = scheduler_health.NotificationPolicy(
-                backend=scheduler_health.NOTIFICATION_NATIVE
+            policy = scheduler_health_contract.NotificationPolicy(
+                backend=scheduler_health_contract.NOTIFICATION_NATIVE
             )
             calls: list[str] = []
 
-            def notifier(_title: str, message: str) -> scheduler_health.NotificationResult:
+            def notifier(_title: str, message: str) -> scheduler_health_contract.NotificationResult:
                 calls.append(message)
-                return scheduler_health.NotificationResult(True, True, "native")
+                return scheduler_health_contract.NotificationResult(True, True, "native")
 
             ready = compute([qstate(1, "ready")])
             empty = compute([])
-            scheduler_health.observe_health(
+            scheduler_health_notifications.observe_health(
                 registration,
                 ready,
                 policy=policy,
                 notifier=notifier,
                 now=NOW,
             )
-            scheduler_health.observe_health(
+            scheduler_health_notifications.observe_health(
                 registration,
                 empty,
                 policy=policy,
                 notifier=notifier,
                 now=NOW + timedelta(minutes=15),
             )
-            scheduler_health.observe_health(
+            scheduler_health_notifications.observe_health(
                 registration,
                 empty,
                 policy=policy,
@@ -213,25 +216,25 @@ class SchedulerHealthNotificationTests(unittest.TestCase):
     def test_transition_back_to_ready_updates_fingerprint_and_notifies(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             registration = registration_file(Path(temp_dir))
-            policy = scheduler_health.NotificationPolicy(
-                backend=scheduler_health.NOTIFICATION_NATIVE
+            policy = scheduler_health_contract.NotificationPolicy(
+                backend=scheduler_health_contract.NOTIFICATION_NATIVE
             )
             calls: list[str] = []
 
-            def notifier(_title: str, message: str) -> scheduler_health.NotificationResult:
+            def notifier(_title: str, message: str) -> scheduler_health_contract.NotificationResult:
                 calls.append(message)
-                return scheduler_health.NotificationResult(True, True, "native")
+                return scheduler_health_contract.NotificationResult(True, True, "native")
 
             empty = compute([])
             ready = compute([qstate(1, "ready")])
-            scheduler_health.observe_health(
+            scheduler_health_notifications.observe_health(
                 registration,
                 empty,
                 policy=policy,
                 notifier=notifier,
                 now=NOW,
             )
-            scheduler_health.observe_health(
+            scheduler_health_notifications.observe_health(
                 registration,
                 ready,
                 policy=policy,
@@ -246,32 +249,32 @@ class SchedulerHealthNotificationTests(unittest.TestCase):
     def test_attention_cooldown_can_renotify_without_tick_spam(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             registration = registration_file(Path(temp_dir))
-            policy = scheduler_health.NotificationPolicy(
-                backend=scheduler_health.NOTIFICATION_NATIVE,
+            policy = scheduler_health_contract.NotificationPolicy(
+                backend=scheduler_health_contract.NOTIFICATION_NATIVE,
                 reminder_hours=24,
             )
             calls: list[str] = []
 
-            def notifier(_title: str, message: str) -> scheduler_health.NotificationResult:
+            def notifier(_title: str, message: str) -> scheduler_health_contract.NotificationResult:
                 calls.append(message)
-                return scheduler_health.NotificationResult(True, True, "native")
+                return scheduler_health_contract.NotificationResult(True, True, "native")
 
             attention = compute([qstate(176, "attention")])
-            scheduler_health.observe_health(
+            scheduler_health_notifications.observe_health(
                 registration,
                 attention,
                 policy=policy,
                 notifier=notifier,
                 now=NOW,
             )
-            scheduler_health.observe_health(
+            scheduler_health_notifications.observe_health(
                 registration,
                 attention,
                 policy=policy,
                 notifier=notifier,
                 now=NOW + timedelta(hours=1),
             )
-            scheduler_health.observe_health(
+            scheduler_health_notifications.observe_health(
                 registration,
                 attention,
                 policy=policy,
@@ -284,15 +287,15 @@ class SchedulerHealthNotificationTests(unittest.TestCase):
     def test_notification_failure_does_not_corrupt_health_or_repeat_each_tick(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             registration = registration_file(Path(temp_dir))
-            policy = scheduler_health.NotificationPolicy(
-                backend=scheduler_health.NOTIFICATION_NATIVE
+            policy = scheduler_health_contract.NotificationPolicy(
+                backend=scheduler_health_contract.NOTIFICATION_NATIVE
             )
             calls = 0
 
-            def notifier(_title: str, _message: str) -> scheduler_health.NotificationResult:
+            def notifier(_title: str, _message: str) -> scheduler_health_contract.NotificationResult:
                 nonlocal calls
                 calls += 1
-                return scheduler_health.NotificationResult(
+                return scheduler_health_contract.NotificationResult(
                     True,
                     False,
                     "native",
@@ -300,14 +303,14 @@ class SchedulerHealthNotificationTests(unittest.TestCase):
                 )
 
             attention = compute([qstate(176, "attention")])
-            scheduler_health.observe_health(
+            scheduler_health_notifications.observe_health(
                 registration,
                 attention,
                 policy=policy,
                 notifier=notifier,
                 now=NOW,
             )
-            scheduler_health.observe_health(
+            scheduler_health_notifications.observe_health(
                 registration,
                 attention,
                 policy=policy,
@@ -315,7 +318,7 @@ class SchedulerHealthNotificationTests(unittest.TestCase):
                 now=NOW + timedelta(minutes=15),
             )
 
-            record = json.loads(scheduler_health.health_path(registration).read_text(encoding="utf-8"))
+            record = json.loads(scheduler_health_storage.health_path(registration).read_text(encoding="utf-8"))
             self.assertEqual(calls, 1)
             self.assertEqual(record["current"]["state"], "ATTENTION_REQUIRED")
             self.assertFalse(record["last_notification"]["delivered"])
@@ -326,7 +329,7 @@ class SchedulerHealthNotificationTests(unittest.TestCase):
             privacy_blocked=True,
             grants={"active": 0, "expired": 1, "revoked": 0},
         )
-        title, message = scheduler_health._notification_message(snapshot)
+        title, message = scheduler_health_notifications._notification_message(snapshot)
         combined = (title + " " + message).casefold()
 
         self.assertIn("owner/repo", combined)
@@ -339,16 +342,14 @@ class SchedulerHealthCliTests(unittest.TestCase):
     def test_run_tick_preserves_scheduler_exit_code_when_health_reporting_fails(self):
         output = io.StringIO()
         error = io.StringIO()
-        with patch.object(
-            scheduler_health,
-            "_resolve_registration",
-            side_effect=scheduler_health.SchedulerHealthError("missing"),
+        with patch.object(scheduler_health_lifecycle, "_resolve_registration",
+            side_effect=scheduler_health_contract.SchedulerHealthError("missing"),
         ), patch.object(
-            scheduler_health.scheduler,
+            scheduler,
             "run_cli",
             return_value=23,
         ) as run_scheduler:
-            code = scheduler_health.run_tick(
+            code = scheduler_health_lifecycle.run_tick(
                 ["run-once", "--registration", "missing.json"],
                 stdout=output,
                 stderr=error,
@@ -361,16 +362,16 @@ class SchedulerHealthCliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             registration = registration_file(Path(temp_dir))
             self.assertEqual(
-                scheduler_health.load_notification_policy(registration).backend,
-                scheduler_health.NOTIFICATION_OFF,
+                scheduler_health_storage.load_notification_policy(registration).backend,
+                scheduler_health_contract.NOTIFICATION_OFF,
             )
 
-            policy = scheduler_health.NotificationPolicy(
-                backend=scheduler_health.NOTIFICATION_NATIVE,
+            policy = scheduler_health_contract.NotificationPolicy(
+                backend=scheduler_health_contract.NOTIFICATION_NATIVE,
                 reminder_hours=48,
             )
-            scheduler_health.save_notification_policy(registration, policy)
-            text = scheduler_health.notification_path(registration).read_text(encoding="utf-8")
+            scheduler_health_storage.save_notification_policy(registration, policy)
+            text = scheduler_health_storage.notification_path(registration).read_text(encoding="utf-8")
 
             self.assertIn('"backend": "native"', text)
             self.assertIn('"reminder_hours": 48', text)

@@ -8,7 +8,8 @@ from pathlib import Path
 
 from area_reader import pipeline as _pipeline
 from area_reader.cli import parse_args as _base_parse_args
-from automation.model_providers import ModelConfig, create_provider, load_provider_config, ollama_command_for_model
+from automation.provider_contract import ModelConfig
+from automation.provider_factory import create_provider, load_provider_config, ollama_command_for_model
 from automation.model_roles import (
     ModelInvocationError,
     append_invocation_metadata,

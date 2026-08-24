@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from automation import queue_contract
+
 import io
 import json
 import os
@@ -10,7 +12,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from automation import issue_queue, repo_setup
+from automation import repo_setup
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -93,7 +95,7 @@ class RepoSetupTests(unittest.TestCase):
             self.assertEqual(len(fake.mutations), mutation_count)
             self.assertEqual(fake.labels["unrelated"], ("ffffff", "keep me"))
             self.assertTrue(
-                all(name in fake.labels for name in issue_queue.LABEL_SPECS)
+                all(name in fake.labels for name in queue_contract.LABEL_SPECS)
             )
             self.assertFalse(any(call[1:3] == ["issue", "edit"] for call in fake.calls))
 

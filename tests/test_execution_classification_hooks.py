@@ -58,7 +58,7 @@ class ExecutionClassificationHookTests(unittest.TestCase):
                 return SimpleNamespace(returncode=0, stdout="", stderr="")
 
             with patch.object(
-                execution_classification_hooks.issue_queue,
+                execution_classification_hooks.queue_github,
                 "ensure_queue_labels",
                 return_value=(),
             ), patch.object(workflow_stages, "gh", side_effect=fake_gh):
@@ -109,7 +109,7 @@ class ExecutionClassificationHookTests(unittest.TestCase):
                 return SimpleNamespace(returncode=0, stdout="", stderr="")
 
             with patch.object(workflow_stages, "gh_json", return_value=issue), patch.object(
-                execution_classification_evidence.issue_queue,
+                execution_classification_evidence.queue_github,
                 "ensure_queue_labels",
                 return_value=(),
             ), patch.object(workflow_stages, "gh", side_effect=fake_gh):

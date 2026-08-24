@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from automation import privacy_grant_cli, privacy_grant_commands, privacy_grant_contract, privacy_grant_hooks, privacy_grant_matching
+
 import json
 import os
 import tempfile
@@ -9,7 +11,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from automation import privacy, privacy_consent, privacy_grants, run_manifest, workflow_stages
+from automation import privacy, privacy_consent, run_manifest, workflow_stages
 
 
 class PrivacyGrantTests(unittest.TestCase):
@@ -62,8 +64,8 @@ class PrivacyGrantTests(unittest.TestCase):
         return mock.patch.dict(
             os.environ,
             {
-                privacy_grants.STORE_ENV: str(Path(root) / "privacy-grants.json"),
-                privacy_grants.REPOSITORY_ID_ENV: "github:owner/repo",
+                privacy_grant_contract.STORE_ENV: str(Path(root) / "privacy-grants.json"),
+                privacy_grant_contract.REPOSITORY_ID_ENV: "github:owner/repo",
             },
             clear=False,
         )
@@ -87,7 +89,7 @@ class PrivacyGrantTests(unittest.TestCase):
                 decision = self._decision()
                 granted_at = datetime(2026, 8, 18, 12, 0, tzinfo=timezone.utc)
                 with self._environment(temp_dir):
-                    privacy_grants.create_grant(
+                    privacy_grant_commands.create_grant(
                         repo,
                         policy,
                         [decision],
@@ -96,7 +98,7 @@ class PrivacyGrantTests(unittest.TestCase):
                     )
                     self._change_run_id(repo, "different-run")
                     self.assertIsNotNone(
-                        privacy_grants.matching_grant(
+                        privacy_grant_matching.matching_grant(
                             repo,
                             policy,
                             self._decision(),
@@ -104,7 +106,7 @@ class PrivacyGrantTests(unittest.TestCase):
                         )
                     )
                     self.assertIsNone(
-                        privacy_grants.matching_grant(
+                        privacy_grant_matching.matching_grant(
                             repo,
                             policy,
                             self._decision(),
@@ -118,21 +120,21 @@ class PrivacyGrantTests(unittest.TestCase):
             policy = privacy.load_policy(repo)
             decision = self._decision()
             with self._environment(temp_dir):
-                record = privacy_grants.create_grant(
+                record = privacy_grant_commands.create_grant(
                     repo,
                     policy,
                     [decision],
                     duration="until-revoked",
                 )
                 self.assertIsNotNone(
-                    privacy_grants.matching_grant(repo, policy, self._decision())
+                    privacy_grant_matching.matching_grant(repo, policy, self._decision())
                 )
                 self.assertEqual(
-                    privacy_grants.revoke_grants(repo, grant_id=str(record["id"])),
+                    privacy_grant_commands.revoke_grants(repo, grant_id=str(record["id"])),
                     1,
                 )
                 self.assertIsNone(
-                    privacy_grants.matching_grant(repo, policy, self._decision())
+                    privacy_grant_matching.matching_grant(repo, policy, self._decision())
                 )
 
     def test_exact_route_grant_does_not_authorize_another_route(self):
@@ -140,7 +142,7 @@ class PrivacyGrantTests(unittest.TestCase):
             repo = self._repo(temp_dir)
             policy = privacy.load_policy(repo)
             with self._environment(temp_dir):
-                privacy_grants.create_grant(
+                privacy_grant_commands.create_grant(
                     repo,
                     policy,
                     [self._decision("planner", "openai/gpt-a")],
@@ -148,17 +150,17 @@ class PrivacyGrantTests(unittest.TestCase):
                     scope="exact",
                 )
                 self.assertIsNotNone(
-                    privacy_grants.matching_grant(
+                    privacy_grant_matching.matching_grant(
                         repo, policy, self._decision("planner", "openai/gpt-a")
                     )
                 )
                 self.assertIsNone(
-                    privacy_grants.matching_grant(
+                    privacy_grant_matching.matching_grant(
                         repo, policy, self._decision("planner", "openai/gpt-b")
                     )
                 )
                 self.assertIsNone(
-                    privacy_grants.matching_grant(
+                    privacy_grant_matching.matching_grant(
                         repo,
                         policy,
                         self._decision(
@@ -172,7 +174,7 @@ class PrivacyGrantTests(unittest.TestCase):
             repo = self._repo(temp_dir)
             policy = privacy.load_policy(repo)
             with self._environment(temp_dir):
-                privacy_grants.create_grant(
+                privacy_grant_commands.create_grant(
                     repo,
                     policy,
                     [
@@ -183,14 +185,14 @@ class PrivacyGrantTests(unittest.TestCase):
                     scope="configured",
                 )
                 self.assertIsNotNone(
-                    privacy_grants.matching_grant(
+                    privacy_grant_matching.matching_grant(
                         repo,
                         policy,
                         self._decision("implementer", "openai/implementer"),
                     )
                 )
                 self.assertIsNone(
-                    privacy_grants.matching_grant(
+                    privacy_grant_matching.matching_grant(
                         repo,
                         policy,
                         self._decision("fixer", "openai/fixer"),
@@ -202,7 +204,7 @@ class PrivacyGrantTests(unittest.TestCase):
             repo = self._repo(temp_dir)
             policy = privacy.load_policy(repo)
             with self._environment(temp_dir):
-                privacy_grants.create_grant(
+                privacy_grant_commands.create_grant(
                     repo,
                     policy,
                     [self._decision("planner", "openai/gpt-a")],
@@ -210,14 +212,14 @@ class PrivacyGrantTests(unittest.TestCase):
                     scope="provider",
                 )
                 self.assertIsNotNone(
-                    privacy_grants.matching_grant(
+                    privacy_grant_matching.matching_grant(
                         repo,
                         policy,
                         self._decision("fixer", "openai/gpt-b"),
                     )
                 )
                 self.assertIsNone(
-                    privacy_grants.matching_grant(
+                    privacy_grant_matching.matching_grant(
                         repo,
                         policy,
                         self._decision(
@@ -232,7 +234,7 @@ class PrivacyGrantTests(unittest.TestCase):
             policy = privacy.load_policy(repo)
             original = self._decision()
             with self._environment(temp_dir):
-                privacy_grants.create_grant(
+                privacy_grant_commands.create_grant(
                     repo,
                     policy,
                     [original],
@@ -241,12 +243,12 @@ class PrivacyGrantTests(unittest.TestCase):
                 retention_drift = self._decision()
                 retention_drift.retention = "bounded"
                 self.assertIsNone(
-                    privacy_grants.matching_grant(repo, policy, retention_drift)
+                    privacy_grant_matching.matching_grant(repo, policy, retention_drift)
                 )
                 enforcement_drift = self._decision()
                 enforcement_drift.enforcement_state = "unverified"
                 self.assertIsNone(
-                    privacy_grants.matching_grant(repo, policy, enforcement_drift)
+                    privacy_grant_matching.matching_grant(repo, policy, enforcement_drift)
                 )
                 weaker_policy = privacy.PrivacyPolicy(
                     profile="no-training",
@@ -254,7 +256,7 @@ class PrivacyGrantTests(unittest.TestCase):
                     source="test",
                 )
                 self.assertIsNone(
-                    privacy_grants.matching_grant(repo, weaker_policy, self._decision())
+                    privacy_grant_matching.matching_grant(repo, weaker_policy, self._decision())
                 )
 
     def test_forbidden_repository_policies_cannot_create_grants(self):
@@ -269,7 +271,7 @@ class PrivacyGrantTests(unittest.TestCase):
                 policy = privacy.load_policy(repo)
                 with self._environment(temp_dir):
                     with self.assertRaises(privacy.PrivacyError):
-                        privacy_grants.create_grant(
+                        privacy_grant_commands.create_grant(
                             repo,
                             policy,
                             [self._decision()],
@@ -281,7 +283,7 @@ class PrivacyGrantTests(unittest.TestCase):
             repo = self._repo(temp_dir)
             policy = privacy.load_policy(repo)
             with self._environment(temp_dir):
-                record = privacy_grants.create_grant(
+                record = privacy_grant_commands.create_grant(
                     repo,
                     policy,
                     [self._decision()],
@@ -294,7 +296,7 @@ class PrivacyGrantTests(unittest.TestCase):
 
                 try:
                     privacy._consent_or_block = unexpected_gate
-                    privacy_grants._install_privacy_gate()
+                    privacy_grant_hooks._install_privacy_gate()
                     result = privacy._consent_or_block(
                         repo, policy, self._decision(), None
                     )
@@ -319,7 +321,7 @@ class PrivacyGrantTests(unittest.TestCase):
             policy = privacy.load_policy(repo)
             old = datetime(2026, 1, 1, tzinfo=timezone.utc)
             with self._environment(temp_dir):
-                privacy_grants.create_grant(
+                privacy_grant_commands.create_grant(
                     repo,
                     policy,
                     [self._decision()],
@@ -327,7 +329,7 @@ class PrivacyGrantTests(unittest.TestCase):
                     now=old,
                 )
                 self.assertIsNone(
-                    privacy_grants.matching_grant(repo, policy, self._decision())
+                    privacy_grant_matching.matching_grant(repo, policy, self._decision())
                 )
 
     def test_headless_run_hook_consumes_valid_grant_without_run_approval(self):
@@ -336,7 +338,7 @@ class PrivacyGrantTests(unittest.TestCase):
             policy = privacy.load_policy(repo)
             decision = self._decision("planner", "openai/planner")
             with self._environment(temp_dir):
-                privacy_grants.create_grant(
+                privacy_grant_commands.create_grant(
                     repo,
                     policy,
                     [decision],
@@ -348,7 +350,7 @@ class PrivacyGrantTests(unittest.TestCase):
                         "automation.privacy_consent._known_consent_requirements",
                         return_value=[decision],
                     ):
-                        privacy_grants._install_run_consent_hook()
+                        privacy_grant_hooks._install_run_consent_hook()
                         privacy_consent.ensure_run_consent(
                             repo, {}, executable="opencode"
                         )
@@ -356,7 +358,7 @@ class PrivacyGrantTests(unittest.TestCase):
                     privacy_consent.ensure_run_consent = original
 
                 self.assertEqual(privacy_consent._load_ledger(repo), {})
-                self.assertEqual(len(privacy_grants.current_grants(repo)), 1)
+                self.assertEqual(len(privacy_grant_commands.current_grants(repo)), 1)
 
     def test_headless_run_without_grant_cannot_manufacture_one(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -372,9 +374,9 @@ class PrivacyGrantTests(unittest.TestCase):
                             return_value=[decision],
                         ),
                         mock.patch("automation.privacy_consent.sys.stdin", non_tty),
-                        mock.patch("automation.privacy_grants.sys.stdin", non_tty),
+                        mock.patch("automation.privacy_grant_hooks.sys.stdin", non_tty),
                     ):
-                        privacy_grants._install_run_consent_hook()
+                        privacy_grant_hooks._install_run_consent_hook()
                         with self.assertRaises(privacy.PrivacyError):
                             privacy_consent.ensure_run_consent(
                                 repo, {}, executable="opencode"
@@ -382,7 +384,7 @@ class PrivacyGrantTests(unittest.TestCase):
                 finally:
                     privacy_consent.ensure_run_consent = original
 
-                self.assertEqual(privacy_grants.current_grants(repo), [])
+                self.assertEqual(privacy_grant_commands.current_grants(repo), [])
 
     def test_interactive_run_prompt_can_create_30_day_grant(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -397,18 +399,18 @@ class PrivacyGrantTests(unittest.TestCase):
                             return_value=[decision],
                         ),
                         mock.patch(
-                            "automation.privacy_grants._read_run_choice",
+                            "automation.privacy_grant_hooks._read_run_choice",
                             return_value="30",
                         ),
                     ):
-                        privacy_grants._install_run_consent_hook()
+                        privacy_grant_hooks._install_run_consent_hook()
                         privacy_consent.ensure_run_consent(
                             repo, {}, executable="opencode"
                         )
                 finally:
                     privacy_consent.ensure_run_consent = original
 
-                grants = privacy_grants.current_grants(repo)
+                grants = privacy_grant_commands.current_grants(repo)
                 self.assertEqual(len(grants), 1)
                 self.assertEqual(grants[0]["duration"], "30d")
                 self.assertEqual(grants[0]["scope"], "configured-routes")
@@ -420,44 +422,44 @@ class PrivacyGrantTests(unittest.TestCase):
             non_tty = SimpleNamespace(isatty=lambda: False)
             with (
                 self._environment(temp_dir),
-                mock.patch("automation.privacy_grants.sys.stdin", non_tty),
+                mock.patch("automation.privacy_grant_cli.sys.stdin", non_tty),
             ):
-                result = privacy_grants.run_cli(
+                result = privacy_grant_cli.run_cli(
                     ["consent", "--duration", "30d"], repo=repo
                 )
                 self.assertEqual(result, 2)
-                self.assertEqual(privacy_grants.current_grants(repo), [])
+                self.assertEqual(privacy_grant_commands.current_grants(repo), [])
 
     def test_store_is_secret_free_and_revoke_all_is_immediate(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = self._repo(temp_dir)
             policy = privacy.load_policy(repo)
             with self._environment(temp_dir):
-                privacy_grants.create_grant(
+                privacy_grant_commands.create_grant(
                     repo,
                     policy,
                     [self._decision("planner", "openai/planner")],
                     duration="24h",
                 )
-                privacy_grants.create_grant(
+                privacy_grant_commands.create_grant(
                     repo,
                     policy,
                     [self._decision("fixer", "openai/fixer")],
                     duration="7d",
                 )
-                raw = Path(os.environ[privacy_grants.STORE_ENV]).read_text(
+                raw = Path(os.environ[privacy_grant_contract.STORE_ENV]).read_text(
                     encoding="utf-8"
                 )
                 self.assertNotIn("prompt", raw.casefold())
                 self.assertNotIn("api_key", raw.casefold())
                 self.assertNotIn("secret", raw.casefold())
                 self.assertEqual(
-                    privacy_grants.revoke_grants(repo, revoke_all=True), 2
+                    privacy_grant_commands.revoke_grants(repo, revoke_all=True), 2
                 )
                 self.assertTrue(
                     all(
                         item["status"] == "revoked"
-                        for item in privacy_grants.current_grants(repo)
+                        for item in privacy_grant_commands.current_grants(repo)
                     )
                 )
 

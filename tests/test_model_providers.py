@@ -7,20 +7,11 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from automation.model_providers import (
-    ChatCompletionsProvider,
-    CommandProvider,
-    ModelConfig,
-    ProviderError,
-    ResponsesProvider,
-    build_chat_completions_body,
-    build_responses_body,
-    classify_http_status,
-    model_config_from_values,
-    normalize_provider_name,
-    resolve_model_config,
-    validate_safe_headers,
-)
+from automation.provider_command import CommandProvider
+from automation.provider_contract import ModelConfig, ProviderError
+from automation.provider_factory import model_config_from_values, normalize_provider_name, resolve_model_config
+from automation.provider_http import ChatCompletionsProvider, ResponsesProvider
+from automation.provider_requests import build_chat_completions_body, build_responses_body, classify_http_status, validate_safe_headers
 
 
 class FakeResponse:

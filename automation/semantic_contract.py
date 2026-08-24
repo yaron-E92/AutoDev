@@ -3,7 +3,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from automation.model_providers import ModelConfig, ModelProvider, ProviderError, load_provider_config
+from automation.provider_contract import ModelConfig, ModelProvider, ProviderError
+from automation.provider_factory import load_provider_config
 
 
 ALLOWED_VERDICTS = {"pass", "repair", "blocked"}

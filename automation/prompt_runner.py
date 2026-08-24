@@ -15,14 +15,8 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from automation.model_output_sanitizer import sanitize_model_output
-from automation.model_providers import (
-    ModelConfig,
-    ProviderError,
-    create_provider,
-    load_provider_config,
-    model_config_from_values,
-    ollama_command_for_model,
-)
+from automation.provider_contract import ModelConfig, ProviderError
+from automation.provider_factory import create_provider, load_provider_config, model_config_from_values, ollama_command_for_model
 from automation.model_roles import (
     MODEL_ROLES,
     ROLE_FALLBACKS,

@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from automation import privacy
-from automation.model_providers import ModelConfig, ModelProvider, ProviderResponse
+from automation.provider_contract import ModelConfig, ModelProvider, ProviderResponse
 from automation.model_roles import ModelInvocationError, invoke_model
 
 

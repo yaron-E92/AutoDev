@@ -3,7 +3,8 @@ from __future__ import annotations
 import json
 import time
 from urllib import error, request
-from automation.model_providers import ModelConfig, create_provider, ollama_command_for_model
+from automation.provider_contract import ModelConfig
+from automation.provider_factory import create_provider, ollama_command_for_model
 
 from area_reader.settings import (
     OLLAMA_CHAT_URL,

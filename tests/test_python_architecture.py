@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from automation import headroom
+
 import ast
 import importlib
 import unittest

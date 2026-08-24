@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+from automation import claim_identity, queue_contract, queue_github, queue_policy
+
 import json
 import shutil
 import subprocess
 from pathlib import Path
 from typing import Callable
 
-from automation import distributed_claims, issue_queue, privacy, queue_selection, user_install
+from automation import privacy, queue_selection, user_install
 from automation.scheduler_backends import (
     _backend_state,
     _install_backend,
@@ -40,7 +42,7 @@ from automation.scheduler_types import (
 
 _REQUIRED_POLICY = (
     Path(".autodev") / "repo.json",
-    issue_queue.QUEUE_CONFIG,
+    queue_contract.QUEUE_CONFIG,
     privacy.PRIVACY_CONFIG,
 )
 
@@ -64,12 +66,12 @@ def _validate_source_policy(repo: Path) -> None:
         raise SchedulerError(
             "repository is not ready for autonomous scheduling; missing " + ", ".join(missing)
         )
-    queue_policy = issue_queue.load_policy(repo)
+    queue_policy = queue_policy.load_policy(repo)
     if not queue_policy.autonomous_execution:
         raise SchedulerError(
             "repository queue policy disables autonomous_execution; enable it before installing a scheduler"
         )
-    distributed_claims.load_claim_policy(repo)
+    claim_identity.load_claim_policy(repo)
     queue_selection.load_roadmap(repo)
     privacy.load_policy(repo)
 
@@ -234,7 +236,7 @@ def install_scheduler(
         raise SchedulerError(
             f"cadence must be between {MIN_CADENCE_MINUTES} and {MAX_CADENCE_MINUTES} minutes"
         )
-    resolved = issue_queue.resolve_github_repo(
+    resolved = queue_github.resolve_github_repo(
         source,
         explicit=github_repo,
         runner=runner,
@@ -254,7 +256,7 @@ def install_scheduler(
         home=home,
         runner=runner,
     )
-    distributed_claims.worker_identity(home=home)
+    claim_identity.worker_identity(home=home)
     registration = SchedulerRegistration(
         github_repository=resolved,
         source_repository=str(source),
@@ -298,7 +300,7 @@ def scheduler_status(
             if repo is None:
                 raise SchedulerError("repository is required to resolve scheduler status")
             source = _repo_root(repo)
-            resolved = issue_queue.resolve_github_repo(source, runner=runner)
+            resolved = queue_github.resolve_github_repo(source, runner=runner)
         path = registration_path(resolved, home=home)
     registration = _load_registration(path)
     if registration is None:
@@ -335,7 +337,7 @@ def uninstall_scheduler(
             if repo is None:
                 raise SchedulerError("repository is required to uninstall scheduler")
             source = _repo_root(repo)
-            resolved = issue_queue.resolve_github_repo(source, runner=runner)
+            resolved = queue_github.resolve_github_repo(source, runner=runner)
         path = registration_path(resolved, home=home)
     registration = _load_registration(path)
     if registration is None:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import automation.repair_budget_resume as repair_budget_resume
+
 from automation import windows_verification_contract
 
 import tempfile
@@ -7,7 +9,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from automation import opencode_resume_status, role_coordinator_flow, role_resume, role_workflow_hooks, semantic_repair_budget, windows_verification_manifest, workflow_stages
+from automation import opencode_resume_status, role_coordinator_flow, role_resume, role_workflow_hooks, windows_verification_manifest, workflow_stages
 
 
 class RoleWorkflowHookTests(unittest.TestCase):
@@ -54,12 +56,8 @@ class RoleWorkflowHookTests(unittest.TestCase):
             def base_resume(*args, **kwargs):
                 return dict(base_payload)
 
-            with patch.object(role_resume, "resume", base_resume), patch.object(
-                semantic_repair_budget,
-                "maybe_reopen_exhausted_budget",
-            ) as reopen, patch.object(
-                semantic_repair_budget,
-                "_append_resume_metadata",
+            with patch.object(role_resume, "resume", base_resume), patch.object(repair_budget_resume, "maybe_reopen_exhausted_budget",
+            ) as reopen, patch.object(repair_budget_resume, "_append_resume_metadata",
             ) as append, patch.object(
                 workflow_stages,
                 "read_state",

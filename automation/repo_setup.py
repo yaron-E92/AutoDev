@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from automation import privacy_grant_commands, queue_contract, queue_github, queue_policy
+
 from automation import opencode_adapter_models
 
 from automation import opencode_adapter_contract
@@ -13,18 +15,11 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Callable
 
-from automation import (
-    execution_classification_hooks,
-    issue_queue,
-    opencode_install,
-    privacy,
-    privacy_grants,
-    queue_selection,
-)
+from automation import execution_classification_hooks, opencode_install, privacy, queue_selection
 
 
 REPO_CONFIG = Path(".autodev") / "repo.json"
-QUEUE_CONFIG = issue_queue.QUEUE_CONFIG
+QUEUE_CONFIG = queue_contract.QUEUE_CONFIG
 ROADMAP_CONFIG = queue_selection.ROADMAP_PATH
 PRIVACY_CONFIG = privacy.PRIVACY_CONFIG
 REPO_SCHEMA = 1
@@ -176,7 +171,7 @@ def opencode_enabled(repo: Path) -> bool:
 
 
 def _validate_repo_policy(repo: Path) -> None:
-    issue_queue.load_policy(repo)
+    queue_policy.load_policy(repo)
     queue_selection.load_roadmap(repo)
     privacy.load_policy(repo)
 
@@ -187,7 +182,7 @@ def _resolve_github_repo(
     *,
     runner: Callable[..., object],
 ) -> str:
-    return issue_queue.resolve_github_repo(repo, explicit=explicit, runner=runner)
+    return queue_github.resolve_github_repo(repo, explicit=explicit, runner=runner)
 
 
 def install_repo(
@@ -245,7 +240,7 @@ def install_repo(
 
     execution_classification_hooks.install()
     resolved = _resolve_github_repo(repo, github_repo, runner=runner)
-    labels = issue_queue.ensure_queue_labels(repo, resolved, runner=runner)
+    labels = queue_github.ensure_queue_labels(repo, resolved, runner=runner)
     return RepoInstallResult(
         repository=str(repo),
         github_repository=resolved,
@@ -265,7 +260,7 @@ def ensure_labels(
     repo = _repo(repo)
     execution_classification_hooks.install()
     resolved = _resolve_github_repo(repo, github_repo, runner=runner)
-    return issue_queue.ensure_queue_labels(repo, resolved, runner=runner)
+    return queue_github.ensure_queue_labels(repo, resolved, runner=runner)
 
 
 def _label_check(
@@ -274,7 +269,7 @@ def _label_check(
     *,
     runner: Callable[..., object],
 ) -> DoctorCheck:
-    result = issue_queue._run_gh(  # type: ignore[attr-defined]
+    result = queue_github._run_gh(  # type: ignore[attr-defined]
         repo,
         [
             "label",
@@ -291,7 +286,7 @@ def _label_check(
     )
     if result.returncode != 0:
         return DoctorCheck("queue-labels", "error", "cannot read GitHub labels")
-    raw = issue_queue._json_result(result, context="gh label list")  # type: ignore[attr-defined]
+    raw = queue_github._json_result(result, context="gh label list")  # type: ignore[attr-defined]
     actual: dict[str, tuple[str, str]] = {}
     if isinstance(raw, list):
         for item in raw:
@@ -302,7 +297,7 @@ def _label_check(
                 )
     drift = [
         name
-        for name, (color, description) in issue_queue.LABEL_SPECS.items()
+        for name, (color, description) in queue_contract.LABEL_SPECS.items()
         if actual.get(name) != (color.casefold(), description)
     ]
     if drift:
@@ -317,7 +312,7 @@ def _label_check(
 
 def _grant_check(repo: Path) -> DoctorCheck:
     try:
-        grants = privacy_grants.current_grants(repo)
+        grants = privacy_grant_commands.current_grants(repo)
     except Exception as exc:  # defensive: never turn doctor into grant mutation
         return DoctorCheck("privacy-grants", "error", f"cannot inspect grant metadata: {exc}")
     counts = {"active": 0, "expired": 0, "revoked": 0}
@@ -345,7 +340,7 @@ def _check_repo_config(repo: Path) -> tuple[DoctorCheck, bool]:
 def _check_policy(repo: Path) -> list[DoctorCheck]:
     checks: list[DoctorCheck] = []
     try:
-        issue_queue.load_policy(repo)
+        queue_policy.load_policy(repo)
         checks.append(
             DoctorCheck(
                 "queue-policy",
@@ -602,7 +597,7 @@ def run_cli(
         return 0 if result.healthy else 2
     except (
         RepoSetupError,
-        issue_queue.QueueError,
+        queue_contract.QueueError,
         privacy.PrivacyError,
         queue_selection.RoadmapError,
         opencode_adapter_contract.OpenCodeAdapterError,
