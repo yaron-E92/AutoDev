@@ -15,4 +15,35 @@ text = text.replace(
     "workflow_stages.render_legacy_verifier(\n",
     "workflow_prompts.render_legacy_verifier(\n",
 )
+old = '''            with patch(
+                "automation.workflow_prompts.gh",
+                return_value=SimpleNamespace(
+                    returncode=0,
+                    stdout="diff --git a/file b/file\\n",
+                    stderr="",
+                ),
+            ):
+                workflow_prompts.render_legacy_verifier(
+                    repo,
+                    current,
+                    state,
+                    REPO_ROOT,
+                )
+'''
+new = '''            workflow_prompts.render_legacy_verifier(
+                repo,
+                current,
+                state,
+                REPO_ROOT,
+                runner=lambda *args, **kwargs: SimpleNamespace(
+                    returncode=0,
+                    stdout="diff --git a/file b/file\\n",
+                    stderr="",
+                ),
+            )
+'''
+if old in text:
+    text = text.replace(old, new)
+elif new not in text:
+    raise SystemExit("legacy verifier test block not found")
 path.write_text(text, encoding="utf-8")
