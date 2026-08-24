@@ -27,6 +27,7 @@ jobs:
         run: |
           python scripts/issue_180_remove_legacy_runner_patch.py
           python scripts/issue_180_runner_ci_idempotence.py
+          python scripts/issue_180_runner_shim_test_patch.py
           python scripts/issue_180_remove_legacy_runner.py
 
       - name: Compile canonical Python
