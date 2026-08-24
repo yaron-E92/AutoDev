@@ -1,6 +1,6 @@
 # OpenCode role-model mapping examples
 
-These files are ready-to-copy examples for the four scenarios documented in `docs/opencode.md`.
+These ready-to-copy examples demonstrate several supported ways to map AutoDev's OpenCode roles to provider models. See [`../../docs/opencode.md`](../../docs/opencode.md) and [`../../docs/model-roles.md`](../../docs/model-roles.md) for the current runtime and role contracts.
 
 | Scenario | Example |
 | --- | --- |
@@ -9,8 +9,12 @@ These files are ready-to-copy examples for the four scenarios documented in `doc
 | All-local Ollama | `all-local-ollama/opencode.jsonc` |
 | Lightweight coordinator + stronger implementer/fixer | `cheap-coordinator-strong-implementer/opencode.jsonc` |
 
-Copy the desired file to the target repository as `opencode.jsonc`, then replace every `<...>` placeholder with a real OpenCode `provider/model-id`.
+Copy the desired file to the target repository as `opencode.jsonc` only when that repository intentionally owns the mapping, then replace every `<...>` placeholder with a real OpenCode `provider/model-id`. If model routing is user-local instead, keep the equivalent mapping in normal user-owned OpenCode configuration rather than committing a repository copy.
 
-Do not put provider API keys in these files. Credentials remain in normal OpenCode/provider/user environment configuration.
+Do not put provider API keys in these files. Credentials remain in normal OpenCode/provider/user environment or secret-store configuration.
 
-The AutoDev installer does not copy these examples into target repositories and does not modify an existing `opencode.json` or `opencode.jsonc`.
+`autodev repo install` does not copy these examples into target repositories and does not rewrite an existing `opencode.json` or `opencode.jsonc`. Inspect the effective mapping with:
+
+```text
+autodev models
+```
