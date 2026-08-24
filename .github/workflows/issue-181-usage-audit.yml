@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - agent/issue-181-dead-code-cleanup
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
