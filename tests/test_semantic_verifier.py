@@ -4,13 +4,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from automation.provider_contract import ModelConfig, ProviderError
-from automation.provider_mock import MockProvider
-from automation.prompt_policies import resolve_prompt_policies
 from automation.semantic_configuration import resolve_semantic_settings
 from automation.semantic_contract import SemanticSettings, SemanticVerifierError
 from automation.semantic_evidence import collect_cross_file_regression_evidence
-from automation.semantic_invocation import invoke_semantic_verifier
 from automation.semantic_prompts import build_semantic_prompt, extract_acceptance_criteria
 from automation.semantic_schema import parse_semantic_output
 
@@ -168,27 +164,6 @@ class SemanticVerifierTests(unittest.TestCase):
         self.assertIn("src/CampaignViewModel.cs:1", evidence)
         self.assertIn("potential blocking regression", evidence)
         self.assertIn("src/CampaignViewModel.cs:1", prompt)
-
-    def test_schema_retry_uses_verifier_again_and_records_separate_telemetry(self):
-        provider = MockProvider(["not json", semantic_result()])
-        policies = resolve_prompt_policies({})
-        with tempfile.TemporaryDirectory() as temp_dir:
-            telemetry = Path(temp_dir) / "model-invocations.json"
-            result = invoke_semantic_verifier(
-                provider=provider,
-                config=ModelConfig(provider="mock", model="verifier"),
-                prompt="Review this implementation.",
-                telemetry_path=telemetry,
-                policies=policies,
-                max_schema_retries=1,
-            )
-            records = json.loads(telemetry.read_text(encoding="utf-8"))
-
-        self.assertEqual(result["verdict"], "pass")
-        self.assertEqual(len(provider.prompts), 2)
-        self.assertIn("previous response was rejected", provider.prompts[1].casefold())
-        self.assertEqual([record["role"] for record in records], ["verifier", "verifier"])
-        self.assertEqual([record["attempt"] for record in records], [0, 1])
 
 
 

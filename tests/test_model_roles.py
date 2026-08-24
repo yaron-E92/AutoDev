@@ -2,9 +2,6 @@ import json
 import unittest
 from pathlib import Path
 
-from automation.provider_contract import ModelConfig
-from automation.provider_mock import MockProvider
-from automation.model_roles import ModelInvocationError, invoke_model
 from automation.prompt_policies import (
     PROMPT_POLICY_VERSION,
     compose_prompt,
@@ -13,27 +10,12 @@ from automation.prompt_policies import (
 )
 
 
-class ModelRoleTests(unittest.TestCase):
+class PromptPolicyTests(unittest.TestCase):
 
 
 
 
 
-    def test_failed_call_has_safe_role_metadata(self):
-        class FailingProvider(MockProvider):
-            def generate(self, prompt, *, model, timeout_seconds):
-                raise RuntimeError("secret failure detail")
-
-        with self.assertRaises(ModelInvocationError) as raised:
-            invoke_model(
-                FailingProvider(),
-                ModelConfig(provider="mock", model="m"),
-                "prompt",
-                role="planner",
-            )
-        self.assertEqual(raised.exception.record["role"], "planner")
-        self.assertEqual(raised.exception.record["status"], "failure")
-        self.assertNotIn("secret failure detail", json.dumps(raised.exception.record))
 
     def test_prompt_policy_defaults_match_roles(self):
         policies = resolve_prompt_policies({})

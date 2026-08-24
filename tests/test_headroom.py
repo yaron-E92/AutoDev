@@ -19,7 +19,6 @@ from automation.provider_contract import ModelConfig, ModelProvider, ProviderErr
 from automation.provider_factory import create_provider, model_config_from_values
 from automation.provider_headroom import HeadroomProvider
 from automation.provider_requests import validate_safe_headers
-from automation.model_roles import invoke_model
 from automation.semantic_prompts import build_semantic_prompt
 
 
