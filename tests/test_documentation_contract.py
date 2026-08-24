@@ -1,10 +1,22 @@
 from __future__ import annotations
 
+import re
 import unittest
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+PUBLIC_DOCS = (
+    "README.md",
+    "docs/installation.md",
+    "docs/model-roles.md",
+    "docs/opencode.md",
+    "docs/releases.md",
+    "docs/windows-verification.md",
+    "docs/workspace-scope.md",
+    "examples/opencode/README.md",
+)
+LOCAL_LINK = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
 
 
 class DocumentationContractTests(unittest.TestCase):
@@ -47,6 +59,12 @@ class DocumentationContractTests(unittest.TestCase):
         self.assertNotIn("autodev-vX.Y.Z-linux.zip", releases)
         self.assertIn("Native Windows MSI and Linux DEB/RPM packages are **not available yet**", releases)
 
+    def test_windows_verification_uses_public_repository_setup(self) -> None:
+        windows = self._read("docs/windows-verification.md")
+        self.assertIn("autodev repo install", windows)
+        self.assertNotIn("python -m automation.opencode_install", windows)
+        self.assertNotIn("python3 -m automation.opencode_install", windows)
+
     def test_workspace_guide_preserves_repository_owned_autodev_policy(self) -> None:
         workspace = self._read("docs/workspace-scope.md")
         self.assertIn("The `.autodev/` directory is the target repository's AutoDev policy/configuration boundary", workspace)
@@ -56,6 +74,19 @@ class DocumentationContractTests(unittest.TestCase):
     def test_release_common_bundle_declares_shipped_docs(self) -> None:
         packaging = self._read("automation/package_release.py")
         self.assertIn('    "docs",', packaging)
+
+    def test_changed_public_docs_have_no_broken_local_links(self) -> None:
+        broken: list[str] = []
+        for relative in PUBLIC_DOCS:
+            source = ROOT / relative
+            for raw_target in LOCAL_LINK.findall(source.read_text(encoding="utf-8")):
+                target = raw_target.split("#", 1)[0].strip()
+                if not target or target.startswith(("http://", "https://", "mailto:")):
+                    continue
+                resolved = (source.parent / target).resolve()
+                if not resolved.exists():
+                    broken.append(f"{relative} -> {raw_target}")
+        self.assertEqual(broken, [])
 
 
 if __name__ == "__main__":
