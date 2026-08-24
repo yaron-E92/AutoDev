@@ -198,7 +198,7 @@ Issue:
 {issue_text}
 """
 '''
-    path.write_text(text.rstrip() + addition + "\n", encoding="utf-8")
+    path.write_text((text.rstrip() + addition).rstrip() + "\n", encoding="utf-8")
 
 
 def retarget_planner_role() -> None:
