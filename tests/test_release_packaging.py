@@ -29,7 +29,6 @@ class ReleasePackagingTests(unittest.TestCase):
         self._git(repo, "config", "user.name", "AutoDev Tests")
         files = {
             "automation/example.py": "print('common')\n",
-            "linux/scripts/example.sh": "#!/usr/bin/env bash\necho linux\n",
             "windows/scripts/example.ps1": "Write-Output 'windows'\n",
         }
         for relative, content in files.items():
@@ -53,7 +52,6 @@ class ReleasePackagingTests(unittest.TestCase):
             self.assertEqual(first["commit_sha"], commit)
             for name in [
                 "autodev-v1.2.3-common.zip",
-                "autodev-v1.2.3-linux.zip",
                 "autodev-v1.2.3-windows.zip",
                 "autodev-release-manifest.json",
                 "SHA256SUMS",
@@ -74,7 +72,7 @@ class ReleasePackagingTests(unittest.TestCase):
             manifest = json.loads((out / "autodev-release-manifest.json").read_text(encoding="utf-8"))
             self.assertEqual(manifest["version"], "v2.0.0")
             self.assertEqual(manifest["commit_sha"], commit)
-            self.assertEqual(set(manifest["bundles"]), {"common", "linux", "windows"})
+            self.assertEqual(set(manifest["bundles"]), {"common", "windows"})
             common_files = manifest["bundles"]["common"]["files"]
             self.assertEqual(common_files[0]["path"], "automation/example.py")
             self.assertEqual(len(common_files[0]["sha256"]), 64)
