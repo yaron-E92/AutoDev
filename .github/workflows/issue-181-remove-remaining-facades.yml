@@ -199,7 +199,7 @@ jobs:
           facades=(model_providers issue_queue distributed_claims privacy_grants scheduler_health semantic_repair_budget)
           for facade in "${facades[@]}"; do
             test ! -e "automation/${facade}.py"
-            if git grep -n -E "(automation\.${facade}|from automation import.*${facade}|${facade}\.)" -- automation area_reader tests ':!scripts/issue_181_*'; then
+            if git grep -n -E "(automation\.${facade}([^A-Za-z0-9_]|$)|from automation import[^[:cntrl:]]*([^A-Za-z0-9_]|^)${facade}([^A-Za-z0-9_]|$)|(^|[^A-Za-z0-9_])${facade}\.)" -- automation area_reader tests ':!scripts/issue_181_*'; then
               echo "Compatibility facade reference remains: ${facade}" >&2
               exit 1
             fi
