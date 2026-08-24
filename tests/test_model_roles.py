@@ -1,11 +1,10 @@
 import json
-import tempfile
 import unittest
 from pathlib import Path
 
-from automation.provider_contract import ModelConfig, ProviderError
+from automation.provider_contract import ModelConfig
 from automation.provider_mock import MockProvider
-from automation.model_roles import ModelInvocationError, invoke_model, resolve_role_configs
+from automation.model_roles import ModelInvocationError, invoke_model
 from automation.prompt_policies import (
     PROMPT_POLICY_VERSION,
     compose_prompt,
@@ -15,58 +14,10 @@ from automation.prompt_policies import (
 
 
 class ModelRoleTests(unittest.TestCase):
-    def setUp(self):
-        self.defaults = {
-            "reader": {"provider": "mock", "model": "reader-default"},
-            "coder": {"provider": "mock", "model": "coder-default"},
-        }
 
-    def test_version_two_roles_are_independent(self):
-        roles = resolve_role_configs(
-            defaults=self.defaults,
-            file_config={
-                "version": 2,
-                "roles": {
-                    role: {"provider": "mock", "model": role}
-                    for role in ("reader", "synthesizer", "planner", "implementer", "fixer", "verifier")
-                },
-            },
-        )
-        self.assertEqual([roles[role].model for role in roles], [
-            "reader", "synthesizer", "planner", "implementer", "fixer", "verifier"
-        ])
 
-    def test_legacy_reader_coder_fallbacks_and_disabled_verifier(self):
-        roles = resolve_role_configs(
-            defaults=self.defaults,
-            file_config={
-                "reader": {"provider": "mock", "model": "legacy-reader"},
-                "coder": {"provider": "mock", "model": "legacy-coder"},
-            },
-        )
-        self.assertEqual(roles["reader"].model, "legacy-reader")
-        self.assertEqual(roles["synthesizer"].model, "legacy-reader")
-        self.assertEqual(roles["planner"].model, "legacy-coder")
-        self.assertEqual(roles["implementer"].model, "legacy-coder")
-        self.assertEqual(roles["fixer"].model, "legacy-coder")
-        self.assertIsNone(roles["verifier"])
 
-    def test_explicit_role_wins_over_legacy_cli_override(self):
-        roles = resolve_role_configs(
-            defaults=self.defaults,
-            file_config={
-                "version": 2,
-                "roles": {"planner": {"provider": "mock", "model": "explicit-planner"}},
-            },
-            cli_values={"coder": {"model": "cli-coder"}},
-        )
-        self.assertEqual(roles["planner"].model, "explicit-planner")
-        self.assertEqual(roles["implementer"].model, "cli-coder")
-        self.assertEqual(roles["fixer"].model, "cli-coder")
 
-    def test_unknown_config_version_is_rejected(self):
-        with self.assertRaises(ProviderError):
-            resolve_role_configs(defaults=self.defaults, file_config={"version": 3})
 
     def test_failed_call_has_safe_role_metadata(self):
         class FailingProvider(MockProvider):

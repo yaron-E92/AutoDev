@@ -3,12 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable
 from automation.provider_contract import ModelConfig, ModelProvider, ProviderError
-from automation.provider_factory import load_provider_config
 from automation.model_roles import (
     ModelInvocationError,
     append_invocation_metadata,
     invoke_model,
-    resolve_role_configs,
 )
 from automation.prompt_policies import compose_prompt, role_policy_metadata
 
@@ -147,16 +145,3 @@ def prepare_semantic_repair_prompt(
         str(result.get("repair_brief", "")).strip() + "\n",
         encoding="utf-8",
     )
-
-def resolve_profile_roles(
-    profile_path: Path,
-) -> tuple[dict[str, object], dict[str, ModelConfig | None]]:
-    file_config = load_provider_config(str(profile_path))
-    roles = resolve_role_configs(
-        defaults={
-            "reader": {"provider": "mock", "model": "reader"},
-            "coder": {"provider": "mock", "model": "coder"},
-        },
-        file_config=file_config,
-    )
-    return file_config, roles

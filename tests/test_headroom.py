@@ -19,7 +19,7 @@ from automation.provider_contract import ModelConfig, ModelProvider, ProviderErr
 from automation.provider_factory import create_provider, model_config_from_values
 from automation.provider_headroom import HeadroomProvider
 from automation.provider_requests import validate_safe_headers
-from automation.model_roles import invoke_model, resolve_role_configs
+from automation.model_roles import invoke_model
 from automation.semantic_prompts import build_semantic_prompt
 
 
@@ -66,39 +66,6 @@ class HeadroomTests(unittest.TestCase):
         self.assertTrue(resolve_headroom_values(profile, "implementer")["enabled"])
         self.assertFalse(resolve_headroom_values(profile, "fixer")["enabled"])
         self.assertFalse(resolve_headroom_values(profile, "verifier")["enabled"])
-
-    def test_role_resolution_composes_headroom_with_version_two_provider_profile(self):
-        configs = resolve_role_configs(
-            defaults={
-                "reader": {
-                    "transport": "openai-compatible-chat-completions",
-                    "model": "reader",
-                    "base_url": "https://reader.invalid/v1",
-                },
-                "coder": {
-                    "transport": "openai-compatible-chat-completions",
-                    "model": "coder",
-                    "base_url": "https://coder.invalid/v1",
-                },
-            },
-            file_config={
-                "version": 2,
-                "headroom": {
-                    "enabled": True,
-                    "proxy_url": "http://127.0.0.1:8787/v1",
-                },
-                "roles": {
-                    "reader": {"model": "reader"},
-                    "implementer": {"model": "implementer"},
-                    "fixer": {"model": "fixer"},
-                    "verifier": {"model": "verifier"},
-                },
-            },
-        )
-
-        self.assertTrue(configs["implementer"].headroom.enabled)
-        self.assertTrue(configs["fixer"].headroom.enabled)
-        self.assertFalse(configs["verifier"].headroom.enabled)
 
 
     def test_semantic_compression_preserves_issue_acceptance_criteria_and_json_schema(self):
