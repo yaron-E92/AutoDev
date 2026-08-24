@@ -94,7 +94,6 @@ from automation.workflow_prompts import (
     commit_message,
     render_ci_repair,
     render_implementer_prompt,
-    render_legacy_verifier,
     resolve_profiles,
 )
 

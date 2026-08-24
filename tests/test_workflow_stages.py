@@ -570,48 +570,6 @@ class WorkflowStageTests(unittest.TestCase):
             self.assertEqual(proof["parent_sha"], "commit-1")
             self.assertTrue(proof["changes"])
 
-    def test_render_legacy_verifier_preserves_semantic_placeholders(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            repo = Path(temp_dir)
-            current = repo / ".autodev-run" / "current"
-            current.mkdir(parents=True)
-            (current / "issue.md").write_text("# Issue\n", encoding="utf-8")
-            (current / "plan.md").write_text("Plan\n", encoding="utf-8")
-            state = {
-                "RepoFullName": "owner/repo",
-                "PrNumber": 7,
-                "LocalCheck": "python -m unittest",
-                "StackContext": "Python",
-            }
-
-            workflow_prompts.render_legacy_verifier(
-                repo,
-                current,
-                state,
-                REPO_ROOT,
-                runner=lambda *args, **kwargs: SimpleNamespace(
-                    returncode=0,
-                    stdout="diff --git a/file b/file\n",
-                    stderr="",
-                ),
-            )
-
-            prompt = (current / "verifier.md").read_text(encoding="utf-8")
-            for name in (
-                "AcceptanceCriteria",
-                "SynthesizedHandoff",
-                "ChangedFiles",
-                "DeterministicEvidence",
-                "CrossFileRegressionEvidence",
-                "UncertaintyNotes",
-            ):
-                self.assertIn("{{" + name + "}}", prompt)
-            self.assertNotIn("{{IssueText}}", prompt)
-            self.assertNotIn("{{Plan}}", prompt)
-            self.assertNotIn("{{Diff}}", prompt)
-            self.assertIn("# Issue", prompt)
-            self.assertIn("diff --git a/file b/file", prompt)
-            self.assertIn("python -m unittest", prompt)
 
     def test_pr_and_ci_reuses_existing_pr_and_records_api_commit(self):
         ci_success = self._ci_success("commit-sha")
@@ -639,7 +597,6 @@ class WorkflowStageTests(unittest.TestCase):
                 patch("automation.workflow_stages.create_api_commit", return_value="commit-sha") as create_commit,
                 patch("automation.workflow_stages.ensure_pr"),
                 patch("automation.workflow_stages.wait_for_required_checks", return_value=ci_success),
-                patch("automation.workflow_stages.render_legacy_verifier") as render_verifier,
             ):
                 passed = workflow_stages.pr_and_ci(
                     repo,
@@ -650,11 +607,10 @@ class WorkflowStageTests(unittest.TestCase):
 
             self.assertTrue(passed)
             create_commit.assert_called_once()
-            render_verifier.assert_called_once()
             state = workflow_stages.read_state(current)
             self.assertEqual(state["LastCommitSha"], "commit-sha")
             self.assertEqual(state["PrUrl"], "https://example.test/pr/1")
-            self.assertEqual(state["Status"], "CiPassedVerifierPromptRendered")
+            self.assertEqual(state["Status"], "CiPassed")
             self.assertEqual(state["CiProof"]["state"], "terminal-success")
             self.assertTrue((current / "last-commit-workspace-snapshot.json").is_file())
 
@@ -687,7 +643,6 @@ class WorkflowStageTests(unittest.TestCase):
                 patch("automation.workflow_stages.create_api_commit", return_value="commit-sha"),
                 patch("automation.workflow_stages.ensure_pr", side_effect=create_pr) as ensure_pr,
                 patch("automation.workflow_stages.wait_for_required_checks", return_value=ci_success),
-                patch("automation.workflow_stages.render_legacy_verifier"),
             ):
                 passed = workflow_stages.pr_and_ci(
                     repo,

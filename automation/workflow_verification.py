@@ -43,7 +43,6 @@ from automation.workflow_github import (
 )
 from automation.workflow_prompts import (
     render_ci_repair,
-    render_legacy_verifier,
 )
 from automation.workflow_storage import (
     _file_sha256,
@@ -192,7 +191,6 @@ def pr_and_ci(
             classification=FAILURE_TRANSIENT,
         )
 
-    render_legacy_verifier(repo, current, state, autodev_root, runner=runner)
-    state["Status"] = "CiPassedVerifierPromptRendered"
+    state["Status"] = "CiPassed"
     write_state(current, state)
     return True

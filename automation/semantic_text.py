@@ -5,7 +5,6 @@ import re
 
 from automation.semantic_contract import (
     SemanticVerifierError,
-    _LEGACY_ONLY_PLACEHOLDERS,
     _TEMPLATE_PLACEHOLDER,
 )
 
@@ -13,7 +12,7 @@ def render_template(template: str, values: dict[str, str]) -> str:
     unresolved: set[str] = set()
     for match in _TEMPLATE_PLACEHOLDER.finditer(template):
         key = match.group("new") or match.group("legacy")
-        if key not in values and key not in _LEGACY_ONLY_PLACEHOLDERS:
+        if key not in values:
             unresolved.add(match.group(0))
     if unresolved:
         raise SemanticVerifierError(

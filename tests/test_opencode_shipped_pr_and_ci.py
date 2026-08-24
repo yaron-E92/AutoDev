@@ -86,7 +86,6 @@ class OpenCodeShippedPrAndCiTests(unittest.TestCase):
             }
             with (
                 patch.object(workflow_stages, "wait_for_required_checks", return_value=ci),
-                patch.object(workflow_stages, "render_legacy_verifier"),
             ):
                 passed = workflow_stages.pr_and_ci(
                     repo,
