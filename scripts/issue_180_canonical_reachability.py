@@ -7,7 +7,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_DIRS = [ROOT / "automation"]
-for candidate in (ROOT / "area_reader", ROOT / "area_reader"):
+for candidate in (ROOT / "area_reader",):
     if candidate.is_dir():
         PACKAGE_DIRS.append(candidate)
 
@@ -118,3 +118,35 @@ for name, path in sorted(modules.items()):
     if 'if __name__ == "__main__"' in text or "if __name__ == '__main__'" in text:
         marker = "reachable" if name in reachable else "UNREACHABLE"
         print(f"{marker}: {name} ({path.relative_to(ROOT)})")
+
+print("=== STALE LEGACY TEXT REFERENCES ===")
+legacy_tokens = (
+    "area_reader_v2",
+    "eval_harness",
+    "evaluation_",
+    "issue_runner_",
+    "issue_run_",
+    "opencode_coordinator.py",
+    "role_coordinator.py",
+    "run_real_issue",
+    "semantic_verifier.py",
+    "workflow_stages_core.py",
+)
+skip_parts = {".git", "__pycache__", ".autodev-run"}
+skip_paths = {
+    "scripts/issue_180_canonical_reachability.py",
+    ".github/workflows/issue-180-canonical-reachability.yml",
+}
+for path in sorted(ROOT.rglob("*")):
+    if not path.is_file() or any(part in skip_parts for part in path.parts):
+        continue
+    relative = path.relative_to(ROOT).as_posix()
+    if relative in skip_paths:
+        continue
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        continue
+    hits = sorted(token for token in legacy_tokens if token in text)
+    if hits:
+        print(f"{relative}: {', '.join(hits)}")
