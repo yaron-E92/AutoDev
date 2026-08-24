@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from automation import opencode_adapter_models
+
+from automation import opencode_adapter_contract
+
 import json
 import os
 import subprocess
@@ -8,7 +12,6 @@ from pathlib import Path
 from typing import Callable
 
 from automation import (
-    opencode_adapter,
     opencode_cli,
     privacy,
     role_runtime,
@@ -23,7 +26,7 @@ class OpenCodeRoleRuntime:
         self._mappings: dict[str, dict[str, str]] = {}
 
     def validate_arguments(self, arguments: str) -> None:
-        opencode_adapter.reject_unsupported_model_overrides(arguments)
+        opencode_adapter_models.reject_unsupported_model_overrides(arguments)
 
     def _resolve_mappings(
         self,
@@ -33,7 +36,7 @@ class OpenCodeRoleRuntime:
         which=None,
     ) -> dict[str, dict[str, str]]:
         if not self._mappings:
-            self._mappings = opencode_adapter.resolve_opencode_model_mappings(
+            self._mappings = opencode_adapter_models.resolve_opencode_model_mappings(
                 repo,
                 runner=runner,
                 which=which,
@@ -49,7 +52,7 @@ class OpenCodeRoleRuntime:
     ) -> dict[str, object]:
         mappings = self._resolve_mappings(repo, runner=runner, which=which)
         snapshots: dict[str, object] = {}
-        for role in opencode_adapter.ROLE_NAMES:
+        for role in opencode_adapter_contract.ROLE_NAMES:
             mapping = mappings.get(role, {})
             model = str(mapping.get("model", ""))
             provider = model.split("/", 1)[0] if "/" in model else ""
@@ -131,7 +134,7 @@ class OpenCodeRoleRuntime:
                 str(exc),
                 classification=exc.classification,
             ) from exc
-        except opencode_adapter.OpenCodeAdapterError as exc:
+        except opencode_adapter_contract.OpenCodeAdapterError as exc:
             raise role_runtime.RoleRuntimeError(
                 str(exc),
                 classification=exc.classification,

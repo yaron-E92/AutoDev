@@ -130,7 +130,7 @@ resolve_semantic_mode() {
 
   local code
   set +e
-  run_python_module automation.semantic_verifier enabled --provider-profile "$provider_profile"
+  run_python_module automation.semantic_cli enabled --provider-profile "$provider_profile"
   code=$?
   set -e
   if [[ $code -eq 0 ]]; then
@@ -313,7 +313,7 @@ EOF
 
 prepare_semantic_prompt() {
   mkdir -p "$current_dir/verification"
-  run_python_module automation.semantic_verifier prepare \
+  run_python_module automation.semantic_cli prepare \
     --repo . \
     --current-dir "$current_dir" \
     --template "$tool_root/promptTemplates/verifier.md" \
@@ -321,7 +321,7 @@ prepare_semantic_prompt() {
 }
 
 prepare_semantic_repair_prompt() {
-  run_python_module automation.semantic_verifier repair-prompt \
+  run_python_module automation.semantic_cli repair-prompt \
     --repo . \
     --current-dir "$current_dir" \
     --template "$tool_root/promptTemplates/verification-repair.md" \
@@ -339,7 +339,7 @@ agent_verify_semantic() {
 semantic_verdict() {
   local code
   set +e
-  run_python_module automation.semantic_verifier verdict --input "$current_dir/verification-result.json"
+  run_python_module automation.semantic_cli verdict --input "$current_dir/verification-result.json"
   code=$?
   set -e
   return "$code"

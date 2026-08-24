@@ -1,6 +1,8 @@
 import unittest
 
-from automation.semantic_verifier import SemanticVerifierError, build_semantic_prompt, render_template
+from automation.semantic_contract import SemanticVerifierError
+from automation.semantic_prompts import build_semantic_prompt
+from automation.semantic_text import render_template
 
 
 class SemanticTemplateCollisionTests(unittest.TestCase):

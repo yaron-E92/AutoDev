@@ -1,6 +1,6 @@
 import unittest
 
-from area_reader_v2.runner_core import (
+from area_reader.prompts import (
     build_area_reader_prompt,
     build_coder_prompt,
     build_synthesis_prompt,

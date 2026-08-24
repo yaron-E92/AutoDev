@@ -1,24 +1,10 @@
 from __future__ import annotations
 
+from automation import windows_verification_hooks
+
 import sys
 
-from automation import (
-    ci_outcomes,
-    context_optimization,
-    execution_classification_evidence,
-    execution_classification_hooks,
-    issue_queue,
-    opencode_github_entrypoint,
-    opencode_role_entrypoint,
-    opencode_runtime,
-    pr_head_sync,
-    privacy_consent,
-    privacy_grants,
-    role_workflow_hooks,
-    semantic_repair_budget,
-    windows_semantic_order,
-    windows_verification,
-)
+from automation import ci_outcomes, context_optimization, execution_classification_evidence, execution_classification_hooks, issue_queue, opencode_github_entrypoint, opencode_role_entrypoint, opencode_runtime, pr_head_sync, privacy_consent, privacy_grants, role_workflow_hooks, semantic_repair_budget, windows_semantic_order
 
 
 COORDINATE_COMMAND = "coordinate"
@@ -31,14 +17,13 @@ def run(argv: list[str] | None = None) -> int:
     ci_outcomes.install()
     pr_head_sync.install()
     semantic_repair_budget.install_opencode_resume_hooks()
-    windows_verification.install_opencode_hooks()
+    windows_verification_hooks.install_opencode_hooks()
     windows_semantic_order.install()
     context_optimization.install()
     privacy_consent.install()
     privacy_grants.install(run_consent=True)
-    # Existing workflow policy hooks historically wrapped opencode_coordinator.
-    # Bridge their runtime-neutral behavior into the canonical role coordinator
-    # only after those hooks have installed their underlying workflow patches.
+    # Install runtime-neutral workflow policy on the canonical coordinator
+    # after the underlying workflow patches are active.
     role_workflow_hooks.install()
     # Manual/external execution classification must wrap the final shared role
     # and resume boundaries so both slash-command and Python coordination stop

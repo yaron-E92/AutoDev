@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from automation import ci_outcomes, opencode_coordinator, workflow_stages
+from automation import ci_outcomes, workflow_stages
 
 
 REAL_SUCCESS_CHECKS = [
@@ -27,8 +27,6 @@ class CiOutcomeTests(unittest.TestCase):
             "wait_for_checks": workflow_stages.wait_for_required_checks,
             "pr_and_ci": workflow_stages.pr_and_ci,
             "execute_stage": workflow_stages.execute_stage,
-            "coordinator_run_stage": opencode_coordinator.run_stage,
-            "coordinator_coordinate": opencode_coordinator.coordinate,
         }
 
     def _restore_install_originals(self, originals: dict[str, object]) -> None:
@@ -37,8 +35,6 @@ class CiOutcomeTests(unittest.TestCase):
         workflow_stages.wait_for_required_checks = originals["wait_for_checks"]  # type: ignore[assignment]
         workflow_stages.pr_and_ci = originals["pr_and_ci"]  # type: ignore[assignment]
         workflow_stages.execute_stage = originals["execute_stage"]  # type: ignore[assignment]
-        opencode_coordinator.run_stage = originals["coordinator_run_stage"]  # type: ignore[assignment]
-        opencode_coordinator.coordinate = originals["coordinator_coordinate"]  # type: ignore[assignment]
 
     def test_real_pass_skipping_neutral_set_is_terminal_success(self):
         self.assertEqual(ci_outcomes.ci_state(REAL_SUCCESS_CHECKS), "terminal-success")
@@ -116,26 +112,6 @@ class CiOutcomeTests(unittest.TestCase):
             self.assertEqual(payload["ci_polls"], 12)
             self.assertIn("coordinate --resume", str(payload["next_action"]))
             self.assertFalse((current / "ci-repair.md").exists())
-
-    def test_waiting_stage_short_circuits_the_python_coordinator(self):
-        originals = self._install_originals()
-        try:
-            ci_outcomes.install()
-            with patch(
-                "automation.opencode_adapter.workflow_stage",
-                return_value=(
-                    0,
-                    {
-                        "state": "WAITING",
-                        "completed_stage": "pr-and-ci",
-                        "waiting_reason": "ci-pending",
-                    },
-                ),
-            ):
-                with self.assertRaises(ci_outcomes._CiWaiting):
-                    opencode_coordinator.run_stage(Path("."), "pr-and-ci")
-        finally:
-            self._restore_install_originals(originals)
 
     def test_ready_proof_accepts_same_non_failing_semantics(self):
         with tempfile.TemporaryDirectory() as temp_dir:

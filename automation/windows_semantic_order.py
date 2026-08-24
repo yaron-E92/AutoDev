@@ -1,24 +1,35 @@
 from __future__ import annotations
 
+from automation import windows_verification_manifest
+
+from automation import windows_verification_hooks
+
+from automation import windows_verification_execution
+
+from automation import windows_verification_contract
+
+from automation import semantic_evidence
+
 from pathlib import Path
 
-from automation import opencode_adapter, opencode_resume, run_manifest, windows_verification, workflow_stages
+from automation import opencode_resume_checkpoint, opencode_resume_execution, opencode_resume_status, run_manifest, workflow_stages
 
 
 WINDOWS_EVIDENCE_FILES = (
     "deferred-verification.json",
-    windows_verification.REQUEST_FILE,
-    windows_verification.RESULT_FILE,
+    windows_verification_contract.REQUEST_FILE,
+    windows_verification_contract.RESULT_FILE,
 )
 MAX_WINDOWS_EVIDENCE_CHARS = 12_000
+_WINDOWS_SEMANTIC_ORDER_INSTALLED = False
 
 
 def _needs_presemantic_windows(state: dict[str, object]) -> bool:
     return bool(
         state.get("OpenCodeProtocolVersion")
         and state.get("LastLocalCheckPassed")
-        and windows_verification.windows_required(state)
-        and not windows_verification.proof_current(state)
+        and windows_verification_manifest.windows_required(state)
+        and not windows_verification_manifest.proof_current(state)
         and str(state.get("LastSemanticVerdict", "")).strip().casefold() != "pass"
     )
 
@@ -63,7 +74,7 @@ def _run_presemantic_windows(
         )
 
     state = workflow_stages.read_state(current)
-    windows = windows_verification.run_after_push(
+    windows = windows_verification_execution.run_after_push(
         repo,
         current,
         state,
@@ -157,16 +168,18 @@ def _with_windows_evidence(current: Path, base: str) -> str:
 def install() -> None:
     """Install the OpenCode ordering bridge for required deferred Windows evidence."""
 
-    windows_verification.install_opencode_hooks()
-    if getattr(opencode_resume, "_autodev_windows_semantic_order_installed", False):
+    global _WINDOWS_SEMANTIC_ORDER_INSTALLED
+
+    windows_verification_hooks.install_opencode_hooks()
+    if _WINDOWS_SEMANTIC_ORDER_INSTALLED:
         return
 
     original_execute_stage = workflow_stages.execute_stage
     original_source_identity = workflow_stages.source_identity
-    original_resume_action = opencode_resume.resume_action
-    original_checkpoint_stage = opencode_resume.checkpoint_stage
-    original_resume = opencode_resume.resume
-    original_collect_deterministic_evidence = opencode_adapter.collect_deterministic_evidence
+    original_resume_action = opencode_resume_status.resume_action
+    original_checkpoint_stage = opencode_resume_checkpoint.checkpoint_stage
+    original_resume = opencode_resume_execution.resume
+    original_collect_deterministic_evidence = semantic_evidence.collect_deterministic_evidence
 
     def source_identity(
         repo: Path,
@@ -222,7 +235,7 @@ def install() -> None:
         current = repo.expanduser().resolve() / workflow_stages.CURRENT_DIR
         state = workflow_stages.read_state(current)
         if payload.get("next_action") == "pr-and-ci" and _needs_presemantic_windows(state):
-            payload["next_stage"] = windows_verification.MANIFEST_STAGE
+            payload["next_stage"] = windows_verification_contract.MANIFEST_STAGE
         return payload
 
     def collect_deterministic_evidence(current: Path) -> str:
@@ -233,8 +246,8 @@ def install() -> None:
 
     workflow_stages.source_identity = source_identity
     workflow_stages.execute_stage = execute_stage
-    opencode_resume.resume_action = resume_action
-    opencode_resume.checkpoint_stage = checkpoint_stage
-    opencode_resume.resume = resume
-    opencode_adapter.collect_deterministic_evidence = collect_deterministic_evidence
-    opencode_resume._autodev_windows_semantic_order_installed = True
+    opencode_resume_status.resume_action = resume_action
+    opencode_resume_checkpoint.checkpoint_stage = checkpoint_stage
+    opencode_resume_execution.resume = resume
+    semantic_evidence.collect_deterministic_evidence = collect_deterministic_evidence
+    _WINDOWS_SEMANTIC_ORDER_INSTALLED = True

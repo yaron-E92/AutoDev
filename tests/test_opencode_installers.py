@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+from automation import windows_verification_contract
+
+from automation import opencode_adapter_contract
+
+from automation import opencode_adapter_cli
+
 import io
 import json
 import tempfile
@@ -7,7 +13,7 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
-from automation import opencode_adapter, opencode_install, windows_verification
+from automation import opencode_install
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -41,7 +47,7 @@ class OpenCodeInstallerTests(unittest.TestCase):
     def test_canonical_installer_renders_repository_setup_and_secret_name_mapping(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             target = Path(temp_dir).resolve()
-            config_path = target / windows_verification.CONFIG_PATH
+            config_path = target / windows_verification_contract.CONFIG_PATH
             config_path.parent.mkdir(parents=True)
             config_path.write_text(
                 json.dumps(
@@ -88,7 +94,7 @@ class OpenCodeInstallerTests(unittest.TestCase):
             self.assertEqual(user_asset.read_text(encoding="utf-8"), "preserve")
             self.assertTrue((target / ".opencode" / "autodev.py").is_file())
             self.assertTrue((target / ".opencode" / "autodev.ps1").is_file())
-            for name in opencode_adapter.AGENT_FILES:
+            for name in opencode_adapter_contract.AGENT_FILES:
                 text = (target / ".opencode" / "agents" / name).read_text(encoding="utf-8")
                 with self.subTest(agent=name):
                     self.assertNotIn(".opencode/autodev.json", text)
@@ -101,7 +107,7 @@ class OpenCodeInstallerTests(unittest.TestCase):
             stderr = io.StringIO()
             stdout = io.StringIO()
             with redirect_stderr(stderr), redirect_stdout(stdout):
-                code = opencode_adapter.run(
+                code = opencode_adapter_cli.run(
                     [
                         "install",
                         "--target-repo",

@@ -8,7 +8,6 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from automation import opencode_adapter
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -65,9 +64,9 @@ class OpenCodeIntegrationTests(unittest.TestCase):
 
     def test_role_agents_are_subagents_model_free_and_use_exact_bridge_permissions(self):
         files = sorted(path.name for path in (OPEN_CODE_ROOT / "agents").glob("autodev-*.md"))
-        self.assertEqual(files, sorted(opencode_adapter.AGENT_FILES))
+        self.assertEqual(files, sorted(opencode_adapter_contract.AGENT_FILES))
 
-        for name in opencode_adapter.AGENT_FILES:
+        for name in opencode_adapter_contract.AGENT_FILES:
             if name == "autodev-coordinator.md":
                 continue
             text = (OPEN_CODE_ROOT / "agents" / name).read_text(encoding="utf-8")
@@ -122,7 +121,7 @@ class OpenCodeIntegrationTests(unittest.TestCase):
         self.assertIn("do not run prepare", body.casefold())
 
     def test_checked_in_bridge_snippets_use_only_real_argparse_commands(self):
-        parser = opencode_adapter.build_parser()
+        parser = opencode_adapter_cli.build_parser()
         paths = list((OPEN_CODE_ROOT / "agents").glob("autodev-*.md")) + list(
             (OPEN_CODE_ROOT / "commands").glob("autodev-*.md")
         )
@@ -154,8 +153,8 @@ class OpenCodeIntegrationTests(unittest.TestCase):
             project_json.write_text('{"agent":{"autodev-reader":{"model":"provider/reader"}}}\n', encoding="utf-8")
             project_jsonc.write_text('// user-owned\n{"model":"provider/default"}\n', encoding="utf-8")
 
-            first = opencode_adapter.install_assets(target, REPO_ROOT, python_command="python-custom")
-            second = opencode_adapter.install_assets(target, REPO_ROOT, python_command="python-custom")
+            first = opencode_adapter_assets.install_assets(target, REPO_ROOT, python_command="python-custom")
+            second = opencode_adapter_assets.install_assets(target, REPO_ROOT, python_command="python-custom")
             config = json.loads((target / ".opencode" / "autodev.json").read_text(encoding="utf-8"))
 
             self.assertEqual(len(first), len(second))
@@ -179,18 +178,18 @@ class OpenCodeIntegrationTests(unittest.TestCase):
     def test_all_seven_opencode_roles_can_be_mapped_independently(self):
         agents = {
             f"autodev-{role}": {"model": f"provider/{role}"}
-            for role in opencode_adapter.OPENCODE_ROLE_NAMES
+            for role in opencode_adapter_contract.OPENCODE_ROLE_NAMES
         }
 
-        mappings = opencode_adapter.model_mappings_from_config({"agent": agents})
+        mappings = opencode_adapter_models.model_mappings_from_config({"agent": agents})
 
-        self.assertEqual(set(mappings), set(opencode_adapter.OPENCODE_ROLE_NAMES))
-        for role in opencode_adapter.OPENCODE_ROLE_NAMES:
+        self.assertEqual(set(mappings), set(opencode_adapter_contract.OPENCODE_ROLE_NAMES))
+        for role in opencode_adapter_contract.OPENCODE_ROLE_NAMES:
             self.assertEqual(mappings[role]["source"], "explicit")
             self.assertEqual(mappings[role]["model"], f"provider/{role}")
 
     def test_unmapped_roles_preserve_opencode_inheritance(self):
-        mappings = opencode_adapter.model_mappings_from_config(
+        mappings = opencode_adapter_models.model_mappings_from_config(
             {
                 "model": "provider/default",
                 "agent": {
@@ -207,23 +206,23 @@ class OpenCodeIntegrationTests(unittest.TestCase):
         self.assertIn("autodev-coordinator", mappings["reader"]["inherits_from"])
         self.assertEqual(mappings["implementer"]["model"], "provider/strong")
 
-        global_only = opencode_adapter.model_mappings_from_config({"model": "provider/default"})
+        global_only = opencode_adapter_models.model_mappings_from_config({"model": "provider/default"})
         self.assertEqual(global_only["coordinator"]["model"], "provider/default")
         self.assertEqual(global_only["reader"]["model"], "provider/default")
 
-        runtime_only = opencode_adapter.model_mappings_from_config({})
+        runtime_only = opencode_adapter_models.model_mappings_from_config({})
         self.assertEqual(runtime_only["coordinator"]["model"], "")
         self.assertIn("current/default", runtime_only["coordinator"]["inherits_from"])
 
     def test_model_mapping_rejects_malformed_and_unknown_autodev_roles(self):
-        with self.assertRaises(opencode_adapter.OpenCodeAdapterError) as malformed:
-            opencode_adapter.model_mappings_from_config(
+        with self.assertRaises(opencode_adapter_contract.OpenCodeAdapterError) as malformed:
+            opencode_adapter_models.model_mappings_from_config(
                 {"agent": {"autodev-reader": {"model": "missing-provider-separator"}}}
             )
         self.assertIn("provider/model", str(malformed.exception))
 
-        with self.assertRaises(opencode_adapter.OpenCodeAdapterError) as unknown:
-            opencode_adapter.model_mappings_from_config(
+        with self.assertRaises(opencode_adapter_contract.OpenCodeAdapterError) as unknown:
+            opencode_adapter_models.model_mappings_from_config(
                 {"agent": {"autodev-reviewer": {"model": "provider/model"}}}
             )
         self.assertIn("unknown AutoDev OpenCode role mapping", str(unknown.exception))
@@ -241,12 +240,12 @@ class OpenCodeIntegrationTests(unittest.TestCase):
             return SimpleNamespace(returncode=0, stdout=json.dumps(config), stderr="")
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            mappings = opencode_adapter.resolve_opencode_model_mappings(
+            mappings = opencode_adapter_models.resolve_opencode_model_mappings(
                 Path(temp_dir),
                 runner=runner,
             )
 
-        rendered = opencode_adapter.render_model_mappings(mappings)
+        rendered = opencode_adapter_models.render_model_mappings(mappings)
         self.assertEqual(calls[0][0], ["opencode", "debug", "config"])
         self.assertEqual(mappings["implementer"]["model"], "provider/strong")
         self.assertIn("provider/strong", rendered)
@@ -254,16 +253,16 @@ class OpenCodeIntegrationTests(unittest.TestCase):
         self.assertNotIn("apiKey", rendered)
 
     def test_models_subcommand_is_read_only_and_prints_mapping(self):
-        parser = opencode_adapter.build_parser()
+        parser = opencode_adapter_cli.build_parser()
         parsed = parser.parse_args(["models", "--repo", "."])
         self.assertEqual(parsed.command, "models")
 
-        mappings = opencode_adapter.model_mappings_from_config({"model": "provider/default"})
+        mappings = opencode_adapter_models.model_mappings_from_config({"model": "provider/default"})
         with patch(
-            "automation.opencode_adapter.resolve_opencode_model_mappings",
+            "automation.opencode_adapter_cli.resolve_opencode_model_mappings",
             return_value=mappings,
         ) as resolve, patch("builtins.print") as output:
-            code = opencode_adapter.run(["models", "--repo", "."])
+            code = opencode_adapter_cli.run(["models", "--repo", "."])
 
         self.assertEqual(code, 0)
         resolve.assert_called_once()
@@ -281,10 +280,10 @@ class OpenCodeIntegrationTests(unittest.TestCase):
             return SimpleNamespace(returncode=0, stdout=json.dumps(config), stderr="")
 
         with tempfile.TemporaryDirectory() as temp_dir, patch(
-            "automation.opencode_adapter.workflow_stages.execute_stage",
+            "automation.opencode_adapter_workflow.workflow_stages.execute_stage",
             return_value=(0, {"state": "CONTINUE"}),
         ):
-            code, payload = opencode_adapter.workflow_stage(
+            code, payload = opencode_adapter_workflow.workflow_stage(
                 "preflight",
                 Path(temp_dir),
                 arguments="66",
@@ -303,11 +302,11 @@ class OpenCodeIntegrationTests(unittest.TestCase):
             "66 --role-model-profile=free-cloud",
         ):
             with tempfile.TemporaryDirectory() as temp_dir, patch(
-                "automation.opencode_adapter.workflow_stages.execute_stage",
+                "automation.opencode_adapter_workflow.workflow_stages.execute_stage",
                 side_effect=AssertionError("stage must not run"),
             ):
-                with self.assertRaises(opencode_adapter.OpenCodeAdapterError) as raised:
-                    opencode_adapter.workflow_stage(
+                with self.assertRaises(opencode_adapter_contract.OpenCodeAdapterError) as raised:
+                    opencode_adapter_workflow.workflow_stage(
                         "preflight",
                         Path(temp_dir),
                         arguments=arguments,
@@ -321,8 +320,8 @@ class OpenCodeIntegrationTests(unittest.TestCase):
             current.mkdir(parents=True)
             (current / "state.json").write_text(json.dumps({"IssueNumber": 65}), encoding="utf-8")
 
-            with patch("automation.opencode_adapter.workflow_stages.ensure_prepared_issue", return_value=current) as prepare:
-                actual = opencode_adapter.ensure_current_issue(repo, REPO_ROOT, "65")
+            with patch("automation.opencode_adapter_protocol.workflow_stages.ensure_prepared_issue", return_value=current) as prepare:
+                actual = opencode_adapter_protocol.ensure_current_issue(repo, REPO_ROOT, "65")
 
             self.assertTrue(actual.samefile(current))
             prepare.assert_called_once()
@@ -333,7 +332,7 @@ class OpenCodeIntegrationTests(unittest.TestCase):
             current = self._write_state(repo, IssueNumber=65)
 
             with patch("automation.workflow_stages.gh", side_effect=AssertionError("GitHub mutation should not run")):
-                actual = opencode_adapter.ensure_current_issue(repo, REPO_ROOT, "65")
+                actual = opencode_adapter_protocol.ensure_current_issue(repo, REPO_ROOT, "65")
 
             self.assertTrue(actual.samefile(current))
 
@@ -359,7 +358,7 @@ class OpenCodeIntegrationTests(unittest.TestCase):
             (current / "coder-plan.md").write_text("Reader plan\n", encoding="utf-8")
             (current / "recommended-command-groups.json").write_text("{}\n", encoding="utf-8")
 
-            path = opencode_adapter.prepare_role("planner", repo, "65", autodev_root=REPO_ROOT)
+            path = opencode_adapter_roles.prepare_role("planner", repo, "65", autodev_root=REPO_ROOT)
             prompt = path.read_text(encoding="utf-8")
             template = (current / "plan.template.md").read_text(encoding="utf-8")
             contracts = json.loads((current / "role-contracts.json").read_text(encoding="utf-8"))
@@ -367,10 +366,10 @@ class OpenCodeIntegrationTests(unittest.TestCase):
             self.assertIn("Bounded handoff", prompt)
             self.assertIn("Role-specific prompt policy (lite; autodev-ponytail-v1)", prompt)
             self.assertIn("# GitHub Issue #65", prompt)
-            for heading in opencode_adapter.REQUIRED_PLAN_HEADINGS:
+            for heading in prompt_runner.REQUIRED_PLAN_HEADINGS:
                 self.assertIn(heading, template)
             self.assertEqual(contracts["protocol_correction_limit"], 1)
-            self.assertEqual(set(contracts["roles"]), set(opencode_adapter.ROLE_NAMES))
+            self.assertEqual(set(contracts["roles"]), set(opencode_adapter_contract.ROLE_NAMES))
 
     def test_verifier_prepare_prepopulates_exact_acceptance_criteria(self):
         issue_text = "# Issue\n\n## Acceptance criteria\n- First exact criterion\n- Second exact criterion\n"
@@ -386,11 +385,11 @@ class OpenCodeIntegrationTests(unittest.TestCase):
             (current / "issue.md").write_text(issue_text, encoding="utf-8")
             (current / "plan.md").write_text("Plan\n", encoding="utf-8")
             with (
-                patch("automation.opencode_adapter.collect_changed_files", return_value=[]),
-                patch("automation.opencode_adapter.collect_current_diff", return_value=""),
-                patch("automation.opencode_adapter.collect_deterministic_evidence", return_value="passed"),
+                patch("automation.opencode_adapter_roles.collect_changed_files", return_value=[]),
+                patch("automation.opencode_adapter_roles.collect_current_diff", return_value=""),
+                patch("automation.opencode_adapter_roles.collect_deterministic_evidence", return_value="passed"),
             ):
-                opencode_adapter.prepare_role("verifier", repo, "67", autodev_root=REPO_ROOT)
+                opencode_adapter_roles.prepare_role("verifier", repo, "67", autodev_root=REPO_ROOT)
 
             template = json.loads((current / "verification-result.template.json").read_text(encoding="utf-8"))
             self.assertEqual(
@@ -400,8 +399,8 @@ class OpenCodeIntegrationTests(unittest.TestCase):
             self.assertEqual(template["findings"], [])
 
     def test_semantic_template_matches_parser_and_structural_errors_are_aggregated(self):
-        template = opencode_adapter.semantic_result_template(["Exact criterion"])
-        parsed = opencode_adapter.parse_semantic_output(
+        template = semantic_schema.semantic_result_template(["Exact criterion"])
+        parsed = semantic_schema.parse_semantic_output(
             json.dumps(template),
             expected_criteria=["Exact criterion"],
         )
@@ -414,8 +413,8 @@ class OpenCodeIntegrationTests(unittest.TestCase):
             "findings": [{"severity": "info", "message": "", "path": 7}],
             "repair_brief": [],
         }
-        with self.assertRaises(opencode_adapter.SemanticVerifierError) as raised:
-            opencode_adapter.parse_semantic_output(json.dumps(malformed))
+        with self.assertRaises(semantic_contract.SemanticVerifierError) as raised:
+            semantic_schema.parse_semantic_output(json.dumps(malformed))
         message = str(raised.exception)
         self.assertIn("verdict must be", message)
         self.assertIn("requirements must be an array", message)
@@ -444,7 +443,7 @@ class OpenCodeIntegrationTests(unittest.TestCase):
             plan_path = current / "plan.md"
             plan_path.write_text(plan, encoding="utf-8")
 
-            outputs = opencode_adapter.accept_role("planner", repo, plan_path)
+            outputs = opencode_adapter_roles.accept_role("planner", repo, plan_path)
             state = json.loads((current / "state.json").read_text(encoding="utf-8"))
 
             self.assertEqual(len(outputs), 1)
@@ -462,24 +461,24 @@ class OpenCodeIntegrationTests(unittest.TestCase):
             plan = current / "plan.md"
             plan.write_text("not a valid six-section plan\n", encoding="utf-8")
             (current / "plan.template.md").write_text(
-                "\n\n".join(opencode_adapter.REQUIRED_PLAN_HEADINGS) + "\n",
+                "\n\n".join(prompt_runner.REQUIRED_PLAN_HEADINGS) + "\n",
                 encoding="utf-8",
             )
 
-            with self.assertRaises(opencode_adapter.OpenCodeAdapterError) as first:
-                opencode_adapter.accept_role("planner", repo, plan)
+            with self.assertRaises(opencode_adapter_contract.OpenCodeAdapterError) as first:
+                opencode_adapter_roles.accept_role("planner", repo, plan)
             self.assertIn("one correction is allowed", str(first.exception))
             self.assertTrue((current / "contract-correction-planner.md").is_file())
 
-            with self.assertRaises(opencode_adapter.OpenCodeAdapterError) as second:
-                opencode_adapter.accept_role("planner", repo, plan)
+            with self.assertRaises(opencode_adapter_contract.OpenCodeAdapterError) as second:
+                opencode_adapter_roles.accept_role("planner", repo, plan)
             self.assertIn("correction limit exhausted", str(second.exception))
             diagnostics = json.loads((current / "run-diagnostics.json").read_text(encoding="utf-8"))
             self.assertEqual(diagnostics["protocol_correction_attempts"]["planner"], 1)
 
     def test_role_contract_bridge_snippets_match_real_argparse_surface(self):
-        parser = opencode_adapter.build_parser()
-        for contract in opencode_adapter.role_contracts().values():
+        parser = opencode_adapter_cli.build_parser()
+        for contract in opencode_adapter_contract.role_contracts().values():
             accept = str(contract["accept"])
             parser.parse_args(shlex.split(accept)[2:])
             prepare = contract["prepare"]
@@ -506,9 +505,9 @@ class OpenCodeIntegrationTests(unittest.TestCase):
             result_path = current / "verification-result.json"
 
             result_path.write_text(json.dumps(repair), encoding="utf-8")
-            opencode_adapter.accept_role("verifier", repo, result_path)
+            opencode_adapter_roles.accept_role("verifier", repo, result_path)
             result_path.write_text(json.dumps(passed), encoding="utf-8")
-            opencode_adapter.accept_role("verifier", repo, result_path)
+            opencode_adapter_roles.accept_role("verifier", repo, result_path)
 
             self.assertTrue((current / "verification" / "semantic-attempt-0.json").is_file())
             self.assertTrue((current / "verification" / "semantic-attempt-1.json").is_file())
@@ -519,14 +518,14 @@ class OpenCodeIntegrationTests(unittest.TestCase):
             repo = Path(temp_dir)
             current = self._write_state(repo)
             result = current / "reader-brief.md"
-            result.write_text("x" * (opencode_adapter.MAX_HANDOFF_CHARS + 1), encoding="utf-8")
+            result.write_text("x" * (opencode_adapter_contract.MAX_HANDOFF_CHARS + 1), encoding="utf-8")
 
-            with self.assertRaises(opencode_adapter.OpenCodeAdapterError):
-                opencode_adapter.accept_role("reader", repo, result)
+            with self.assertRaises(opencode_adapter_contract.OpenCodeAdapterError):
+                opencode_adapter_roles.accept_role("reader", repo, result)
             self.assertTrue((current / "contract-correction-reader.md").is_file())
 
-    def test_opencode_adapter_has_no_windows_workflow_backend(self):
-        adapter = (REPO_ROOT / "automation" / "opencode_adapter.py").read_text(encoding="utf-8")
+    def test_opencode_workflow_adapter_has_no_windows_workflow_backend(self):
+        adapter = (REPO_ROOT / "automation" / "opencode_adapter_workflow.py").read_text(encoding="utf-8")
         runtime = (REPO_ROOT / "automation" / "opencode_runtime.py").read_text(encoding="utf-8")
         portable = (REPO_ROOT / "integrations" / "opencode" / "autodev.py").read_text(encoding="utf-8")
 
@@ -539,17 +538,6 @@ class OpenCodeIntegrationTests(unittest.TestCase):
         self.assertIn("automation.autodev_cli", portable)
         self.assertNotIn("automation.opencode_runtime", portable)
         self.assertIn("opencode_adapter", runtime)
-
-    def test_existing_workflow_entrypoints_do_not_depend_on_opencode_adapter(self):
-        paths = (
-            REPO_ROOT / "scripts" / "run-real-issue.ps1",
-            REPO_ROOT / "windows" / "scripts" / "issue-to-pr-cycle.ps1",
-            REPO_ROOT / "linux" / "scripts" / "issue-to-pr-cycle.sh",
-            REPO_ROOT / "automation" / "prompt_runner.py",
-            REPO_ROOT / "automation" / "run_real_issue.py",
-        )
-        for path in paths:
-            self.assertNotIn("opencode_adapter", path.read_text(encoding="utf-8"))
 
     def _write_state(self, repo: Path, **overrides):
         current = repo / ".autodev-run" / "current"
@@ -569,3 +557,23 @@ class OpenCodeIntegrationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+from automation import opencode_adapter_assets
+
+from automation import opencode_adapter_cli
+
+from automation import opencode_adapter_contract
+
+from automation import opencode_adapter_models
+
+from automation import opencode_adapter_protocol
+
+from automation import opencode_adapter_roles
+
+from automation import opencode_adapter_workflow
+
+from automation import prompt_runner
+
+from automation import semantic_contract
+
+from automation import semantic_schema

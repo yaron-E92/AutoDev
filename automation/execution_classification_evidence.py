@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from automation import opencode_adapter_protocol
+
 import subprocess
 from dataclasses import replace
 from pathlib import Path
@@ -8,7 +10,9 @@ from automation import (
     execution_classification as execution,
     execution_classification_hooks as hooks,
     issue_queue,
-    role_coordinator,
+    role_coordinator_flow,
+    role_resume,
+    role_runtime,
     workflow_stages,
 )
 
@@ -163,7 +167,7 @@ def _install_attention_prepare_manifest() -> None:
     # prepare, but that state must still be resumable after the human supplies
     # the completion marker. Create the same issue-selected checkpoint without
     # launching any role or creating any shipment branch/PR.
-    current = role_coordinator.run_stage
+    current = role_coordinator_flow.run_stage
     if getattr(current, "_autodev_manual_attention_manifest", False):
         return
     original = current
@@ -176,16 +180,16 @@ def _install_attention_prepare_manifest() -> None:
             name == "prepare"
             and payload.get("state") == hooks.ATTENTION_STATE
             and current_dir.is_dir()
-            and not role_coordinator.role_resume.has_manifest(resolved)
+            and not role_resume.has_manifest(resolved)
         ):
             runtime_name = str(kwargs.get("runtime_name", "")).strip() or "opencode"
-            role_coordinator.opencode_adapter._ensure_opencode_protocol(current_dir)
-            role_coordinator.role_resume.create_manifest(
+            opencode_adapter_protocol._ensure_opencode_protocol(current_dir)
+            role_resume.create_manifest(
                 resolved,
                 workflow_stages.read_state(current_dir),
                 runtime_name=runtime_name,
             )
-            role_coordinator.role_runtime.persist_selection(
+            role_runtime.persist_selection(
                 resolved,
                 name=runtime_name,
                 source="selected",
@@ -194,7 +198,7 @@ def _install_attention_prepare_manifest() -> None:
         return payload
 
     run_stage._autodev_manual_attention_manifest = True  # type: ignore[attr-defined]
-    role_coordinator.run_stage = run_stage
+    role_coordinator_flow.run_stage = run_stage
 
 
 def install() -> None:

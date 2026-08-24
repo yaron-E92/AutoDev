@@ -1,16 +1,14 @@
 from __future__ import annotations
 
+from automation import windows_verification_manifest
+
+from automation import windows_verification_contract
+
+from automation import opencode_resume_status
+
 from pathlib import Path
 
-from automation import (
-    opencode_resume,
-    role_coordinator,
-    role_resume,
-    run_manifest,
-    semantic_repair_budget,
-    windows_verification,
-    workflow_stages,
-)
+from automation import role_coordinator_contract, role_coordinator_flow, role_resume, run_manifest, semantic_repair_budget, workflow_stages
 
 
 class _CiWaiting(RuntimeError):
@@ -20,7 +18,7 @@ class _CiWaiting(RuntimeError):
 
 
 def _install_waiting_bridge() -> None:
-    current_run_stage = role_coordinator.run_stage
+    current_run_stage = role_coordinator_flow.run_stage
     if not getattr(current_run_stage, "_autodev_role_ci_waiting", False):
         original_run_stage = current_run_stage
 
@@ -31,9 +29,9 @@ def _install_waiting_bridge() -> None:
             return payload
 
         run_stage._autodev_role_ci_waiting = True  # type: ignore[attr-defined]
-        role_coordinator.run_stage = run_stage
+        role_coordinator_flow.run_stage = run_stage
 
-    current_coordinate = role_coordinator.coordinate
+    current_coordinate = role_coordinator_flow.coordinate
     if not getattr(current_coordinate, "_autodev_role_ci_waiting", False):
         original_coordinate = current_coordinate
 
@@ -44,7 +42,7 @@ def _install_waiting_bridge() -> None:
                 return dict(waiting.payload)
 
         coordinate._autodev_role_ci_waiting = True  # type: ignore[attr-defined]
-        role_coordinator.coordinate = coordinate
+        role_coordinator_flow.coordinate = coordinate
 
 
 def _install_resume_bridge() -> None:
@@ -76,15 +74,15 @@ def _install_resume_bridge() -> None:
         ):
             return payload
 
-        attempts = opencode_resume.repair_attempts(manifest)
+        attempts = opencode_resume_status.repair_attempts(manifest)
         payload["windows_repair_attempt"] = int(attempts.get("windows", 0) or 0)
-        payload.update(windows_verification.payload_metadata(state))
+        payload.update(windows_verification_manifest.payload_metadata(state))
         if (
             payload.get("next_action") == "pr-and-ci"
-            and windows_verification.windows_required(state)
-            and not windows_verification.proof_current(state)
+            and windows_verification_manifest.windows_required(state)
+            and not windows_verification_manifest.proof_current(state)
         ):
-            payload["next_stage"] = windows_verification.MANIFEST_STAGE
+            payload["next_stage"] = windows_verification_contract.MANIFEST_STAGE
         return payload
 
     resume._autodev_role_resume_hooks = True  # type: ignore[attr-defined]
@@ -95,6 +93,6 @@ def install() -> None:
     # Windows verification extends the existing repair vocabulary. Keep that
     # workflow concern visible to the generic coordinator without teaching the
     # runtime abstraction anything about Windows or GitHub Actions.
-    role_coordinator.REPAIR_KINDS.setdefault("fixer-windows", "windows")
+    role_coordinator_contract.REPAIR_KINDS.setdefault("fixer-windows", "windows")
     _install_waiting_bridge()
     _install_resume_bridge()

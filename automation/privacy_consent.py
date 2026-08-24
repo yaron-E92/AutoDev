@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from automation import opencode_resume_contract
+
 import copy
 import hashlib
 import json
@@ -10,7 +12,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from automation import opencode_adapter, opencode_coordinator, opencode_resume, privacy, run_manifest, workflow_stages
+from automation import privacy, run_manifest, workflow_stages
 
 
 LEDGER_NAME = "privacy-consent.json"
@@ -157,7 +159,7 @@ def _ledger_path(repo: Path) -> Path:
 
 
 def _manifest(repo: Path) -> dict[str, object]:
-    path = opencode_resume.manifest_path(repo)
+    path = opencode_resume_contract.manifest_path(repo)
     if not path.is_file():
         return {}
     try:
@@ -564,52 +566,8 @@ def _install_audit_preview_guard() -> None:
     privacy._audit = audit
 
 
-def _install_preflight_hook() -> None:
-    current = opencode_coordinator._run_agent_process
-    if getattr(current, "_autodev_run_consent", False):
-        return
-    original = current
-
-    def run_agent_process(
-        repo: Path,
-        role: str,
-        prompt: str,
-        *,
-        runner,
-        which=None,
-        repair_kind: str = "",
-        phase: str = "work",
-    ) -> None:
-        try:
-            executable = opencode_coordinator.opencode_cli.resolve_opencode_cli(which=which)
-            mappings = opencode_adapter.resolve_opencode_model_mappings(
-                repo, runner=runner, which=which
-            )
-            ensure_run_consent(
-                repo,
-                mappings,
-                executable=executable,
-                runner=runner,
-            )
-        except privacy.PrivacyError as exc:
-            raise opencode_coordinator.OpenCodeCoordinatorError(
-                str(exc), classification=exc.classification
-            ) from exc
-        return original(
-            repo,
-            role,
-            prompt,
-            runner=runner,
-            which=which,
-            repair_kind=repair_kind,
-            phase=phase,
-        )
-
-    run_agent_process._autodev_run_consent = True  # type: ignore[attr-defined]
-    opencode_coordinator._run_agent_process = run_agent_process
 
 
 def install() -> None:
     _install_audit_preview_guard()
     _install_consent_gate()
-    _install_preflight_hook()

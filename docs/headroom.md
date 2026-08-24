@@ -232,7 +232,7 @@ fail_open_used
 
 If Headroom reports token counts or a compression ratio, AutoDev records those exact values. Missing values remain absent.
 
-With `automation.run_real_issue --debug-artifacts`, AutoDev also writes concise records beneath:
+When provider-backed execution enables debug artifacts, AutoDev also writes concise records beneath:
 
 ```text
 compression/reader-attempt-0.json

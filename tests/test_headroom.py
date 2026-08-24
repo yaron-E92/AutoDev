@@ -5,7 +5,6 @@ from pathlib import Path
 from unittest import mock
 from urllib import error
 
-from automation import run_real_issue
 from automation.headroom import (
     HeadroomConfig,
     HeadroomPromptResult,
@@ -25,8 +24,7 @@ from automation.model_providers import (
     validate_safe_headers,
 )
 from automation.model_roles import invoke_model, resolve_role_configs
-from automation.run_real_issue_core import build_implementation_prompt
-from automation.semantic_verifier import build_semantic_prompt
+from automation.semantic_prompts import build_semantic_prompt
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -106,51 +104,6 @@ class HeadroomTests(unittest.TestCase):
         self.assertTrue(configs["fixer"].headroom.enabled)
         self.assertFalse(configs["verifier"].headroom.enabled)
 
-    def test_implementer_compression_preserves_issue_constraints_and_output_contract(self):
-        issue = "# Issue\nEXACT-ISSUE-REQUIREMENT"
-        constraints = "EXACT-SAFETY-CONSTRAINT"
-        prompt = build_implementation_prompt(
-            issue_text=issue,
-            synthesized_handoff="long supporting handoff",
-            coder_plan="long supporting plan",
-            recommended_command_groups='{"groups":["tests"]}',
-            constraints=constraints,
-            branch_name="autodev/issue-36",
-        )
-        ranges = compressible_ranges(prompt, "implementer")
-        replacements = [f"COMPRESSED-{index}" for index in range(len(ranges))]
-
-        def fake_urlopen(req, timeout):
-            body = json.loads(req.data.decode("utf-8"))
-            self.assertEqual(len(body["messages"]), len(ranges))
-            return FakeResponse(
-                {
-                    "messages": [
-                        {"role": "user", "content": replacement}
-                        for replacement in replacements
-                    ],
-                    "tokens_before": 100,
-                    "tokens_after": 40,
-                }
-            )
-
-        result = prepare_prompt(
-            prompt,
-            role="implementer",
-            model="model-a",
-            config=HeadroomConfig(enabled=True),
-            upstream_base_url="https://upstream.invalid/v1",
-            timeout_seconds=5,
-            urlopen=fake_urlopen,
-        )
-
-        self.assertIn(issue, result.prompt)
-        self.assertIn(constraints, result.prompt)
-        self.assertIn("BEGIN_UNIFIED_DIFF", result.prompt)
-        self.assertIn("NO_CHANGES_REQUIRED", result.prompt)
-        self.assertNotIn("long supporting handoff", result.prompt)
-        self.assertEqual(result.telemetry["tokens_before"], 100)
-        self.assertEqual(result.telemetry["tokens_after"], 40)
 
     def test_semantic_compression_preserves_issue_acceptance_criteria_and_json_schema(self):
         template = (REPO_ROOT / "promptTemplates" / "verifier.md").read_text(encoding="utf-8")
@@ -191,32 +144,6 @@ class HeadroomTests(unittest.TestCase):
         self.assertIn('"status": "met | missing | uncertain"', result.prompt)
         self.assertNotIn("supporting handoff", result.prompt)
 
-    def test_compression_failure_fails_open_to_original_prompt(self):
-        prompt = build_implementation_prompt(
-            issue_text="Issue",
-            synthesized_handoff="evidence",
-            coder_plan="plan",
-            recommended_command_groups="{}",
-            constraints="constraints",
-            branch_name="branch",
-        )
-
-        def unavailable(req, timeout):
-            raise error.URLError("offline")
-
-        result = prepare_prompt(
-            prompt,
-            role="implementer",
-            model="m",
-            config=HeadroomConfig(enabled=True, fail_open=True),
-            upstream_base_url="https://upstream.invalid/v1",
-            timeout_seconds=5,
-            urlopen=unavailable,
-        )
-
-        self.assertEqual(result.prompt, prompt)
-        self.assertEqual(result.telemetry["status"], "compression_failed")
-        self.assertTrue(result.telemetry["fail_open_used"])
 
     def test_proxy_transport_failure_falls_back_but_upstream_failure_does_not(self):
         config = HeadroomConfig(enabled=True, fail_open=True)
@@ -299,58 +226,6 @@ class HeadroomTests(unittest.TestCase):
         self.assertNotIn("password", serialized)
         self.assertNotIn("token=secret", serialized)
 
-    def test_compression_telemetry_stays_out_of_model_text_and_debug_artifact_is_safe(self):
-        direct = StubProvider("direct")
-        proxy = StubProvider("BEGIN_UNIFIED_DIFF\npatch\nEND_UNIFIED_DIFF")
-        provider = HeadroomProvider(
-            direct,
-            proxy,
-            HeadroomConfig(enabled=True),
-            "https://upstream.invalid/v1",
-        )
-        prepared = HeadroomPromptResult(
-            "effective",
-            {
-                "status": "compressed",
-                "characters_before": 100,
-                "characters_after": 50,
-                "original_prompt_sha256": "a",
-                "effective_prompt_sha256": "b",
-                "upstream_base_url": "https://upstream.invalid/v1",
-            },
-        )
-        config = ModelConfig(
-            provider="openai-compatible-chat-completions",
-            model="m",
-            base_url="https://upstream.invalid/v1",
-            headroom=HeadroomConfig(enabled=True),
-        )
-
-        with tempfile.TemporaryDirectory() as privacy_root:
-            with mock.patch("automation.model_providers.prepare_prompt", return_value=prepared):
-                text, record = invoke_model(
-                    provider,
-                    config,
-                    "prompt",
-                    role="implementer",
-                    repo=Path(privacy_root),
-                )
-
-        self.assertEqual(text, "BEGIN_UNIFIED_DIFF\npatch\nEND_UNIFIED_DIFF")
-        self.assertEqual(record["compression"]["status"], "compressed")
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            out = Path(temp_dir)
-            run_real_issue.write_compression_debug_artifact(out, record)
-            artifact = json.loads(
-                (out / "compression" / "implementer-attempt-0.json").read_text(
-                    encoding="utf-8"
-                )
-            )
-
-        self.assertEqual(artifact["role"], "implementer")
-        self.assertEqual(artifact["status"], "compressed")
-        self.assertNotIn("Authorization", json.dumps(artifact))
 
 
 if __name__ == "__main__":

@@ -1,18 +1,25 @@
 from __future__ import annotations
 
+from automation import windows_verification_obligations
+
+from automation import windows_verification_manifest
+
+from automation import windows_verification_execution
+
+from automation import windows_verification_contract
+
+from automation import windows_verification_config
+
+from automation import windows_verification_actions
+
 import os
 from pathlib import Path
 
-from automation import windows_verification
+def build_execute_stage(core, original_execute_stage):
+    """Return a Windows-aware workflow executor without mutating the facade."""
 
 
-def install(core) -> None:
-    """Layer GitHub-hosted Windows verification onto the shared workflow API."""
-
-    if getattr(core, "_autodev_windows_workflow_hooks_installed", False):
-        return
-    windows_verification.install_manifest_hooks()
-    original_execute_stage = core.execute_stage
+    windows_verification_manifest.install_manifest_hooks()
 
     def _windows_pr_and_ci(
         repo: Path,
@@ -46,7 +53,7 @@ def install(core) -> None:
             raise core.WorkflowStageError("no workspace file changes detected, and no pushed AutoDev commit exists")
 
         state = core.read_state(current)
-        windows = windows_verification.run_after_push(
+        windows = windows_verification_execution.run_after_push(
             repo,
             current,
             state,
@@ -147,29 +154,29 @@ def install(core) -> None:
 
         if name == "preflight":
             try:
-                config = windows_verification.load_config(repo)
+                config = windows_verification_config.load_config(repo)
                 if config and bool(config.get("enabled", True)):
                     owner = os.environ.get("GITHUB_OWNER", "").strip()
                     repo_name = os.environ.get("GITHUB_REPO", "").strip()
                     if owner and repo_name:
-                        windows_verification.validate_actions_installation(
+                        windows_verification_actions.validate_actions_installation(
                             repo,
                             repo_full=f"{owner}/{repo_name}",
                             config=config,
                             runner=runner,
                         )
-            except windows_verification.WindowsVerificationError as exc:
+            except windows_verification_contract.WindowsVerificationError as exc:
                 raise core.WorkflowStageError(str(exc)) from exc
 
         if name == "ready" and current.is_dir():
             try:
-                windows_verification.validate_ready(current, core.read_state(current))
-            except windows_verification.WindowsVerificationError as exc:
+                windows_verification_execution.validate_ready(current, core.read_state(current))
+            except windows_verification_contract.WindowsVerificationError as exc:
                 raise core.WorkflowStageError(str(exc)) from exc
 
         if name == "pr-and-ci" and current.is_dir():
             state = core.read_state(current)
-            if windows_verification.windows_required(state):
+            if windows_verification_manifest.windows_required(state):
                 if state.get("OpenCodeProtocolVersion"):
                     if not bool(state.get("LastLocalCheckPassed")):
                         raise core.WorkflowStageError(
@@ -188,7 +195,7 @@ def install(core) -> None:
                         attempt=attempt,
                         runner=runner,
                     )
-                except windows_verification.WindowsVerificationError as exc:
+                except windows_verification_contract.WindowsVerificationError as exc:
                     raise core.WorkflowStageError(str(exc)) from exc
                 return 0, payload
 
@@ -208,20 +215,28 @@ def install(core) -> None:
             output = core.read_text(current / "local-check.log")
             try:
                 payload.update(
-                    windows_verification.record_local_deferred_obligations(
+                    windows_verification_obligations.record_local_deferred_obligations(
                         repo,
                         current,
                         state,
                         output,
                     )
                 )
-            except windows_verification.WindowsVerificationError as exc:
+            except windows_verification_contract.WindowsVerificationError as exc:
                 raise core.WorkflowStageError(str(exc)) from exc
 
         if name in {"ready", "status"} and current.is_dir():
-            payload.update(windows_verification.payload_metadata(core.read_state(current)))
+            payload.update(windows_verification_manifest.payload_metadata(core.read_state(current)))
 
         return code, payload
 
-    core.execute_stage = execute_stage
+    return execute_stage
+
+
+def install(core) -> None:
+    """Compatibility installer for callers that still request mutation explicitly."""
+
+    if getattr(core, "_autodev_windows_workflow_hooks_installed", False):
+        return
+    core.execute_stage = build_execute_stage(core, core.execute_stage)
     core._autodev_windows_workflow_hooks_installed = True

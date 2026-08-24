@@ -1,18 +1,20 @@
 from __future__ import annotations
 
+from automation import opencode_resume_status
+
+from automation import opencode_resume_execution
+
+from automation import opencode_adapter_roles
+
+from automation import opencode_adapter_handoff
+
+from automation import opencode_adapter_contract
+
 import json
 import subprocess
 from pathlib import Path
 
-from automation import (
-    execution_classification as execution,
-    issue_queue,
-    opencode_adapter,
-    opencode_resume,
-    role_coordinator,
-    role_resume,
-    workflow_stages,
-)
+from automation import execution_classification as execution, issue_queue, role_coordinator_flow, role_resume, workflow_stages
 
 
 ATTENTION_STATE = "ATTENTION_REQUIRED"
@@ -495,7 +497,7 @@ def _install_prepare_gate() -> None:
 
 
 def _install_reader_gate() -> None:
-    current_prepare = opencode_adapter._prepare_reader  # type: ignore[attr-defined]
+    current_prepare = opencode_adapter_handoff._prepare_reader  # type: ignore[attr-defined]
     if not getattr(current_prepare, "_autodev_execution_classification", False):
         original_prepare = current_prepare
 
@@ -510,9 +512,9 @@ def _install_reader_gate() -> None:
             return prompt
 
         _prepare_reader._autodev_execution_classification = True  # type: ignore[attr-defined]
-        opencode_adapter._prepare_reader = _prepare_reader  # type: ignore[attr-defined]
+        opencode_adapter_handoff._prepare_reader = _prepare_reader  # type: ignore[attr-defined]
 
-    current_accept = opencode_adapter._accept_role_once  # type: ignore[attr-defined]
+    current_accept = opencode_adapter_roles._accept_role_once  # type: ignore[attr-defined]
     if not getattr(current_accept, "_autodev_execution_classification", False):
         original_accept = current_accept
 
@@ -536,7 +538,7 @@ def _install_reader_gate() -> None:
                     issue_text,
                 )
             except execution.ExecutionClassificationError as exc:
-                raise opencode_adapter.OpenCodeAdapterError(
+                raise opencode_adapter_contract.OpenCodeAdapterError(
                     f"reader execution-classification contract rejected: {exc}"
                 ) from exc
             execution.apply_state_fields(state, report)
@@ -545,7 +547,7 @@ def _install_reader_gate() -> None:
             return outputs
 
         _accept_role_once._autodev_execution_classification = True  # type: ignore[attr-defined]
-        opencode_adapter._accept_role_once = _accept_role_once  # type: ignore[attr-defined]
+        opencode_adapter_roles._accept_role_once = _accept_role_once  # type: ignore[attr-defined]
 
 
 def _attention_resume_payload(
@@ -576,7 +578,7 @@ def _attention_resume_payload(
 
 
 def _install_resume_gates() -> None:
-    current_opencode_resume = opencode_resume.resume
+    current_opencode_resume = opencode_resume_execution.resume
     if not getattr(current_opencode_resume, "_autodev_execution_classification", False):
         original_opencode_resume = current_opencode_resume
 
@@ -591,9 +593,9 @@ def _install_resume_gates() -> None:
             return attention or payload
 
         resume._autodev_execution_classification = True  # type: ignore[attr-defined]
-        opencode_resume.resume = resume
+        opencode_resume_execution.resume = resume
 
-    current_status = opencode_resume.status_text
+    current_status = opencode_resume_status.status_text
     if not getattr(current_status, "_autodev_execution_classification", False):
         original_status = current_status
 
@@ -617,7 +619,7 @@ def _install_resume_gates() -> None:
             return text.rstrip() + "\n" + "\n".join(extra) + "\n"
 
         status_text._autodev_execution_classification = True  # type: ignore[attr-defined]
-        opencode_resume.status_text = status_text
+        opencode_resume_status.status_text = status_text
 
     current_role_resume = role_resume.resume
     if not getattr(current_role_resume, "_autodev_execution_classification", False):
@@ -638,7 +640,7 @@ def _install_resume_gates() -> None:
 
 
 def _install_python_coordinator_gate() -> None:
-    current_resume_payload = role_coordinator._resume_payload  # type: ignore[attr-defined]
+    current_resume_payload = role_coordinator_flow._resume_payload  # type: ignore[attr-defined]
     if not getattr(current_resume_payload, "_autodev_execution_classification", False):
         original_resume_payload = current_resume_payload
 
@@ -649,9 +651,9 @@ def _install_python_coordinator_gate() -> None:
             return payload
 
         _resume_payload._autodev_execution_classification = True  # type: ignore[attr-defined]
-        role_coordinator._resume_payload = _resume_payload  # type: ignore[attr-defined]
+        role_coordinator_flow._resume_payload = _resume_payload  # type: ignore[attr-defined]
 
-    current_terminal = role_coordinator.terminal_payload
+    current_terminal = role_coordinator_flow.terminal_payload
     if not getattr(current_terminal, "_autodev_execution_classification", False):
         original_terminal = current_terminal
 
@@ -661,9 +663,9 @@ def _install_python_coordinator_gate() -> None:
             return original_terminal(repo, payload, **kwargs)
 
         terminal_payload._autodev_execution_classification = True  # type: ignore[attr-defined]
-        role_coordinator.terminal_payload = terminal_payload
+        role_coordinator_flow.terminal_payload = terminal_payload
 
-    current_coordinate = role_coordinator.coordinate
+    current_coordinate = role_coordinator_flow.coordinate
     if not getattr(current_coordinate, "_autodev_execution_classification", False):
         original_coordinate = current_coordinate
 
@@ -674,7 +676,7 @@ def _install_python_coordinator_gate() -> None:
                 return dict(attention.payload)
 
         coordinate._autodev_execution_classification = True  # type: ignore[attr-defined]
-        role_coordinator.coordinate = coordinate
+        role_coordinator_flow.coordinate = coordinate
 
 
 def install() -> None:

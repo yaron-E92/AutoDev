@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from automation import opencode_adapter_contract
+
 import json
 import tempfile
 import unittest
@@ -9,11 +11,42 @@ from unittest.mock import patch
 
 from automation import (
     non_success_report,
-    opencode_adapter,
-    opencode_coordinator,
+    opencode_role_runtime,
+    role_coordinator_contract,
+    role_coordinator_runtime,
+    role_runtime,
     role_runtime_diagnostics,
     workflow_stages,
 )
+
+
+class _DiagnosticRuntime:
+    name = "opencode"
+
+    def invoke(self, context, *, runner, which=None):
+        completed = runner(["opencode-test-role"], capture_output=True)
+        returncode = int(getattr(completed, "returncode", 1))
+        return role_runtime.RoleInvocationResult(
+            runtime=self.name,
+            role=context.role,
+            phase=context.phase,
+            returncode=returncode,
+            elapsed_ms=1,
+            stdout=str(getattr(completed, "stdout", "") or ""),
+            stderr=str(getattr(completed, "stderr", "") or ""),
+            termination="completed" if returncode == 0 else "runtime-nonzero",
+            model="test/model",
+        )
+
+
+def _diagnostic_snapshots():
+    return {
+        "reader": role_runtime.build_role_snapshot(
+            runtime="opencode",
+            role="reader",
+            configured={"model": "test/model"},
+        )
+    }
 
 
 class RoleRuntimeDiagnosticsTests(unittest.TestCase):
@@ -80,25 +113,27 @@ class RoleRuntimeDiagnosticsTests(unittest.TestCase):
                 stdout='{"type":"text","text":"claimed success token=runtime-secret"}\n',
                 stderr="",
             )
-            rejection = opencode_adapter.OpenCodeAdapterError(
+            rejection = opencode_adapter_contract.OpenCodeAdapterError(
                 "reader protocol correction limit exhausted after one retry: role result is empty: "
                 ".autodev-run/current/reader-brief.md"
             )
 
-            with patch.object(opencode_adapter, "prepare_role"), patch.object(
-                opencode_adapter,
-                "accept_role",
+            with patch.object(role_coordinator_runtime, "_prepare_role"), patch.object(
+                role_coordinator_runtime,
+                "_accept_role",
                 side_effect=[
-                    opencode_adapter.OpenCodeAdapterError(
+                    opencode_adapter_contract.OpenCodeAdapterError(
                         "role result is empty: .autodev-run/current/reader-brief.md"
                     ),
                     rejection,
                 ],
             ):
-                with self.assertRaises(opencode_coordinator.OpenCodeCoordinatorError) as raised:
-                    opencode_coordinator.run_role(
+                with self.assertRaises(role_coordinator_contract.RoleCoordinatorError) as raised:
+                    role_coordinator_runtime.run_role(
                         repo,
                         "reader",
+                        _DiagnosticRuntime(),
+                        _diagnostic_snapshots(),
                         runner=lambda *args, **kwargs: completed,
                         which=lambda _: "/usr/bin/opencode",
                     )
@@ -163,23 +198,25 @@ class RoleRuntimeDiagnosticsTests(unittest.TestCase):
                 "artifact": ".autodev-run/current/reader-brief.md",
                 "sha256": "abc",
             }
-            with patch.object(opencode_adapter, "prepare_role"), patch.object(
-                opencode_adapter,
-                "accept_role",
+            with patch.object(role_coordinator_runtime, "_prepare_role"), patch.object(
+                role_coordinator_runtime,
+                "_accept_role",
                 side_effect=[
-                    opencode_adapter.OpenCodeAdapterError(
+                    opencode_adapter_contract.OpenCodeAdapterError(
                         "role result is empty: .autodev-run/current/reader-brief.md"
                     ),
                     [],
                 ],
             ), patch.object(
-                opencode_coordinator,
+                role_coordinator_runtime,
                 "role_acceptance",
                 return_value=accepted,
             ):
-                result = opencode_coordinator.run_role(
+                result = role_coordinator_runtime.run_role(
                     repo,
                     "reader",
+                    _DiagnosticRuntime(),
+                    _diagnostic_snapshots(),
                     runner=runner,
                     which=lambda _: "/usr/bin/opencode",
                 )
@@ -205,11 +242,13 @@ class RoleRuntimeDiagnosticsTests(unittest.TestCase):
                 stdout="",
                 stderr="provider unavailable token=secret-value",
             )
-            with patch.object(opencode_adapter, "prepare_role"):
-                with self.assertRaises(opencode_coordinator.OpenCodeCoordinatorError) as raised:
-                    opencode_coordinator.run_role(
+            with patch.object(role_coordinator_runtime, "_prepare_role"):
+                with self.assertRaises(role_coordinator_contract.RoleCoordinatorError) as raised:
+                    role_coordinator_runtime.run_role(
                         repo,
                         "reader",
+                        _DiagnosticRuntime(),
+                        _diagnostic_snapshots(),
                         runner=lambda *args, **kwargs: completed,
                         which=lambda _: "/usr/bin/opencode",
                     )

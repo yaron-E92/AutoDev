@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from automation import opencode_adapter_contract
+
 import json
 import os
 import tempfile
@@ -9,9 +11,9 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from automation import (
-    opencode_adapter,
     opencode_role_runtime,
-    role_coordinator,
+    role_coordinator_flow,
+    role_coordinator_runtime,
     role_runtime,
     run_manifest,
     workflow_stages,
@@ -32,7 +34,7 @@ class MockRuntime:
                 configured={"implementation": "test-double-v1"},
                 safe_metadata={"model": "mock/model"},
             )
-            for role in opencode_adapter.ROLE_NAMES
+            for role in opencode_adapter_contract.ROLE_NAMES
         }
 
     def invoke(self, context: role_runtime.RoleInvocationContext, *, runner, which=None):
@@ -205,6 +207,32 @@ class RoleRuntimeSelectionTests(unittest.TestCase):
             )
 
 
+    def test_user_config_is_below_repository_config_and_above_default(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            repo = root / "repo"
+            repo.mkdir()
+            user_config = root / "user-config.json"
+            user_config.write_text(
+                json.dumps({"role_runtime": "user-runtime"}),
+                encoding="utf-8",
+            )
+            with patch.dict(
+                os.environ,
+                {role_runtime.USER_CONFIG_ENV: str(user_config)},
+                clear=True,
+            ):
+                self.assertEqual(role_runtime.resolve_runtime_name(repo)[0], "user-runtime")
+                repo_config = repo / ".autodev" / "config.json"
+                repo_config.parent.mkdir(parents=True)
+                repo_config.write_text(
+                    json.dumps({"role_runtime": "repo-runtime"}),
+                    encoding="utf-8",
+                )
+                self.assertEqual(role_runtime.resolve_runtime_name(repo)[0], "repo-runtime")
+
+
+
 class OpenCodeRoleRuntimeTests(unittest.TestCase):
     def test_opencode_runtime_preserves_agent_command_and_model_mapping(self):
         runtime = opencode_role_runtime.OpenCodeRoleRuntime()
@@ -230,7 +258,7 @@ class OpenCodeRoleRuntimeTests(unittest.TestCase):
             "resolve_opencode_cli",
             return_value="/usr/bin/opencode",
         ), patch.object(
-            opencode_adapter,
+            opencode_role_runtime.opencode_adapter_models,
             "resolve_opencode_model_mappings",
             return_value={
                 "reader": {
@@ -278,29 +306,29 @@ class RuntimeAgnosticCoordinatorTests(unittest.TestCase):
             }
 
         with tempfile.TemporaryDirectory() as temp_dir, patch.object(
-            role_coordinator.opencode_runtime,
+            role_coordinator_flow.opencode_runtime,
             "install_workflow_guards",
         ), patch.object(
-            role_coordinator,
+            role_coordinator_flow,
             "run_stage",
             side_effect=[{"state": "CONTINUE"}, {"state": "CONTINUE"}],
         ) as stage, patch.object(
-            role_coordinator,
+            role_coordinator_flow,
             "_resume_payload",
             side_effect=cursors,
         ), patch.object(
-            role_coordinator,
+            role_coordinator_runtime,
             "_prepare_role",
         ), patch.object(
-            role_coordinator,
+            role_coordinator_runtime,
             "_accept_role",
             return_value=[],
         ), patch.object(
-            role_coordinator,
+            role_coordinator_runtime,
             "role_acceptance",
             side_effect=lambda repo, role: accepted(role),
         ):
-            result = role_coordinator.coordinate(
+            result = role_coordinator_flow.coordinate(
                 Path(temp_dir),
                 arguments="29",
                 runtime_name="mock",
@@ -323,19 +351,19 @@ class RuntimeAgnosticCoordinatorTests(unittest.TestCase):
             runner=lambda *args, **kwargs: None,
         )
         with tempfile.TemporaryDirectory() as temp_dir, patch.object(
-            role_coordinator,
+            role_coordinator_runtime,
             "_prepare_role",
         ), patch.object(
-            role_coordinator,
+            role_coordinator_runtime,
             "_accept_role",
             return_value=[],
         ), patch.object(
-            role_coordinator,
+            role_coordinator_runtime,
             "role_acceptance",
             return_value={"state": "MISSING", "reason": "not accepted"},
         ):
-            with self.assertRaises(role_coordinator.RoleCoordinatorError) as raised:
-                role_coordinator.run_role(
+            with self.assertRaises(role_coordinator_runtime.RoleCoordinatorError) as raised:
+                role_coordinator_runtime.run_role(
                     Path(temp_dir),
                     "reader",
                     runtime,

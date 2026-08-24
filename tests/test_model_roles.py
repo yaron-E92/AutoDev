@@ -1,11 +1,9 @@
-import io
 import json
 import tempfile
 import unittest
 from pathlib import Path
 
-from area_reader_v2 import runner as area_runner
-from automation import run_real_issue
+from area_reader import workflow as area_runner
 from automation.model_providers import ModelConfig, MockProvider, ProviderError
 from automation.model_roles import ModelInvocationError, invoke_model, resolve_role_configs
 from automation.prompt_policies import (
@@ -185,39 +183,6 @@ class ModelRoleTests(unittest.TestCase):
         self.assertEqual([record["role"] for record in records], ["reader", "synthesizer", "planner"])
         self.assertEqual([record["prompt_policy_mode"] for record in records], ["off", "lite", "lite"])
 
-    def test_dry_run_routes_initial_patch_to_implementer_only(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            out_dir = Path(temp_dir)
-            (out_dir / "synthesized-handoff.md").write_text("handoff", encoding="utf-8")
-            (out_dir / "coder-plan.md").write_text("plan", encoding="utf-8")
-            (out_dir / "recommended-command-groups.json").write_text("{}", encoding="utf-8")
-            provider = MockProvider([
-                "BEGIN_UNIFIED_DIFF\ndiff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-a\n+b\nEND_UNIFIED_DIFF"
-            ])
-            policy_token = run_real_issue._ACTIVE_POLICIES.set(resolve_prompt_policies({}))
-            try:
-                result = run_real_issue.run_implementation_loop(
-                    repo=out_dir,
-                    out_dir=out_dir,
-                    issue_text="Issue",
-                    branch_name="autodev/issue-34",
-                    implementer_provider=provider,
-                    implementer_config=ModelConfig(provider="mock", model="implementer"),
-                    fixer_config=ModelConfig(provider="mock", model="fixer"),
-                    max_fix_attempts=1,
-                    dry_run=True,
-                    stream=io.StringIO(),
-                )
-            finally:
-                run_real_issue._ACTIVE_POLICIES.reset(policy_token)
-            records = json.loads((out_dir / "model-invocations.json").read_text(encoding="utf-8"))
-            implementation_prompt = (out_dir / "implementation-prompt.md").read_text(encoding="utf-8")
-        self.assertTrue(result.passed)
-        self.assertEqual([record["role"] for record in records], ["implementer"])
-        self.assertEqual(records[0]["prompt_policy_mode"], "full")
-        self.assertEqual(records[0]["prompt_policy_version"], PROMPT_POLICY_VERSION)
-        self.assertIn("Reuse existing code", implementation_prompt)
-        self.assertTrue(implementation_prompt.endswith("NO_CHANGES_REQUIRED\n<short explanation>\n"))
 
     def test_provider_metadata_records_policy_source_and_modes(self):
         policies = resolve_prompt_policies({})

@@ -128,7 +128,7 @@ function Resolve-SemanticVerificationMode {
         return 0
     }
 
-    $code = Invoke-PythonModule -Module "automation.semantic_verifier" -Arguments @(
+    $code = Invoke-PythonModule -Module "automation.semantic_cli" -Arguments @(
         "enabled",
         "--provider-profile", $ProviderProfile
     )
@@ -373,7 +373,7 @@ function Invoke-LegacyVerifyAgent {
 function Invoke-SemanticPromptPreparation {
     $verificationDir = Join-Path $currentDir "verification"
     New-Item -ItemType Directory -Force -Path $verificationDir | Out-Null
-    $code = Invoke-PythonModule -Module "automation.semantic_verifier" -Arguments @(
+    $code = Invoke-PythonModule -Module "automation.semantic_cli" -Arguments @(
         "prepare",
         "--repo", [System.IO.Path]::GetFullPath("."),
         "--current-dir", $currentDir,
@@ -384,7 +384,7 @@ function Invoke-SemanticPromptPreparation {
 }
 
 function Invoke-SemanticRepairPromptPreparation {
-    $code = Invoke-PythonModule -Module "automation.semantic_verifier" -Arguments @(
+    $code = Invoke-PythonModule -Module "automation.semantic_cli" -Arguments @(
         "repair-prompt",
         "--repo", [System.IO.Path]::GetFullPath("."),
         "--current-dir", $currentDir,
@@ -410,7 +410,7 @@ function Invoke-SemanticVerifyAgent {
 }
 
 function Get-SemanticVerdictCode {
-    return Invoke-PythonModule -Module "automation.semantic_verifier" -Arguments @(
+    return Invoke-PythonModule -Module "automation.semantic_cli" -Arguments @(
         "verdict",
         "--input", (Join-Path $currentDir "verification-result.json")
     )

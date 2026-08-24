@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from automation import opencode_resume_status
+
 import json
 import os
 import subprocess
@@ -8,7 +10,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from automation import opencode_resume, run_manifest, semantic_repair_budget, workflow_stages
+from automation import run_manifest, semantic_repair_budget, workflow_stages
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -380,7 +382,7 @@ class SemanticRepairBudgetTests(unittest.TestCase):
             2,
         )
         self.assertEqual(
-            opencode_resume.resume_action(updated_manifest, updated_state),
+            opencode_resume_status.resume_action(updated_manifest, updated_state),
             "fixer-semantic",
         )
 

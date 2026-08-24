@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from automation import workflow_stages
+from automation import workflow_prompts, workflow_stages
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -584,20 +584,17 @@ class WorkflowStageTests(unittest.TestCase):
                 "StackContext": "Python",
             }
 
-            with patch(
-                "automation.workflow_stages_core.gh",
-                return_value=SimpleNamespace(
+            workflow_prompts.render_legacy_verifier(
+                repo,
+                current,
+                state,
+                REPO_ROOT,
+                runner=lambda *args, **kwargs: SimpleNamespace(
                     returncode=0,
                     stdout="diff --git a/file b/file\n",
                     stderr="",
                 ),
-            ):
-                workflow_stages.render_legacy_verifier(
-                    repo,
-                    current,
-                    state,
-                    REPO_ROOT,
-                )
+            )
 
             prompt = (current / "verifier.md").read_text(encoding="utf-8")
             for name in (

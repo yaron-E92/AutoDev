@@ -1,5 +1,17 @@
 from __future__ import annotations
 
+from automation import semantic_evidence
+
+from automation import opencode_adapter_storage
+
+from automation import opencode_adapter_roles
+
+from automation import opencode_adapter_protocol
+
+from automation import opencode_adapter_handoff
+
+from automation import opencode_adapter_contract
+
 import argparse
 import hashlib
 import json
@@ -7,7 +19,7 @@ import math
 from datetime import datetime, timezone
 from pathlib import Path
 
-from automation import headroom, opencode_adapter, semantic_verifier, workflow_stages
+from automation import headroom, workflow_stages
 from automation.model_providers import load_provider_config
 from automation.prompt_policies import compose_prompt
 
@@ -121,8 +133,8 @@ def _headroom_metadata(repo: Path, state: dict[str, object], role: str) -> dict[
 
 
 def _current_policy(repo: Path, current: Path, role: str) -> str:
-    state = opencode_adapter._read_state(current)
-    return str(opencode_adapter._resolved_policies(repo, state).get(role, "off"))
+    state = opencode_adapter_storage._read_state(current)
+    return str(opencode_adapter_protocol._resolved_policies(repo, state).get(role, "off"))
 
 
 def _compose(role: str, raw: str, repo: Path, current: Path) -> tuple[str, str]:
@@ -190,13 +202,13 @@ Independently decide whether the implementation satisfies the issue. Use only ve
 
 
 def _write_verifier_evidence(repo: Path, current: Path) -> None:
-    changed_files = semantic_verifier.collect_changed_files(repo)
-    diff = semantic_verifier.collect_current_diff(repo, changed_files)
+    changed_files = semantic_evidence.collect_changed_files(repo)
+    diff = semantic_evidence.collect_current_diff(repo, changed_files)
     evidence = {
         "schema_version": SCHEMA_VERSION,
         "changed_files": changed_files,
-        "deterministic_evidence": semantic_verifier.collect_deterministic_evidence(current),
-        "cross_file_regression_evidence": semantic_verifier.collect_cross_file_regression_evidence(
+        "deterministic_evidence": semantic_evidence.collect_deterministic_evidence(current),
+        "cross_file_regression_evidence": semantic_evidence.collect_cross_file_regression_evidence(
             repo, changed_files, diff
         ),
     }
@@ -276,7 +288,7 @@ def _record(
         for item in components
         if not bool(item.get("required"))
     )
-    state = opencode_adapter._read_state(current)
+    state = opencode_adapter_storage._read_state(current)
     record = {
         "schema_version": SCHEMA_VERSION,
         "recorded_at": _utc_now(),
@@ -354,7 +366,7 @@ def optimize_prepared_role(
     elif role == "implementer":
         raw = _implementer_prompt()
     elif role == "fixer":
-        fixer_source = opencode_adapter._fixer_source(current, arguments)
+        fixer_source = opencode_adapter_handoff._fixer_source(current, arguments)
         raw = _fixer_prompt(_repo_relative(repo, fixer_source))
     else:
         _write_verifier_evidence(repo, current)
@@ -438,7 +450,7 @@ def install() -> None:
     if _INSTALLED:
         return
 
-    current_prepare = opencode_adapter.prepare_role
+    current_prepare = opencode_adapter_roles.prepare_role
     if not getattr(current_prepare, "_autodev_context_optimized", False):
         original_prepare = current_prepare
 
@@ -447,7 +459,7 @@ def install() -> None:
             repo: Path,
             arguments: str,
             *,
-            autodev_root: Path = opencode_adapter.AUTODEV_ROOT,
+            autodev_root: Path = opencode_adapter_contract.AUTODEV_ROOT,
         ) -> Path:
             path = original_prepare(
                 role,
@@ -460,7 +472,7 @@ def install() -> None:
             return path
 
         prepare_role._autodev_context_optimized = True  # type: ignore[attr-defined]
-        opencode_adapter.prepare_role = prepare_role
+        opencode_adapter_roles.prepare_role = prepare_role
 
     current_execute = workflow_stages.execute_stage
     if not getattr(current_execute, "_autodev_context_optimized", False):

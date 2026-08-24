@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from automation import opencode_adapter_models
+
+from automation import opencode_adapter_contract
+
 import argparse
 import json
 import sys
@@ -8,14 +12,18 @@ from pathlib import Path
 from automation import (
     github_cli_proxy,
     non_success_report,
-    opencode_adapter,
     opencode_failure_entrypoint,
-    role_coordinator as opencode_coordinator,
     role_resume,
     role_runtime,
     workflow_stages,
 )
 
+from automation import (
+    role_coordinator_cli,
+    role_coordinator_contract,
+    role_coordinator_flow,
+    role_coordinator_stages,
+)
 
 SUCCESSFUL_TERMINAL_STATES = {
     "PR_READY",
@@ -66,13 +74,13 @@ def run(argv: list[str] | None = None) -> int:
         try:
             selected_name, _ = role_runtime.resolve_runtime_name(repo, args.runtime)
             if selected_name == "opencode":
-                opencode_adapter.reject_unsupported_model_overrides(args.arguments)
-            payload = opencode_coordinator.coordinate(
+                opencode_adapter_models.reject_unsupported_model_overrides(args.arguments)
+            payload = role_coordinator_flow.coordinate(
                 repo,
                 arguments=args.arguments,
                 resume=args.resume,
                 invalidated_roles=(
-                    opencode_coordinator.invalidations(args.arguments)
+                    role_coordinator_cli.invalidations(args.arguments)
                     if args.resume
                     else set()
                 ),
@@ -81,15 +89,15 @@ def run(argv: list[str] | None = None) -> int:
             )
         except (
             opencode_failure_entrypoint.ProviderCapabilityError,
-            opencode_coordinator.RoleCoordinatorError,
+            role_coordinator_contract.RoleCoordinatorError,
             role_runtime.RoleRuntimeError,
             role_resume.RoleResumeError,
-            opencode_adapter.OpenCodeAdapterError,
+            opencode_adapter_contract.OpenCodeAdapterError,
             workflow_stages.WorkflowStageError,
             OSError,
             ValueError,
         ) as exc:
-            payload = opencode_coordinator.terminal_payload(
+            payload = role_coordinator_stages.terminal_payload(
                 repo,
                 {
                     "state": "FAILED",

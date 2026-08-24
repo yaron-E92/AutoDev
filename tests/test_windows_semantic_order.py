@@ -1,19 +1,22 @@
 from __future__ import annotations
 
+from automation import windows_verification_storage
+
+from automation import windows_verification_contract
+
+from automation import opencode_resume_status
+
+from automation import opencode_resume_checkpoint
+
+from automation import semantic_evidence
+
 import json
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
-from automation import (
-    opencode_adapter,
-    opencode_resume,
-    run_manifest,
-    windows_semantic_order,
-    windows_verification,
-    workflow_stages,
-)
+from automation import run_manifest, windows_semantic_order, windows_verification_execution, workflow_stages
 
 
 HEAD = "a" * 40
@@ -100,7 +103,7 @@ class WindowsSemanticOrderTests(unittest.TestCase):
                 persisted["WindowsVerificationProof"] = proof
                 persisted["Status"] = "WindowsVerificationPassed"
                 workflow_stages.write_state(current, persisted)
-                result_path = current / windows_verification.RESULT_FILE
+                result_path = current / windows_verification_contract.RESULT_FILE
                 result_path.write_text(
                     json.dumps(
                         {
@@ -117,7 +120,7 @@ class WindowsSemanticOrderTests(unittest.TestCase):
                     "failed_stage": "",
                     "failure_classification": "",
                     "artifact": str(result_path),
-                    "platform_verification_stage": windows_verification.MANIFEST_STAGE,
+                    "platform_verification_stage": windows_verification_contract.MANIFEST_STAGE,
                     "windows_repair_attempt": 0,
                     "windows_verification_proof": proof,
                     "windows_stage_completed": True,
@@ -130,7 +133,7 @@ class WindowsSemanticOrderTests(unittest.TestCase):
                     return_value=[{"Path": "src/App.cs", "Status": "modified"}],
                 ),
                 mock.patch.object(workflow_stages, "create_api_commit", side_effect=create_commit),
-                mock.patch.object(windows_verification, "run_after_push", side_effect=run_windows),
+                mock.patch.object(windows_verification_execution, "run_after_push", side_effect=run_windows),
             ):
                 payload = windows_semantic_order._run_presemantic_windows(
                     repo,
@@ -167,15 +170,15 @@ class WindowsSemanticOrderTests(unittest.TestCase):
             repair = {
                 "state": "REPAIR",
                 "failed_stage": "windows-verification",
-                "failure_classification": windows_verification.FAILURE_CODE_REPAIRABLE,
+                "failure_classification": windows_verification_contract.FAILURE_CODE_REPAIRABLE,
                 "next_action": "delegate the Windows repair to autodev-fixer",
-                "artifact": str(current / windows_verification.REPAIR_FILE),
-                "platform_verification_stage": windows_verification.MANIFEST_STAGE,
+                "artifact": str(current / windows_verification_contract.REPAIR_FILE),
+                "platform_verification_stage": windows_verification_contract.MANIFEST_STAGE,
                 "windows_repair_attempt": 0,
             }
             with (
                 mock.patch.object(workflow_stages, "workspace_changes", return_value=[]),
-                mock.patch.object(windows_verification, "run_after_push", return_value=repair),
+                mock.patch.object(windows_verification_execution, "run_after_push", return_value=repair),
             ):
                 payload = windows_semantic_order._run_presemantic_windows(
                     repo,
@@ -231,11 +234,11 @@ class WindowsSemanticOrderTests(unittest.TestCase):
                 '{"windows_required":true}\n',
                 encoding="utf-8",
             )
-            (current / windows_verification.REQUEST_FILE).write_text(
+            (current / windows_verification_contract.REQUEST_FILE).write_text(
                 '{"commands":[{"name":"smoke","command":"pwsh -File smoke.ps1"}]}\n',
                 encoding="utf-8",
             )
-            (current / windows_verification.RESULT_FILE).write_text(
+            (current / windows_verification_contract.RESULT_FILE).write_text(
                 '{"state":"passed","commit_sha":"abc","source_identity":"source"}\n',
                 encoding="utf-8",
             )
@@ -243,9 +246,9 @@ class WindowsSemanticOrderTests(unittest.TestCase):
 
         self.assertIn("BASE EVIDENCE", evidence)
         self.assertIn("deferred-verification.json", evidence)
-        self.assertIn(windows_verification.REQUEST_FILE, evidence)
+        self.assertIn(windows_verification_contract.REQUEST_FILE, evidence)
         self.assertIn("pwsh -File smoke.ps1", evidence)
-        self.assertIn(windows_verification.RESULT_FILE, evidence)
+        self.assertIn(windows_verification_contract.RESULT_FILE, evidence)
         self.assertIn('"state":"passed"', evidence)
 
     def test_platform_only_checkpoint_completes_windows_not_pr(self):
@@ -265,7 +268,7 @@ class WindowsSemanticOrderTests(unittest.TestCase):
                 branch="autodev/issue-137",
                 role_snapshots={},
             )
-            result_path = current / windows_verification.RESULT_FILE
+            result_path = current / windows_verification_contract.RESULT_FILE
             result_path.write_text('{"state":"passed"}\n', encoding="utf-8")
             proof = {
                 "state": "terminal-success",
@@ -273,7 +276,7 @@ class WindowsSemanticOrderTests(unittest.TestCase):
                 "source_identity": SOURCE,
                 "run_id": 321,
                 "run_url": "https://github.com/example/repo/actions/runs/321",
-                "result_sha256": windows_verification._sha256_file(result_path),
+                "result_sha256": windows_verification_storage._sha256_file(result_path),
             }
             state = _presemantic_state()
             state.update(
@@ -292,16 +295,16 @@ class WindowsSemanticOrderTests(unittest.TestCase):
                 "failed_stage": "",
                 "failure_classification": "",
                 "platform_verification_only": True,
-                "platform_verification_stage": windows_verification.MANIFEST_STAGE,
+                "platform_verification_stage": windows_verification_contract.MANIFEST_STAGE,
                 "windows_stage_completed": True,
                 "windows_repair_attempt": 0,
                 "windows_verification_proof": proof,
             }
 
-            opencode_resume.checkpoint_stage(repo, "pr-and-ci", payload, 0)
+            opencode_resume_checkpoint.checkpoint_stage(repo, "pr-and-ci", payload, 0)
             manifest = run_manifest.load_manifest(manifest_path)
 
-        self.assertTrue(run_manifest.stage_completed(manifest, windows_verification.MANIFEST_STAGE))
+        self.assertTrue(run_manifest.stage_completed(manifest, windows_verification_contract.MANIFEST_STAGE))
         self.assertFalse(run_manifest.stage_completed(manifest, "pr-created"))
 
     def test_resume_selects_windows_stage_before_semantic_and_then_verifier(self):
@@ -321,7 +324,7 @@ class WindowsSemanticOrderTests(unittest.TestCase):
         }
         state = _presemantic_state()
 
-        self.assertEqual(opencode_resume.resume_action(manifest, state), "pr-and-ci")
+        self.assertEqual(opencode_resume_status.resume_action(manifest, state), "pr-and-ci")
 
         state["LastCommitSha"] = HEAD
         state["ShippedSourceIdentity"] = SOURCE
@@ -330,23 +333,23 @@ class WindowsSemanticOrderTests(unittest.TestCase):
             "head_sha": HEAD,
             "source_identity": SOURCE,
         }
-        self.assertEqual(opencode_resume.resume_action(manifest, state), "verifier")
+        self.assertEqual(opencode_resume_status.resume_action(manifest, state), "verifier")
 
         state["WindowsVerificationRequired"] = False
         state.pop("WindowsVerificationProof", None)
-        self.assertEqual(opencode_resume.resume_action(manifest, state), "verifier")
+        self.assertEqual(opencode_resume_status.resume_action(manifest, state), "verifier")
 
     def test_install_augments_opencode_verifier_evidence(self):
         windows_semantic_order.install()
         with tempfile.TemporaryDirectory() as temp_dir:
             current = Path(temp_dir)
-            (current / windows_verification.RESULT_FILE).write_text(
+            (current / windows_verification_contract.RESULT_FILE).write_text(
                 '{"state":"passed","run_id":321}\n',
                 encoding="utf-8",
             )
-            evidence = opencode_adapter.collect_deterministic_evidence(current)
+            evidence = semantic_evidence.collect_deterministic_evidence(current)
 
-        self.assertIn(windows_verification.RESULT_FILE, evidence)
+        self.assertIn(windows_verification_contract.RESULT_FILE, evidence)
         self.assertIn('"run_id":321', evidence)
 
 

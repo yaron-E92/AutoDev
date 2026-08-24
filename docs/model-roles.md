@@ -65,17 +65,7 @@ deterministic repair   -> fixer
 semantic review        -> verifier
 ```
 
-Use the configuration with the operational runner:
-
-```text
-python -m automation.run_real_issue \
-  --repo /path/to/repo \
-  --github-repo OWNER/REPO \
-  --issue 32 \
-  --mode plan-only \
-  --provider-config providers.json \
-  --out /tmp/autodev-run
-```
+Use the role configuration through the supported platform issue-to-PR entrypoints. The wrappers resolve the profile in Python and pass model work through the shared provider boundary; examples are shown under **Existing issue-to-PR entrypoints** below.
 
 The shared area runner also accepts `--provider-config`. Its legacy `--synthesizer` option remains a model-only compatibility override when the synthesizer role is not independently configured.
 
@@ -158,15 +148,7 @@ generic model access failure
 
 ### Use the profile
 
-```text
-python -m automation.run_real_issue \
-  --repo /path/to/repo \
-  --github-repo OWNER/REPO \
-  --issue 33 \
-  --mode plan-only \
-  --provider-config examples/providers/ollama-cloud-nemotron-minimax.json \
-  --out /tmp/autodev-run
-```
+After the preflight succeeds, pass the same profile to the supported platform issue-to-PR entrypoints shown below. The profile remains the source of truth for role/provider selection during that run.
 
 On PowerShell, replace each trailing `\` with a backtick, or place the command on one line.
 
@@ -376,4 +358,4 @@ linux/scripts/issue-to-pr-cycle.sh \
 
 Both wrappers pass role and profile references to `automation.prompt_runner`; provider validation, request construction, model invocation, failure classification, compression telemetry, and response parsing live in Python. Legacy planner/agent provider, model, and command flags remain accepted and are resolved by Python. Codex Desktop is optional and is not needed for a headless run.
 
-Semantic verification and Headroom compression are now independent optional layers above the shared role/provider transport. Resumable manifests and the evaluation harness remain separate issues.
+Semantic verification, resumable manifests, and Headroom compression are integrated layers above the shared role/provider transport.

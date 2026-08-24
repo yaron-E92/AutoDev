@@ -1,10 +1,18 @@
 from __future__ import annotations
 
+from automation import opencode_resume_status
+
+from automation import opencode_resume_execution
+
+from automation import opencode_resume_contract
+
+from automation import opencode_resume_checkpoint
+
 import subprocess
 from pathlib import Path
 from typing import Callable
 
-from automation import opencode_resume, run_manifest, workflow_stages
+from automation import run_manifest, workflow_stages
 
 
 class RoleResumeError(ValueError):
@@ -71,8 +79,8 @@ def create_manifest(
 
 def begin_role(repo: Path, role: str, arguments: str) -> None:
     try:
-        opencode_resume.begin_role(repo, role, arguments)
-    except opencode_resume.OpenCodeResumeError as exc:
+        opencode_resume_checkpoint.begin_role(repo, role, arguments)
+    except opencode_resume_contract.OpenCodeResumeError as exc:
         raise RoleResumeError(str(exc)) from exc
 
 
@@ -114,7 +122,7 @@ def checkpoint_role(
     manifest = run_manifest.load_manifest(path)
     try:
         if role == "reader":
-            artifacts = opencode_resume._existing(
+            artifacts = opencode_resume_checkpoint._existing(
                 current,
                 "reader-brief.md",
                 "routed-areas.json",
@@ -140,7 +148,7 @@ def checkpoint_role(
                 run_root=current,
                 artifacts=[current / "synthesized-handoff.md"],
                 inputs={
-                    "repository_read_output": opencode_resume._stage_output_hash(manifest, "repository-read"),
+                    "repository_read_output": opencode_resume_checkpoint._stage_output_hash(manifest, "repository-read"),
                     "synthesizer_fingerprint": run_manifest.stage_role_fingerprint(manifest, "synthesizer"),
                 },
             )
@@ -152,7 +160,7 @@ def checkpoint_role(
                 run_root=current,
                 artifacts=[current / "plan.md"],
                 inputs={
-                    "handoff_output": opencode_resume._stage_output_hash(manifest, "handoff-synthesized"),
+                    "handoff_output": opencode_resume_checkpoint._stage_output_hash(manifest, "handoff-synthesized"),
                     "planner_fingerprint": run_manifest.stage_role_fingerprint(manifest, "planner"),
                 },
             )
@@ -169,12 +177,12 @@ def checkpoint_role(
                 run_root=current,
                 artifacts=[current / "commit-message.txt"],
                 inputs={
-                    "plan_output": opencode_resume._stage_output_hash(manifest, "plan-created"),
+                    "plan_output": opencode_resume_checkpoint._stage_output_hash(manifest, "plan-created"),
                     "implementer_fingerprint": run_manifest.stage_role_fingerprint(manifest, "implementer"),
                 },
-                details=opencode_resume._source_details(proof),
+                details=opencode_resume_checkpoint._source_details(proof),
             )
-            opencode_resume._checkpoint_patch_applied(
+            opencode_resume_checkpoint._checkpoint_patch_applied(
                 path,
                 current,
                 proof,
@@ -184,7 +192,7 @@ def checkpoint_role(
             return
         if role == "fixer":
             manifest = run_manifest.load_manifest(path)
-            repair = opencode_resume._stage_record(manifest, "repair-generated")
+            repair = opencode_resume_checkpoint._stage_record(manifest, "repair-generated")
             details = repair.get("details", {}) if isinstance(repair, dict) else {}
             kind = str(details.get("kind", "")) if isinstance(details, dict) else ""
             attempt = int(details.get("attempt", 0) or 0) if isinstance(details, dict) else 0
@@ -217,10 +225,10 @@ def checkpoint_role(
                 details={
                     "kind": kind,
                     "attempt": attempt,
-                    **opencode_resume._source_details(proof),
+                    **opencode_resume_checkpoint._source_details(proof),
                 },
             )
-            opencode_resume._checkpoint_patch_applied(
+            opencode_resume_checkpoint._checkpoint_patch_applied(
                 path,
                 current,
                 proof,
@@ -229,7 +237,7 @@ def checkpoint_role(
             )
             run_manifest.record_stage_state(
                 path,
-                opencode_resume._stage_for_repair_kind(kind),
+                opencode_resume_checkpoint._stage_for_repair_kind(kind),
                 status="pending",
                 details={"attempt": attempt, "repair_kind": kind},
             )
@@ -242,15 +250,15 @@ def checkpoint_role(
 
 def checkpoint_stage(repo: Path, name: str, payload: dict[str, object], attempt: int) -> None:
     try:
-        opencode_resume.checkpoint_stage(repo, name, payload, attempt)
-    except opencode_resume.OpenCodeResumeError as exc:
+        opencode_resume_checkpoint.checkpoint_stage(repo, name, payload, attempt)
+    except opencode_resume_contract.OpenCodeResumeError as exc:
         raise RoleResumeError(str(exc)) from exc
 
 
 def checkpoint_failure(repo: Path, stage: str, error: BaseException) -> None:
     try:
-        opencode_resume.checkpoint_failure(repo, stage, error)
-    except opencode_resume.OpenCodeResumeError as exc:
+        opencode_resume_checkpoint.checkpoint_failure(repo, stage, error)
+    except opencode_resume_contract.OpenCodeResumeError as exc:
         raise RoleResumeError(str(exc)) from exc
 
 
@@ -286,7 +294,7 @@ def resume(
         )
         manifest = run_manifest.load_manifest(path)
         state = workflow_stages.read_state(current)
-        opencode_resume._repair_atomic_implementation_checkpoint(
+        opencode_resume_execution._repair_atomic_implementation_checkpoint(
             repo,
             current,
             path,
@@ -294,7 +302,7 @@ def resume(
             state,
         )
         manifest = run_manifest.load_manifest(path)
-        problems = opencode_resume._resume_problems(
+        problems = opencode_resume_status._resume_problems(
             repo,
             current,
             manifest,
@@ -307,9 +315,9 @@ def resume(
     except run_manifest.ManifestError as exc:
         raise RoleResumeError(str(exc)) from exc
 
-    action = opencode_resume.resume_action(manifest, state)
-    role = opencode_resume._role_for_action(action)
-    attempts = opencode_resume.repair_attempts(manifest)
+    action = opencode_resume_status.resume_action(manifest, state)
+    role = opencode_resume_status._role_for_action(action)
+    attempts = opencode_resume_status.repair_attempts(manifest)
     target = manifest.get("target", {}) if isinstance(manifest.get("target", {}), dict) else {}
     snapshot = snapshots.get(role, {}) if role else {}
     safe = snapshot.get("safe_metadata", {}) if isinstance(snapshot, dict) else {}
