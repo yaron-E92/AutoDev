@@ -25,9 +25,12 @@ jobs:
             'prompt_runner' \
             'Legacy PASS/FAIL|Legacy mode|Legacy compatibility|Legacy configuration|temporary compatibility shim' \
             'resolve_model_config|load_provider_config|create_provider' \
-            'resolve_role_configs|resolve_profile_roles|ROLE_FALLBACKS'; do
+            'resolve_role_configs|resolve_profile_roles|ROLE_FALLBACKS' \
+            'invoke_model|ModelInvocationError|append_invocation_metadata|safe_role_metadata' \
+            'model_config_from_values|ModelProvider|HeadroomProvider|resolve_headroom_values'; do
             echo "=== $pattern ==="
             git grep -n -E "$pattern" -- automation area_reader integrations promptTemplates tests docs README.md CONTRIBUTING.md 2>/dev/null || true
           done
           echo '=== issue-181 scaffolding ==='
-          find .github/workflows scripts -maxdepth 2 -type f -name '*181*' -print 2>/dev/null | sort
+          find .github/workflows -maxdepth 1 -type f -name '*181*' -print | sort
+          if [ -d scripts ]; then find scripts -maxdepth 2 -type f -name '*181*' -print | sort; fi
