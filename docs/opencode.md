@@ -523,7 +523,7 @@ OpenCode role-model mapping
   -> controls OpenCode agents
 
 AutoDev provider profile
-  -> provider-profile JSON used by automation.run_real_issue / prompt_runner
+  -> provider-profile JSON used by the platform workflows / automation.prompt_runner
   -> controls non-OpenCode/headless model transports
 ```
 
@@ -564,7 +564,6 @@ scripts/run-real-issue.ps1
 windows/scripts/issue-to-pr-cycle.ps1
 linux/scripts/issue-to-pr-cycle.sh
 automation.prompt_runner
-automation.run_real_issue
 ```
 
 OpenCode does not use `windows/scripts/issue-to-pr-cycle.ps1` as its backend. PowerShell and Bash remain supported frontends, while portable OpenCode stages use the shared Python implementation.

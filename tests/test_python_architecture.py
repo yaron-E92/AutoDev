@@ -13,6 +13,7 @@ REPRESENTATIVE_MODULES = (
     "automation.scheduler_registration",
     "automation.workflow_dispatch",
     "automation.semantic_invocation",
+    "automation.semantic_cli",
     "automation.privacy_grant_hooks",
     "automation.claim_lease",
     "automation.scheduler_health_lifecycle",
@@ -25,6 +26,36 @@ REPRESENTATIVE_MODULES = (
     "automation.coordination_state",
     "automation.role_coordinator_flow",
     "area_reader.pipeline",
+)
+REMOVED_PATHS = (
+    "automation/run_real_issue.py",
+    "automation/run_real_issue_core.py",
+    "automation/workflow_stages_core.py",
+    "automation/semantic_verifier.py",
+    "automation/windows_verification.py",
+    "automation/opencode_resume.py",
+    "automation/opencode_adapter.py",
+    "automation/role_coordinator.py",
+    "automation/opencode_coordinator.py",
+    "automation/eval_harness.py",
+    "automation/eval_harness_core.py",
+    "area_reader_v2",
+)
+MAINTAINED_DOCS = (
+    "CONTRIBUTING.md",
+    "docs/headroom.md",
+    "docs/model-roles.md",
+    "docs/opencode.md",
+    "docs/python-architecture.md",
+)
+STALE_TEXT_MARKERS = (
+    "automation." + "run_real_issue",
+    "automation." + "semantic_verifier",
+    "automation." + "windows_verification.py",
+    "automation." + "opencode_resume.py",
+    "workflow_stages" + "_core.py",
+    "eval_harness" + "_core.py",
+    "area_reader" + "_v2",
 )
 
 
@@ -113,26 +144,44 @@ class PythonArchitectureTests(unittest.TestCase):
         cycle = first_cycle(graph)
         self.assertEqual(cycle, [], "top-level local import cycle: " + " -> ".join(cycle))
 
-
     def test_representative_responsibility_modules_import_cleanly(self):
         for name in REPRESENTATIVE_MODULES:
             with self.subTest(module=name):
                 importlib.import_module(name)
 
+    def test_removed_legacy_module_paths_do_not_return(self):
+        existing = [relative for relative in REMOVED_PATHS if (ROOT / relative).exists()]
+        self.assertEqual(existing, [])
+
+    def test_maintained_docs_do_not_reference_retired_python_surfaces(self):
+        stale: list[str] = []
+        for relative in MAINTAINED_DOCS:
+            text = (ROOT / relative).read_text(encoding="utf-8")
+            for marker in STALE_TEXT_MARKERS:
+                if marker in text:
+                    stale.append(f"{relative}: {marker}")
+        self.assertEqual(stale, [])
+
     def test_issue_180_migration_scaffolding_is_not_shipped(self):
-        leftovers = sorted(
-            path.relative_to(ROOT).as_posix()
-            for parent in (ROOT / "scripts", ROOT / ".github" / "workflows")
-            if parent.is_dir()
-            for path in parent.glob("issue-180-*")
-            if path.name not in {"issue-180-canonical-reachability.yml", "issue-180-remove-legacy-runner.yml"}
-        )
+        leftovers: list[str] = []
+        scripts = ROOT / "scripts"
+        workflows = ROOT / ".github" / "workflows"
+        if scripts.is_dir():
+            leftovers.extend(
+                path.relative_to(ROOT).as_posix()
+                for path in scripts.glob("issue_180_*")
+            )
+        if workflows.is_dir():
+            leftovers.extend(
+                path.relative_to(ROOT).as_posix()
+                for path in workflows.glob("issue-180-*")
+            )
         chunks = sorted(
             path.relative_to(ROOT).as_posix()
             for path in ROOT.rglob("*.chunk*.txt")
             if ".git" not in path.parts
         )
-        self.assertEqual(leftovers, [])
+        self.assertEqual(sorted(leftovers), [])
         self.assertEqual(chunks, [])
 
 

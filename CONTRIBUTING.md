@@ -319,7 +319,7 @@ Python syntax, unit tests, and the explicit no-network mocked runner smoke path:
 ```text
 python -m compileall automation area_reader benchmarks tests
 python -m unittest discover -s tests -v
-python -m unittest -v tests.test_run_real_issue.RunRealIssueTests.test_plan_only_uses_reader_provider_for_planning_not_coder_provider tests.test_run_real_issue.RunRealIssueTests.test_dry_run_implementation_calls_coder_and_saves_patch
+python -m unittest -v tests.test_autodev_cli.AutoDevCliTests.test_existing_commands_share_opencode_entrypoint_core tests.test_role_runtime.RuntimeAgnosticCoordinatorTests.test_mock_runtime_executes_reader_synthesizer_planner_through_same_coordinator
 ```
 
 Bash syntax on Linux:
@@ -378,7 +378,7 @@ if ((${#forbidden[@]} > 0)); then
 fi
 ```
 
-The two named `RunRealIssueTests` use `MockProvider`; they exercise plan-only reader routing and dry-run patch generation without contacting Ollama, GitHub, or a cloud model.
+The two named smoke tests exercise canonical CLI routing and the mock-runtime coordinator flow without contacting Ollama, GitHub, or a cloud model.
 
 ---
 
