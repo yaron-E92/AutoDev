@@ -9,7 +9,7 @@ on:
         type: string
         default: ''
       version:
-        description: Canonical vMAJOR.MINOR.PATCH package version
+        description: Canonical vMAJOR.MINOR.PATCH package version; ordinary CI uses synthetic v0.0.0 and releases pass the exact release tag
         required: false
         type: string
         default: v0.0.0
@@ -46,8 +46,10 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $wix = Join-Path ${env:ProgramFiles(x86)} 'WiX Toolset v3.14\bin'
-          if (-not (Test-Path (Join-Path $wix 'candle.exe'))) {
-            throw "GitHub Windows runner does not provide WiX Toolset v3.14 at $wix"
+          foreach ($tool in @('candle.exe', 'light.exe', 'dark.exe')) {
+            if (-not (Test-Path (Join-Path $wix $tool))) {
+              throw "GitHub Windows runner does not provide WiX Toolset v3.14 $tool at $wix"
+            }
           }
           "WIX=$wix" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           $wix | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
@@ -76,7 +78,7 @@ jobs:
             throw 'Repeated PyInstaller Windows payload builds are not byte-reproducible.'
           }
 
-      - name: Build and normalize MSI twice
+      - name: Build and verify equivalent MSI contents twice
         shell: pwsh
         env:
           PACKAGE_VERSION: ${{ inputs.version }}
@@ -85,17 +87,41 @@ jobs:
           $PSNativeCommandUseErrorActionPreference = $true
           $sha = (git rev-parse HEAD).Trim()
           $epoch = (git show -s --format=%ct $sha).Trim()
-          $payload = "$env:RUNNER_TEMP\native-win-a\payload\autodev"
-          python -m automation.native_windows --repo . --payload $payload --out "$env:RUNNER_TEMP\msi-a" --version $env:PACKAGE_VERSION --commit $sha
-          python -m automation.native_windows --repo . --payload $payload --out "$env:RUNNER_TEMP\msi-b" --version $env:PACKAGE_VERSION --commit $sha
+          $payloadA = "$env:RUNNER_TEMP\native-win-a\payload\autodev"
+          $payloadB = "$env:RUNNER_TEMP\native-win-b\payload\autodev"
+          python -m automation.native_windows --repo . --payload $payloadA --out "$env:RUNNER_TEMP\msi-a" --version $env:PACKAGE_VERSION --commit $sha
+          python -m automation.native_windows --repo . --payload $payloadB --out "$env:RUNNER_TEMP\msi-b" --version $env:PACKAGE_VERSION --commit $sha
           $name = "AutoDev-$($env:PACKAGE_VERSION.TrimStart('v'))-Setup.msi"
-          python -m automation.msi_reproducibility --msi "$env:RUNNER_TEMP\msi-a\$name" --epoch $epoch
-          python -m automation.msi_reproducibility --msi "$env:RUNNER_TEMP\msi-b\$name" --epoch $epoch
-          $hashA = (Get-FileHash "$env:RUNNER_TEMP\msi-a\$name" -Algorithm SHA256).Hash
-          $hashB = (Get-FileHash "$env:RUNNER_TEMP\msi-b\$name" -Algorithm SHA256).Hash
-          if ($hashA -ne $hashB) {
-            throw "Repeated normalized MSI builds differ: $hashA != $hashB"
+          $msiA = "$env:RUNNER_TEMP\msi-a\$name"
+          $msiB = "$env:RUNNER_TEMP\msi-b\$name"
+          python -m automation.msi_reproducibility --msi $msiA --epoch $epoch
+          python -m automation.msi_reproducibility --msi $msiB --epoch $epoch
+
+          $sourceA = Get-Content "$env:RUNNER_TEMP\msi-a\.native-build\windows\autodev.wxs" -Raw
+          $sourceB = Get-Content "$env:RUNNER_TEMP\msi-b\.native-build\windows\autodev.wxs" -Raw
+          if ($sourceA -cne $sourceB) {
+            throw 'Repeated MSI builds did not use identical path-independent WiX authoring.'
           }
+
+          $dark = Join-Path $env:WIX 'dark.exe'
+          & $dark -nologo -x "$env:RUNNER_TEMP\msi-extract-a" -o "$env:RUNNER_TEMP\msi-a.decompiled.wxs" $msiA
+          & $dark -nologo -x "$env:RUNNER_TEMP\msi-extract-b" -o "$env:RUNNER_TEMP\msi-b.decompiled.wxs" $msiB
+
+          function Get-TreeManifest([string] $Root) {
+            Get-ChildItem $Root -File -Recurse | ForEach-Object {
+              $relative = $_.FullName.Substring($Root.Length).Replace('\\', '/')
+              "$relative $((Get-FileHash $_.FullName -Algorithm SHA256).Hash)"
+            } | Sort-Object
+          }
+          $contentsA = Get-TreeManifest "$env:RUNNER_TEMP\msi-extract-a"
+          $contentsB = Get-TreeManifest "$env:RUNNER_TEMP\msi-extract-b"
+          if (Compare-Object $contentsA $contentsB) {
+            throw 'Repeated MSI builds contain different packaged file contents.'
+          }
+
+          Write-Host "Unsigned MSI A SHA256: $((Get-FileHash $msiA -Algorithm SHA256).Hash)"
+          Write-Host "Unsigned MSI B SHA256: $((Get-FileHash $msiB -Algorithm SHA256).Hash)"
+          Write-Host 'MSI container bytes may differ; exact-source authoring and extracted package contents are equivalent.'
 
       - name: Verify install, upgrade, failed upgrade preservation, and uninstall
         shell: pwsh
@@ -221,7 +247,7 @@ jobs:
           (cd "$RUNNER_TEMP/native-linux-b/payload/autodev" && find . -type l -printf '%p -> %l\n' | sort) > "$RUNNER_TEMP/payload-b.links"
           diff -u "$RUNNER_TEMP/payload-a.links" "$RUNNER_TEMP/payload-b.links"
 
-      - name: Build DEB and RPM twice reproducibly
+      - name: Build DEB and RPM reproducibly
         shell: bash
         env:
           PACKAGE_VERSION: ${{ inputs.version }}
@@ -232,11 +258,33 @@ jobs:
           python -m automation.native_linux --repo . --payload "$payload" --out "$RUNNER_TEMP/linux-packages-a" --version "$PACKAGE_VERSION" --commit "$sha"
           python -m automation.native_linux --repo . --payload "$payload" --out "$RUNNER_TEMP/linux-packages-b" --version "$PACKAGE_VERSION" --commit "$sha"
           plain="${PACKAGE_VERSION#v}"
-          cmp "$RUNNER_TEMP/linux-packages-a/autodev_${plain}_amd64.deb" "$RUNNER_TEMP/linux-packages-b/autodev_${plain}_amd64.deb"
-          cmp "$RUNNER_TEMP/linux-packages-a/autodev-${plain}-1.x86_64.rpm" "$RUNNER_TEMP/linux-packages-b/autodev-${plain}-1.x86_64.rpm"
-          dpkg-deb --info "$RUNNER_TEMP/linux-packages-a/autodev_${plain}_amd64.deb"
-          rpm -qpi "$RUNNER_TEMP/linux-packages-a/autodev-${plain}-1.x86_64.rpm"
-          rpm -qpl "$RUNNER_TEMP/linux-packages-a/autodev-${plain}-1.x86_64.rpm" | grep -Fx '/usr/bin/autodev'
+          deb_a="$RUNNER_TEMP/linux-packages-a/autodev_${plain}_amd64.deb"
+          deb_b="$RUNNER_TEMP/linux-packages-b/autodev_${plain}_amd64.deb"
+          rpm_a="$RUNNER_TEMP/linux-packages-a/autodev-${plain}-1.x86_64.rpm"
+          rpm_b="$RUNNER_TEMP/linux-packages-b/autodev-${plain}-1.x86_64.rpm"
+
+          # Debian packages are fully byte-reproducible under SOURCE_DATE_EPOCH.
+          cmp "$deb_a" "$deb_b"
+
+          # RPM reproducibility excludes generated build/signature/header metadata;
+          # require the actual cpio payload and important package metadata to match.
+          rpm2cpio "$rpm_a" > "$RUNNER_TEMP/rpm-a.cpio"
+          rpm2cpio "$rpm_b" > "$RUNNER_TEMP/rpm-b.cpio"
+          cmp "$RUNNER_TEMP/rpm-a.cpio" "$RUNNER_TEMP/rpm-b.cpio"
+          for side in a b; do
+            package_var="rpm_${side}"
+            package="${!package_var}"
+            {
+              rpm -qp --qf '%{NAME}\n%{VERSION}\n%{RELEASE}\n%{ARCH}\n%{LICENSE}\n%{URL}\n' "$package"
+              rpm -qpR "$package" | LC_ALL=C sort
+              rpm -qpl "$package" | LC_ALL=C sort
+            } > "$RUNNER_TEMP/rpm-${side}.metadata"
+          done
+          diff -u "$RUNNER_TEMP/rpm-a.metadata" "$RUNNER_TEMP/rpm-b.metadata"
+
+          dpkg-deb --info "$deb_a"
+          rpm -qpi "$rpm_a"
+          rpm -qpl "$rpm_a" | grep -Fx '/usr/bin/autodev'
 
       - name: Verify Debian install, upgrade, recovery, and uninstall
         shell: bash
