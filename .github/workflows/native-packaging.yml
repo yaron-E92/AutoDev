@@ -207,7 +207,7 @@ jobs:
 
   linux:
     name: Native Linux DEB and RPM
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Check out exact source
@@ -227,7 +227,7 @@ jobs:
           set -euo pipefail
           python -m pip install --disable-pip-version-check 'pyinstaller==6.16.0'
           sudo apt-get update
-          sudo apt-get install -y rpm
+          sudo apt-get install -y rpm cpio
 
       - name: Build self-contained payload twice
         shell: bash
@@ -266,11 +266,37 @@ jobs:
           # Debian packages are fully byte-reproducible under SOURCE_DATE_EPOCH.
           cmp "$deb_a" "$deb_b"
 
-          # RPM reproducibility excludes generated build/signature/header metadata;
-          # require the actual cpio payload and important package metadata to match.
-          rpm2cpio "$rpm_a" > "$RUNNER_TEMP/rpm-a.cpio"
-          rpm2cpio "$rpm_b" > "$RUNNER_TEMP/rpm-b.cpio"
-          cmp "$RUNNER_TEMP/rpm-a.cpio" "$RUNNER_TEMP/rpm-b.cpio"
+          # RPM's cpio stream carries generated archive metadata, so compare the
+          # extracted installed tree instead: path, type, mode, content and links.
+          mkdir -p "$RUNNER_TEMP/rpm-tree-a" "$RUNNER_TEMP/rpm-tree-b"
+          (cd "$RUNNER_TEMP/rpm-tree-a" && rpm2cpio "$rpm_a" | cpio -idm --quiet)
+          (cd "$RUNNER_TEMP/rpm-tree-b" && rpm2cpio "$rpm_b" | cpio -idm --quiet)
+
+          rpm_tree_manifest() {
+            local root="$1"
+            (
+              cd "$root"
+              find . -mindepth 1 -print0 |
+                sort -z |
+                while IFS= read -r -d '' path; do
+                  if [[ -L "$path" ]]; then
+                    printf 'L %s %s -> %s\n' "$(stat -c '%a' "$path")" "$path" "$(readlink "$path")"
+                  elif [[ -f "$path" ]]; then
+                    printf 'F %s %s %s\n' "$(stat -c '%a' "$path")" "$(sha256sum "$path" | awk '{print $1}')" "$path"
+                  elif [[ -d "$path" ]]; then
+                    printf 'D %s %s\n' "$(stat -c '%a' "$path")" "$path"
+                  else
+                    printf 'O %s %s\n' "$(stat -c '%a' "$path")" "$path"
+                  fi
+                done
+            )
+          }
+          rpm_tree_manifest "$RUNNER_TEMP/rpm-tree-a" > "$RUNNER_TEMP/rpm-a.payload"
+          rpm_tree_manifest "$RUNNER_TEMP/rpm-tree-b" > "$RUNNER_TEMP/rpm-b.payload"
+          diff -u "$RUNNER_TEMP/rpm-a.payload" "$RUNNER_TEMP/rpm-b.payload"
+
+          # Important package metadata must also remain identical. Generated RPM
+          # build/signature/header metadata is intentionally outside this gate.
           for side in a b; do
             package_var="rpm_${side}"
             package="${!package_var}"
