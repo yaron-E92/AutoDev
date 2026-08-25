@@ -23,6 +23,7 @@ COMMON_ROOTS = (
     "docs",
     "README.md",
     "CONTRIBUTING.md",
+    "LICENSE",
     "pyproject.toml",
     "codex-profiles.json",
 )
