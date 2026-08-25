@@ -6,7 +6,7 @@ param(
 
     [switch] $VerifyOnly,
 
-    [string] $TimestampUrl = 'https://timestamp.digicert.com'
+    [string] $TimestampUrl = 'http://timestamp.digicert.com'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -46,12 +46,21 @@ function Find-SignTool {
     return $candidate.FullName
 }
 
-$work = Join-Path $env:RUNNER_TEMP ('autodev-signing-' + [guid]::NewGuid().ToString('N'))
+$tempRoot = if ([string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)) {
+    [IO.Path]::GetTempPath()
+}
+else {
+    $env:RUNNER_TEMP
+}
+
+$work = Join-Path $tempRoot ('autodev-signing-' + [guid]::NewGuid().ToString('N'))
+
 New-Item -ItemType Directory -Path $work -Force | Out-Null
 $pfxPath = Join-Path $work 'autodev-signing.pfx'
 $cerPath = Join-Path $work 'autodev-signing.cer'
 $importedMy = @()
-$importedRoot = @()
+$signer = $null
+$addedRootTrust = $false
 
 try {
     try {
@@ -79,7 +88,11 @@ try {
     $signer = $signers[0]
 
     Export-Certificate -Cert $signer -FilePath $cerPath -Force | Out-Null
-    $importedRoot = @(Import-Certificate -FilePath $cerPath -CertStoreLocation 'Cert:\CurrentUser\Root')
+    $rootCertificatePath = "Cert:\CurrentUser\Root\$($signer.Thumbprint)"
+    if (-not (Test-Path -LiteralPath $rootCertificatePath)) {
+        & certutil.exe -user -addstore -f Root $cerPath
+        $addedRootTrust = $true
+    }
 
     $targetMsi = $InputMsi
     $signTool = Find-SignTool
@@ -122,8 +135,8 @@ try {
     Write-Host "Timestamp authority: $($signature.TimeStamperCertificate.Subject)"
 }
 finally {
-    foreach ($certificate in $importedRoot) {
-        Remove-Item -LiteralPath $certificate.PSPath -Force -ErrorAction SilentlyContinue
+    if ($addedRootTrust -and $null -ne $signer) {
+        & certutil.exe -user -delstore Root $signer.Thumbprint
     }
     foreach ($certificate in $importedMy) {
         Remove-Item -LiteralPath $certificate.PSPath -Force -ErrorAction SilentlyContinue
