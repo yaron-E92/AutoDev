@@ -477,13 +477,20 @@ def doctor(
         fixed = True
 
     root = (autodev_root or Path(__file__).resolve().parents[1]).expanduser().resolve()
-    checks: list[DoctorCheck] = [
-        DoctorCheck(
+    if getattr(sys, "frozen", False):
+        executable = Path(sys.executable).expanduser().resolve()
+        cli_check = DoctorCheck(
+            "cli",
+            "ok" if executable.is_file() else "error",
+            f"native CLI executable: {executable}",
+        )
+    else:
+        cli_check = DoctorCheck(
             "cli",
             "ok" if (root / "automation" / "autodev_cli.py").is_file() else "error",
             f"canonical CLI root: {root}",
         )
-    ]
+    checks: list[DoctorCheck] = [cli_check]
     for command in ("git", "gh"):
         resolved = which(command)
         checks.append(
