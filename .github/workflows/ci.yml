@@ -14,6 +14,11 @@ on:
         required: false
         type: string
         default: ''
+      native_version:
+        description: Native package version to build when CI is reused
+        required: false
+        type: string
+        default: v0.0.0
 
 permissions:
   contents: read
@@ -184,6 +189,15 @@ jobs:
           tests.test_autodev_cli.AutoDevCliTests.test_existing_commands_share_opencode_entrypoint_core
           tests.test_role_runtime.RuntimeAgnosticCoordinatorTests.test_mock_runtime_executes_reader_synthesizer_planner_through_same_coordinator
 
+  native-packaging:
+    name: Native installer verification
+    uses: ./.github/workflows/native-packaging.yml
+    with:
+      ref: ${{ inputs.ref || github.sha }}
+      version: ${{ inputs.native_version || 'v0.0.0' }}
+    permissions:
+      contents: read
+
   bash-syntax:
     name: Bash syntax
     runs-on: ubuntu-latest
@@ -287,6 +301,7 @@ jobs:
       needs.release-reproducibility.result == 'success' &&
       needs.version-policy-action.result == 'success' &&
       needs.python.result == 'success' &&
+      needs.native-packaging.result == 'success' &&
       needs.bash-syntax.result == 'success' &&
       needs.powershell-syntax.result == 'success' &&
       needs.repository-hygiene.result == 'success'
@@ -295,6 +310,7 @@ jobs:
       - release-reproducibility
       - version-policy-action
       - python
+      - native-packaging
       - bash-syntax
       - powershell-syntax
       - repository-hygiene
