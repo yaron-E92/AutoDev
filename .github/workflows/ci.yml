@@ -14,11 +14,6 @@ on:
         required: false
         type: string
         default: ''
-      native_version:
-        description: Native package version to build when CI is reused
-        required: false
-        type: string
-        default: v0.0.0
 
 permissions:
   contents: read
@@ -194,7 +189,8 @@ jobs:
     uses: ./.github/workflows/native-packaging.yml
     with:
       ref: ${{ inputs.ref || github.sha }}
-      version: ${{ inputs.native_version || 'v0.0.0' }}
+      version: v0.0.0
+      release_packaging: false
     permissions:
       contents: read
 
