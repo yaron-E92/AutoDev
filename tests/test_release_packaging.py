@@ -30,6 +30,7 @@ class ReleasePackagingTests(unittest.TestCase):
         files = {
             "automation/example.py": "print('common')\n",
             "docs/installation.md": "# Install AutoDev\n",
+            "LICENSE": "SPDX-License-Identifier: GPL-3.0-only\n",
             "windows/scripts/example.ps1": "Write-Output 'windows'\n",
         }
         for relative, content in files.items():
@@ -75,6 +76,10 @@ class ReleasePackagingTests(unittest.TestCase):
                     archive.read("docs/installation.md"),
                     b"# Install AutoDev\n",
                 )
+                self.assertEqual(
+                    archive.read("LICENSE"),
+                    b"SPDX-License-Identifier: GPL-3.0-only\n",
+                )
 
     def test_manifest_lists_file_and_archive_hashes(self) -> None:
         temp, repo, commit = self._repo()
@@ -91,6 +96,7 @@ class ReleasePackagingTests(unittest.TestCase):
             common_paths = {entry["path"] for entry in common_files}
             self.assertIn("automation/example.py", common_paths)
             self.assertIn("docs/installation.md", common_paths)
+            self.assertIn("LICENSE", common_paths)
             automation_entry = next(
                 entry for entry in common_files if entry["path"] == "automation/example.py"
             )
