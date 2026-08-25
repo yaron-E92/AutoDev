@@ -8,6 +8,8 @@ import sys
 from automation import opencode_entrypoint, user_install
 
 
+manage_cli.register_help()
+
 INTERACTIVE_CONSENT_ARG = "--interactive-consent"
 INTERACTIVE_CONSENT_ENV = "AUTODEV_INTERACTIVE_CONSENT"
 INTERACTIVE_CONSENT_VALUE = "controlling-terminal"
