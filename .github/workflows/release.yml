@@ -62,14 +62,25 @@ jobs:
           "msi=native-signed/$name" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "unsigned=native-unsigned/$name" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
-          $previousNativeErrorPreference = $PSNativeCommandUseErrorActionPreference
-          try {
-            $PSNativeCommandUseErrorActionPreference = $false
-            gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY *> $null
-            $releaseExists = ($LASTEXITCODE -eq 0)
+          $encodedReleaseTag = [Uri]::EscapeDataString($env:RELEASE_TAG)
+          $releaseUri = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/tags/$encodedReleaseTag"
+          $headers = @{
+            Accept = "application/vnd.github+json"
+            Authorization = "Bearer $env:GH_TOKEN"
+            "X-GitHub-Api-Version" = "2026-03-10"
           }
-          finally {
-            $PSNativeCommandUseErrorActionPreference = $previousNativeErrorPreference
+          try {
+            Invoke-RestMethod -Method Get -Uri $releaseUri -Headers $headers | Out-Null
+            $releaseExists = $true
+          }
+          catch {
+            $statusCode = $_.Exception.Response.StatusCode
+            if ($null -ne $statusCode -and [int]$statusCode -eq 404) {
+              $releaseExists = $false
+            }
+            else {
+              throw
+            }
           }
 
           if ($releaseExists) {
