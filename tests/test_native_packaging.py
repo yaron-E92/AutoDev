@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from automation import native_linux, native_packaging, native_windows
+from automation import msi_reproducibility, native_linux, native_packaging, native_windows
 
 
 class NativePackagingTests(unittest.TestCase):
@@ -81,6 +81,13 @@ class NativePackagingTests(unittest.TestCase):
         self.assertIn('InstallPrivileges="limited"', first)
         self.assertIn('Schedule="afterInstallInitialize"', first)
         self.assertIn('Root="HKCU" Key="Software\\AutoDev"', first)
+        self.assertIn('Key="Software\\AutoDev\\Payload"', first)
+        self.assertIn('Key="Software\\AutoDev\\Directories"', first)
+        self.assertIn('KeyPath="yes"', first)
+        self.assertIn('<RemoveFolder ', first)
+        self.assertIn('Directory="INSTALLFOLDER" On="uninstall"', first)
+        self.assertIn('Directory="AutoDevProgramsFolder" On="uninstall"', first)
+        self.assertNotIn('Source="', first.split('KeyPath="yes"', 1)[0].splitlines()[-1])
         self.assertIn('Name="PATH"', first)
         self.assertIn('System="no"', first)
         self.assertIn('Value="[INSTALLFOLDER]"', first)
@@ -88,6 +95,26 @@ class NativePackagingTests(unittest.TestCase):
         self.assertIn('Directory Id="AutoDevProgramsFolder" Name="Programs"', first)
         self.assertNotIn(".autodev-run", first)
         self.assertNotIn("privacy-grants", first)
+
+    def test_windows_file_components_use_registry_not_files_as_key_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            payload = Path(temp_dir) / "payload"
+            payload.mkdir()
+            (payload / "autodev.exe").write_bytes(b"exe")
+            source = native_windows.render_wix_source(
+                payload,
+                "v1.2.3",
+                "abcdef1234567890abcdef1234567890abcdef12",
+            )
+
+        file_line = next(line for line in source.splitlines() if "<File " in line)
+        payload_registry = next(
+            line
+            for line in source.splitlines()
+            if 'Key="Software\\AutoDev\\Payload"' in line
+        )
+        self.assertNotIn("KeyPath=", file_line)
+        self.assertIn('KeyPath="yes"', payload_registry)
 
     def test_windows_msi_identity_is_stable_for_same_release_and_changes_by_version(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -102,6 +129,14 @@ class NativePackagingTests(unittest.TestCase):
         self.assertEqual(same_a, same_b)
         self.assertNotEqual(same_a, newer)
         self.assertEqual(native_windows.artifact_name("v1.2.3"), "AutoDev-1.2.3-Setup.msi")
+
+    def test_msi_filetime_conversion_is_deterministic(self) -> None:
+        epoch = 1_234_567_890
+        first = msi_reproducibility.filetime_from_unix(epoch)
+        second = msi_reproducibility.filetime_from_unix(epoch)
+        self.assertEqual(first.dwLowDateTime, second.dwLowDateTime)
+        self.assertEqual(first.dwHighDateTime, second.dwHighDateTime)
+        self.assertNotEqual((first.dwLowDateTime, first.dwHighDateTime), (0, 0))
 
     def test_debian_metadata_declares_runtime_and_no_scheduler_side_effects(self) -> None:
         control = native_linux.deb_control("v3.4.5")
