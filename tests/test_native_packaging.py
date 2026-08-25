@@ -96,6 +96,25 @@ class NativePackagingTests(unittest.TestCase):
         self.assertNotIn(".autodev-run", first)
         self.assertNotIn("privacy-grants", first)
 
+    def test_windows_wix_source_is_independent_of_payload_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            payload_a = root / "first payload root"
+            payload_b = root / "second payload root"
+            for payload in (payload_a, payload_b):
+                (payload / "_internal").mkdir(parents=True)
+                (payload / "autodev.exe").write_bytes(b"exe")
+                (payload / "_internal" / "data.txt").write_text("data\n", encoding="utf-8")
+            commit = "abcdef1234567890abcdef1234567890abcdef12"
+
+            source_a = native_windows.render_wix_source(payload_a, "v1.2.3", commit)
+            source_b = native_windows.render_wix_source(payload_b, "v1.2.3", commit)
+
+        self.assertEqual(source_a, source_b)
+        self.assertIn('Source="$(var.PayloadRoot)\\autodev.exe"', source_a)
+        self.assertNotIn(str(payload_a), source_a)
+        self.assertNotIn(str(payload_b), source_b)
+
     def test_windows_file_components_use_registry_not_files_as_key_paths(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             payload = Path(temp_dir) / "payload"
