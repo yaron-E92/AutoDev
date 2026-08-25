@@ -40,6 +40,13 @@ class ReleasePackagingTests(unittest.TestCase):
         self._git(repo, "commit", "-m", "fixture")
         return temp, repo, self._git(repo, "rev-parse", "HEAD")
 
+    def _native_fixture(self, root: Path, version: str) -> Path:
+        native = root / "native"
+        native.mkdir(parents=True)
+        for index, name in enumerate(package_release.native_artifact_names(version).values(), start=1):
+            (native / name).write_bytes(f"native-{index}\n".encode())
+        return native
+
     def test_release_bundles_are_reproducible_and_tied_to_commit_bytes(self) -> None:
         temp, repo, commit = self._repo()
         with temp:
@@ -75,9 +82,11 @@ class ReleasePackagingTests(unittest.TestCase):
             out = repo / "dist"
             package_release.build_release(repo, out, "v2.0.0", commit)
             manifest = json.loads((out / "autodev-release-manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["schema_version"], 2)
             self.assertEqual(manifest["version"], "v2.0.0")
             self.assertEqual(manifest["commit_sha"], commit)
             self.assertEqual(set(manifest["bundles"]), {"common", "windows"})
+            self.assertEqual(manifest["native_installers"], {})
             common_files = manifest["bundles"]["common"]["files"]
             common_paths = {entry["path"] for entry in common_files}
             self.assertIn("automation/example.py", common_paths)
@@ -87,6 +96,45 @@ class ReleasePackagingTests(unittest.TestCase):
             )
             self.assertEqual(len(automation_entry["sha256"]), 64)
             self.assertEqual(len(manifest["bundles"]["common"]["sha256"]), 64)
+
+    def test_native_installers_are_manifested_and_covered_by_checksums(self) -> None:
+        temp, repo, commit = self._repo()
+        with temp:
+            native = self._native_fixture(repo, "v3.4.5")
+            out = repo / "dist"
+            manifest = package_release.build_release(
+                repo,
+                out,
+                "v3.4.5",
+                commit,
+                native_dir=native,
+            )
+
+            self.assertEqual(
+                set(manifest["native_installers"]),
+                {"windows-msi", "debian-amd64", "rpm-x86_64"},
+            )
+            checksum_text = (out / "SHA256SUMS").read_text(encoding="utf-8")
+            for kind, name in package_release.native_artifact_names("v3.4.5").items():
+                self.assertTrue((out / name).is_file())
+                self.assertEqual(manifest["native_installers"][kind]["artifact"], name)
+                self.assertIn(name, checksum_text)
+                self.assertEqual(len(manifest["native_installers"][kind]["sha256"]), 64)
+
+    def test_native_release_requires_every_platform_artifact(self) -> None:
+        temp, repo, commit = self._repo()
+        with temp:
+            native = repo / "native"
+            native.mkdir()
+            (native / "AutoDev-1.2.3-Setup.msi").write_bytes(b"msi")
+            with self.assertRaises(package_release.ReleasePackagingError):
+                package_release.build_release(
+                    repo,
+                    repo / "dist",
+                    "v1.2.3",
+                    commit,
+                    native_dir=native,
+                )
 
     def test_requested_commit_must_match_checkout(self) -> None:
         temp, repo, _ = self._repo()
