@@ -54,7 +54,7 @@ autodev manage --all --json
 autodev manage --list
 ```
 
-`--list` shows only currently open issues carrying `autodev:managed`. It is intentionally read-only: it does not bootstrap labels, reconcile queue state, or mutate GitHub.
+`--list` shows only currently open issues carrying `autodev:managed`. It is strictly read-only: it does not bootstrap labels, reconcile queue state, or mutate GitHub.
 
 Machine-readable output is available with:
 
