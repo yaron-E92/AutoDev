@@ -37,7 +37,7 @@ class NativePackagingTests(unittest.TestCase):
             (repo / "packaging" / "autodev_entry.py").write_text("pass\n", encoding="utf-8")
             for relative in ("integrations", "promptTemplates", "agentFiles", "docs"):
                 (repo / relative).mkdir(parents=True)
-            for relative in ("README.md", "CONTRIBUTING.md", "codex-profiles.json"):
+            for relative in ("README.md", "CONTRIBUTING.md", "LICENSE", "codex-profiles.json"):
                 (repo / relative).write_text("fixture\n", encoding="utf-8")
             build_info = work / "autodev-build.json"
 
@@ -56,6 +56,7 @@ class NativePackagingTests(unittest.TestCase):
         self.assertIn("area_reader", command)
         data_values = [command[index + 1] for index, value in enumerate(command[:-1]) if value == "--add-data"]
         self.assertTrue(any("integrations" in value for value in data_values))
+        self.assertTrue(any("LICENSE" in value for value in data_values))
         self.assertTrue(any("autodev-build.json" in value for value in data_values))
         # Commands are argument arrays rather than shell strings, so paths containing spaces remain atomic.
         self.assertIn(str(repo), command)
@@ -161,22 +162,24 @@ class NativePackagingTests(unittest.TestCase):
         self.assertEqual(first.dwHighDateTime, second.dwHighDateTime)
         self.assertNotEqual((first.dwLowDateTime, first.dwHighDateTime), (0, 0))
 
-    def test_debian_metadata_declares_runtime_and_no_scheduler_side_effects(self) -> None:
+    def test_debian_metadata_declares_runtime_license_and_no_scheduler_side_effects(self) -> None:
         control = native_linux.deb_control("v3.4.5")
         self.assertIn("Version: 3.4.5", control)
         self.assertIn("Architecture: amd64", control)
         self.assertIn("Depends: libc6, git, gh", control)
         self.assertIn("Homepage: https://github.com/yaron-E92/AutoDev", control)
-        self.assertIn("X-AutoDev-License: NOASSERTION", control)
+        self.assertIn("X-AutoDev-License: GPL-3.0-only", control)
+        self.assertNotIn("NOASSERTION", control)
         self.assertNotIn("systemd", control.casefold())
         self.assertNotIn("cron", control.casefold())
         self.assertEqual(native_linux.deb_artifact_name("v3.4.5"), "autodev_3.4.5_amd64.deb")
 
-    def test_rpm_metadata_declares_runtime_identity_and_reproducibility_controls(self) -> None:
+    def test_rpm_metadata_declares_runtime_identity_license_and_reproducibility_controls(self) -> None:
         spec = native_linux.rpm_spec("v3.4.5")
         self.assertIn("Version:        3.4.5", spec)
         self.assertIn("BuildArch:      x86_64", spec)
-        self.assertIn("License:        NOASSERTION", spec)
+        self.assertIn("License:        GPL-3.0-only", spec)
+        self.assertNotIn("NOASSERTION", spec)
         self.assertIn("Requires:       glibc", spec)
         self.assertIn("Requires:       git", spec)
         self.assertIn("Requires:       gh", spec)
