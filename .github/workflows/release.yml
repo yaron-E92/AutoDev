@@ -21,8 +21,13 @@ jobs:
     uses: ./.github/workflows/ci.yml
     with:
       ref: ${{ inputs.tag }}
+    # Reusable-workflow permission validation includes every nested job, even jobs
+    # whose `if` condition is false for workflow_call. ci.yml contains the
+    # main-only version-tag job, so this caller must allow its declared ceiling.
+    # Other jobs in ci.yml remain constrained by their own read-only permissions.
     permissions:
-      contents: read
+      contents: write
+      pull-requests: read
 
   publish:
     name: Package, attest, and publish
