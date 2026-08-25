@@ -2,8 +2,9 @@ param(
     [Parameter(Mandatory = $true)]
     [string] $InputMsi,
 
-    [Parameter(Mandatory = $true)]
-    [string] $OutputMsi,
+    [string] $OutputMsi = '',
+
+    [switch] $VerifyOnly,
 
     [string] $TimestampUrl = 'https://timestamp.digicert.com'
 )
@@ -22,7 +23,10 @@ if ([string]::IsNullOrWhiteSpace($pfxPassword)) {
     throw 'Missing protected secret AUTODEV_WINDOWS_SIGNING_PFX_PASSWORD.'
 }
 if (-not (Test-Path -LiteralPath $InputMsi -PathType Leaf)) {
-    throw "Unsigned MSI does not exist: $InputMsi"
+    throw "MSI does not exist: $InputMsi"
+}
+if (-not $VerifyOnly -and [string]::IsNullOrWhiteSpace($OutputMsi)) {
+    throw 'OutputMsi is required when signing a new MSI.'
 }
 
 function Find-SignTool {
@@ -77,24 +81,28 @@ try {
     Export-Certificate -Cert $signer -FilePath $cerPath -Force | Out-Null
     $importedRoot = @(Import-Certificate -FilePath $cerPath -CertStoreLocation 'Cert:\CurrentUser\Root')
 
-    $destinationParent = Split-Path -Parent $OutputMsi
-    if (-not [string]::IsNullOrWhiteSpace($destinationParent)) {
-        New-Item -ItemType Directory -Path $destinationParent -Force | Out-Null
-    }
-    Copy-Item -LiteralPath $InputMsi -Destination $OutputMsi -Force
-
+    $targetMsi = $InputMsi
     $signTool = Find-SignTool
-    & $signTool sign `
-        /fd SHA256 `
-        /tr $TimestampUrl `
-        /td SHA256 `
-        /s My `
-        /sha1 $signer.Thumbprint `
-        $OutputMsi
+    if (-not $VerifyOnly) {
+        $destinationParent = Split-Path -Parent $OutputMsi
+        if (-not [string]::IsNullOrWhiteSpace($destinationParent)) {
+            New-Item -ItemType Directory -Path $destinationParent -Force | Out-Null
+        }
+        Copy-Item -LiteralPath $InputMsi -Destination $OutputMsi -Force
+        $targetMsi = $OutputMsi
 
-    & $signTool verify /pa /all /v $OutputMsi
+        & $signTool sign `
+            /fd SHA256 `
+            /tr $TimestampUrl `
+            /td SHA256 `
+            /s My `
+            /sha1 $signer.Thumbprint `
+            $targetMsi
+    }
 
-    $signature = Get-AuthenticodeSignature -FilePath $OutputMsi
+    & $signTool verify /pa /all /v $targetMsi
+
+    $signature = Get-AuthenticodeSignature -FilePath $targetMsi
     if ($signature.Status -ne 'Valid') {
         throw "Signed MSI did not pass Authenticode verification: $($signature.Status) $($signature.StatusMessage)"
     }
@@ -108,7 +116,7 @@ try {
         throw 'Signed MSI does not contain a trusted RFC 3161 timestamp.'
     }
 
-    Write-Host "Verified signed MSI: $OutputMsi"
+    Write-Host "Verified signed MSI: $targetMsi"
     Write-Host "Signer subject: $($signer.Subject)"
     Write-Host "Signer thumbprint: $($signer.Thumbprint)"
     Write-Host "Timestamp authority: $($signature.TimeStamperCertificate.Subject)"
