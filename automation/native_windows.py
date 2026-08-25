@@ -121,7 +121,8 @@ def _render_directory(
         component_id = _id("C", relative)
         file_id = _id("F", relative)
         component_ids.append(component_id)
-        source = escape(os.fspath(file_path.resolve()), {'"': '&quot;'})
+        windows_relative = relative.replace("/", "\\")
+        source = escape(f"$(var.PayloadRoot)\\{windows_relative}", {'"': '&quot;'})
         lines.extend(
             [
                 f'{indent}<Component Id="{component_id}" Guid="{_guid("autodev/windows/component/" + relative)}">',
@@ -264,7 +265,15 @@ def build_msi(
     # and ICE91 describes the expected per-user directory layout. Suppress only
     # those two known warnings; all other WiX validation remains enabled.
     commands = (
-        [candle, "-nologo", "-sw1091", "-out", os.fspath(wixobj), os.fspath(wxs)],
+        [
+            candle,
+            "-nologo",
+            "-sw1091",
+            f"-dPayloadRoot={payload}",
+            "-out",
+            os.fspath(wixobj),
+            os.fspath(wxs),
+        ],
         [
             light,
             "-nologo",
