@@ -36,11 +36,15 @@ jobs:
 
       - name: Install frozen-runtime builder
         shell: pwsh
-        run: python -m pip install --disable-pip-version-check "pyinstaller==6.16.0"
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          python -m pip install --disable-pip-version-check "pyinstaller==6.16.0"
 
       - name: Locate pinned WiX toolchain
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           $wix = Join-Path ${env:ProgramFiles(x86)} 'WiX Toolset v3.14\bin'
           if (-not (Test-Path (Join-Path $wix 'candle.exe'))) {
             throw "GitHub Windows runner does not provide WiX Toolset v3.14 at $wix"
@@ -53,6 +57,8 @@ jobs:
         env:
           PACKAGE_VERSION: ${{ inputs.version }}
         run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           $sha = (git rev-parse HEAD).Trim()
           python -m automation.native_packaging --repo . --out "$env:RUNNER_TEMP\native-win-a" --version $env:PACKAGE_VERSION --commit $sha --platform windows
           python -m automation.native_packaging --repo . --out "$env:RUNNER_TEMP\native-win-b" --version $env:PACKAGE_VERSION --commit $sha --platform windows
@@ -75,6 +81,8 @@ jobs:
         env:
           PACKAGE_VERSION: ${{ inputs.version }}
         run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           $sha = (git rev-parse HEAD).Trim()
           $epoch = (git show -s --format=%ct $sha).Trim()
           $payload = "$env:RUNNER_TEMP\native-win-a\payload\autodev"
@@ -92,6 +100,9 @@ jobs:
       - name: Verify install, upgrade, failed upgrade preservation, and uninstall
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+
           function Invoke-Msi([string[]] $Arguments, [bool] $ExpectSuccess = $true) {
             $process = Start-Process -FilePath msiexec.exe -ArgumentList $Arguments -Wait -PassThru
             $success = $process.ExitCode -eq 0 -or $process.ExitCode -eq 3010
@@ -233,7 +244,6 @@ jobs:
           set -euo pipefail
           sha="$(git rev-parse HEAD)"
           epoch="$(git show -s --format=%ct "$sha")"
-          payload="$RUNNER_TEMP/native-linux-a/payload/autodev"
           state="$HOME/.autodev"
           target="$RUNNER_TEMP/target repo with spaces"
           mkdir -p "$state" "$target/.autodev" "$target/.autodev-run"
