@@ -70,7 +70,7 @@ try {
     $signers = @(
         $importedMy | Where-Object {
             $_.HasPrivateKey -and
-            @($_.EnhancedKeyUsageList | ForEach-Object { $_.ObjectId.Value }) -contains $codeSigningEku
+            @($_.EnhancedKeyUsageList | ForEach-Object { $_.ObjectId }) -contains $codeSigningEku
         }
     )
     if ($signers.Count -ne 1) {

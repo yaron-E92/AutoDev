@@ -59,6 +59,12 @@ class ReleaseWorkflowPermissionTests(unittest.TestCase):
         self.assertNotIn("AUTODEV_WINDOWS_SIGNING_PFX_BASE64", native)
         self.assertNotIn("AUTODEV_WINDOWS_SIGNING_PFX_PASSWORD", native)
 
+    def test_windows_signer_reads_code_signing_eku_object_id_as_string(self) -> None:
+        signer = (ROOT / "automation" / "sign_windows_release.ps1").read_text(encoding="utf-8")
+
+        self.assertIn("ForEach-Object { $_.ObjectId }) -contains $codeSigningEku", signer)
+        self.assertNotIn("$_.ObjectId.Value", signer)
+
     def test_release_rerun_branches_before_downloading_or_signing_msi(self) -> None:
         release = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
         signing_job = release.split("  sign-windows:\n", 1)[1].split("\n  publish:\n", 1)[0]
