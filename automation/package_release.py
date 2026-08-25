@@ -4,12 +4,13 @@ import argparse
 import hashlib
 import json
 import re
+import shutil
 import subprocess
 import zipfile
 from pathlib import Path
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
 VERSION_RE = re.compile(r"^v[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$")
 COMMON_ROOTS = (
@@ -95,6 +96,15 @@ def validate_version(version: str) -> str:
     return value
 
 
+def native_artifact_names(version: str) -> dict[str, str]:
+    plain = validate_version(version).removeprefix("v")
+    return {
+        "windows-msi": f"AutoDev-{plain}-Setup.msi",
+        "debian-amd64": f"autodev_{plain}_amd64.deb",
+        "rpm-x86_64": f"autodev-{plain}-1.x86_64.rpm",
+    }
+
+
 def commit_files(repo: Path, commit: str, roots: tuple[str, ...]) -> list[str]:
     raw = run_git_bytes(
         repo,
@@ -153,7 +163,38 @@ def bundle_name(version: str, kind: str) -> str:
     return f"autodev-{version}-{kind}.zip"
 
 
-def build_release(repo: Path, out_dir: Path, version: str, commit: str = "") -> dict[str, object]:
+def collect_native_installers(
+    native_dir: Path,
+    out_dir: Path,
+    version: str,
+) -> tuple[dict[str, object], list[Path]]:
+    native_dir = native_dir.expanduser().resolve()
+    values: dict[str, object] = {}
+    subjects: list[Path] = []
+    for kind, name in native_artifact_names(version).items():
+        source = native_dir / name
+        if not source.is_file():
+            raise ReleasePackagingError(f"missing native installer {kind}: {source}")
+        destination = out_dir / name
+        if source.resolve() != destination.resolve():
+            shutil.copy2(source, destination)
+        values[kind] = {
+            "artifact": destination.name,
+            "sha256": sha256_file(destination),
+            "size": destination.stat().st_size,
+        }
+        subjects.append(destination)
+    return values, subjects
+
+
+def build_release(
+    repo: Path,
+    out_dir: Path,
+    version: str,
+    commit: str = "",
+    *,
+    native_dir: Path | None = None,
+) -> dict[str, object]:
     repo = repo.expanduser().resolve()
     out_dir = out_dir.expanduser().resolve()
     version = validate_version(version)
@@ -175,12 +216,18 @@ def build_release(repo: Path, out_dir: Path, version: str, commit: str = "") -> 
             "files": source_manifest(repo, commit_sha, files),
         }
 
+    native_installers: dict[str, object] = {}
+    native_subjects: list[Path] = []
+    if native_dir is not None:
+        native_installers, native_subjects = collect_native_installers(native_dir, out_dir, version)
+
     manifest = {
         "schema_version": SCHEMA_VERSION,
         "version": version,
         "commit_sha": commit_sha,
         "archive_format": "zip-stored",
         "bundles": bundles,
+        "native_installers": native_installers,
     }
     manifest_path = out_dir / "autodev-release-manifest.json"
     manifest_path.write_text(
@@ -190,6 +237,7 @@ def build_release(repo: Path, out_dir: Path, version: str, commit: str = "") -> 
     )
 
     subjects = [out_dir / str(bundle["archive"]) for bundle in bundles.values()]
+    subjects.extend(native_subjects)
     subjects.append(manifest_path)
     checksums = "".join(
         f"{sha256_file(path)}  {path.name}\n"
@@ -207,6 +255,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", required=True)
     parser.add_argument("--version", required=True)
     parser.add_argument("--commit", default="")
+    parser.add_argument("--native-dir", default="")
     args = parser.parse_args(argv)
     try:
         manifest = build_release(
@@ -214,6 +263,7 @@ def main(argv: list[str] | None = None) -> int:
             Path(args.out),
             args.version,
             args.commit,
+            native_dir=Path(args.native_dir) if args.native_dir else None,
         )
     except ReleasePackagingError as exc:
         parser.error(str(exc))
@@ -225,6 +275,10 @@ def main(argv: list[str] | None = None) -> int:
                 "bundles": {
                     key: value["sha256"]
                     for key, value in manifest["bundles"].items()
+                },
+                "native_installers": {
+                    key: value["sha256"]
+                    for key, value in manifest["native_installers"].items()
                 },
             },
             sort_keys=True,
