@@ -260,9 +260,20 @@ def build_msi(
 
     candle = find_wix_tool("candle.exe", which=which)
     light = find_wix_tool("light.exe", which=which)
+    # Package/@Id is intentionally deterministic for one exact release identity,
+    # and ICE91 describes the expected per-user directory layout. Suppress only
+    # those two known warnings; all other WiX validation remains enabled.
     commands = (
-        [candle, "-nologo", "-out", os.fspath(wixobj), os.fspath(wxs)],
-        [light, "-nologo", "-spdb", "-out", os.fspath(destination), os.fspath(wixobj)],
+        [candle, "-nologo", "-sw1091", "-out", os.fspath(wixobj), os.fspath(wxs)],
+        [
+            light,
+            "-nologo",
+            "-sice:ICE91",
+            "-spdb",
+            "-out",
+            os.fspath(destination),
+            os.fspath(wixobj),
+        ],
     )
     env = dict(os.environ)
     env.setdefault("SOURCE_DATE_EPOCH", str(native_packaging.source_date_epoch(repo, commit)))
