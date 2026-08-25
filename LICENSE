@@ -1,0 +1,23 @@
+GNU General Public License v3.0 only
+
+SPDX-License-Identifier: GPL-3.0-only
+
+Unless a file explicitly states otherwise, AutoDev's original source code and
+documentation in this repository are licensed under version 3 of the GNU General
+Public License, with no option to use a later version.
+
+AutoDev is free software: you can redistribute it and/or modify it under the
+terms of the GNU General Public License as published by the Free Software
+Foundation, version 3 of the License.
+
+AutoDev is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+The complete GNU General Public License version 3 text is available from the
+Free Software Foundation at:
+
+https://www.gnu.org/licenses/gpl-3.0.txt
+
+A copy of this LICENSE file is included in AutoDev's native packaged payload so
+recipients can identify the applicable license and its terms.
