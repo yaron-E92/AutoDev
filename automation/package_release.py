@@ -19,6 +19,7 @@ COMMON_ROOTS = (
     "promptTemplates",
     "agentFiles",
     "examples",
+    "docs",
     "README.md",
     "CONTRIBUTING.md",
     "pyproject.toml",

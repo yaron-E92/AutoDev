@@ -6,11 +6,11 @@ Scheduling is **explicitly opt-in per repository**. Installing the `autodev` CLI
 
 ## Prerequisites
 
-From the target repository:
+Install the user-level `autodev` CLI first as described in [`installation.md`](installation.md). Then, from the target repository, configure and validate repository-owned AutoDev policy:
 
 ```text
-autodev install --user --add-to-path
 autodev repo install
+autodev doctor
 ```
 
 Commit and push the repository-owned `.autodev/` policy before installing the scheduler. The dedicated worker is cloned from the repository remote, so AutoDev refuses scheduler installation when the worker does not contain the same configured repository policy as the interactive checkout.

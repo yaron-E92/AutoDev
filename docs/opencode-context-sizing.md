@@ -32,11 +32,13 @@ The record contains hashes and sizes, not the evidence content itself. It report
 
 Approximate tokens deliberately use one provider-neutral estimate of four characters per token. They are for before/after sizing and trend comparison, not billing reconciliation or model-specific context enforcement.
 
-Show the latest heavy-role measurements with:
+The normal installed CLI does not require users to run a profiler manually. For contributor/developer diagnostics from an AutoDev source checkout, the internal profiler can show the latest heavy-role measurements:
 
 ```bash
 python3 -m automation.context_optimization --repo /path/to/target-repo
 ```
+
+That command is a source-development diagnostic, not an alternative user-facing AutoDev launcher. Ordinary issue work continues through `autodev issue-to-pr`, `autodev status`, and `autodev resume`.
 
 Because AutoDev generates the old monolithic prompt first for measurement and then replaces it before `opencode run`, a representative production run yields a like-for-like **before** measurement without paying for a duplicate model request. The optimized role is the only prompt path sent to OpenCode.
 

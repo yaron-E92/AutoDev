@@ -1,6 +1,6 @@
 # Model data privacy
 
-AutoDev can enforce a repository-level policy before model-heavy repository content is sent to cloud LLMs.
+AutoDev enforces repository privacy policy before model-heavy repository content is sent to a configured model route. Privacy is a preflight boundary: if the effective route cannot satisfy the active policy and no permitted explicit consent covers it, AutoDev stops before sending repository/prompt content.
 
 The decision order is intentionally fail-closed:
 
@@ -12,6 +12,7 @@ resolve effective route
             -> require a fresh explicit attestation when AutoDev cannot query it
        -> compliant: ALLOW
        -> not enforceable/verifiable/attested: require explicit consent
+            -> matching valid consent: ALLOW
             -> consent unavailable/denied: BLOCK
 ```
 
@@ -19,7 +20,7 @@ Consent is a fallback. AutoDev does not ask you to accept a weaker provider defa
 
 ## Repository policy
 
-A real Git repository defaults to `strict-confidential` unless it explicitly configures another profile. Put repository policy in:
+A real Git repository defaults to `strict-confidential` unless it explicitly configures another profile. Repository privacy policy belongs in:
 
 ```text
 .autodev/privacy.json
@@ -45,9 +46,23 @@ Supported profiles are:
 
 `local-only` is absolute: a cloud route is blocked rather than offered as a consent exception.
 
-`AUTODEV_PRIVACY_PROFILE` can strengthen a repository policy for a run, but it cannot weaken it. For example, a repository declaring `strict-confidential` cannot be changed to `off` merely by setting the environment variable.
+`consent_mode: "deny"` disables consent exceptions even when the profile would otherwise allow explicit consent.
+
+`AUTODEV_PRIVACY_PROFILE` can strengthen repository policy for a run, but it cannot weaken it. For example, a repository declaring `strict-confidential` cannot be changed to `off` merely by setting the environment variable.
 
 Scratch directories that are not Git repositories default to `off` so fixtures/tests do not accidentally acquire cloud-policy behavior. Production Git repositories default to strict handling.
+
+## Inspect privacy state
+
+From the target repository, use the installed CLI:
+
+```text
+autodev privacy status
+autodev privacy status --json
+autodev privacy --help
+```
+
+`status` reports grants associated with the current repository identity. Persistent grant data is user-local, not committed repository configuration.
 
 ## Automatic enforcement
 
@@ -66,9 +81,7 @@ For `strict-confidential`, AutoDev injects this into every OpenRouter request pa
 
 For `no-training`, `data_collection: "deny"` is required; ZDR is added when zero retention is required.
 
-OpenRouter documents `data_collection: "deny"` as restricting requests to provider endpoints that do not collect user data and `zdr: true` as restricting routing to Zero Data Retention endpoints. AutoDev verifies the effective request options contain the required fields before allowing the provider call.
-
-When Headroom is in the AutoDev provider path, the same controls are applied to both the direct/fail-open provider and the Headroom proxy provider. Compression must not remove or weaken privacy routing.
+AutoDev verifies that the effective request options contain the required controls before allowing the provider call. When Headroom is in the AutoDev provider path, the same controls are applied to both the direct/fail-open provider and the Headroom proxy provider. Compression must not remove or weaken privacy routing.
 
 ### OpenRouter through OpenCode
 
@@ -77,20 +90,22 @@ OpenCode model calls are made by isolated `opencode run --agent autodev-*` subpr
 1. resolves the role's effective `provider/model` mapping;
 2. uses a runtime `OPENCODE_CONFIG_CONTENT` overlay to add the OpenRouter privacy fields;
 3. runs `opencode debug config` with that overlay;
-4. checks the resolved effective configuration contains the required controls;
+4. checks that the resolved effective configuration contains the required controls;
 5. only then launches the role process using that verified environment.
 
-The overlay is runtime-scoped and does not rewrite a developer's global OpenCode configuration. It supports current OpenCode `providers.*.body` configuration as well as the legacy OpenRouter `provider.*.models.*.options.provider` form.
+The overlay is runtime-scoped and does not rewrite user-owned OpenCode configuration. It supports the current OpenCode provider-body configuration and the legacy OpenRouter model-option form still recognized by AutoDev.
 
-If a higher-precedence/managed configuration removes or overrides the requested privacy values, verification fails and AutoDev does not treat the route as safe.
+If higher-precedence/managed configuration removes or overrides the requested privacy values, verification fails and AutoDev does not treat the route as safe.
 
 ## Provider-owned/account-level settings
 
-A request can constrain the downstream model provider while the routing service itself may still have account-level content settings. AutoDev does not equate "the request contains ZDR" with "every service in the path is definitely retaining nothing."
+Request-level controls can constrain a downstream model endpoint without proving every account/project setting in the routing service. AutoDev therefore does not equate “the request contains ZDR” with “every service in the path is definitely retaining nothing.”
 
-OpenRouter, for example, documents that prompt/completion logging and use of inputs/outputs are opt-in account/workspace settings. The request-level `data_collection` and `zdr` fields constrain downstream endpoints; they do not prove those OpenRouter-owned account settings are disabled.
+Where AutoDev cannot query an account/project setting, a repository may carry a fresh, non-secret administrator/user attestation in `.autodev/privacy.json` when collaboration policy permits that evidence.
 
-Where AutoDev cannot query an account/project setting, a private repository may carry a fresh, non-secret administrator/user attestation in `.autodev/privacy.json`. Example:
+### OpenRouter account attestation
+
+Example:
 
 ```json
 {
@@ -106,13 +121,13 @@ Where AutoDev cannot query an account/project setting, a private repository may 
 }
 ```
 
-For OpenRouter strict mode, automatic request controls **plus** this fresh account-setting attestation allow the route without prompting. If the attestation is absent or stale, AutoDev asks for explicit consent or blocks before transmitting repository content.
+For OpenRouter strict mode, automatic request controls plus a fresh account-setting attestation can allow the route without prompting. If the attestation is absent or stale and the remaining requirement cannot be verified automatically, the route requires explicit consent or blocks before model content is sent.
 
-Attestations are deliberately labeled as attestations in the audit trail rather than as machine-verified provider state. They expire after the same review window as built-in provider policy metadata and must be refreshed after the underlying provider/account setting is checked again.
+Attestations are deliberately recorded as attestations rather than machine-verified provider state. They expire after the same review window as built-in provider-policy metadata and must be refreshed after the underlying setting is checked again.
 
 ### Groq ZDR attestation
 
-Groq documents inference data as not used for training and offers account-level Zero Data Retention controls. When a collaborator has verified ZDR is enabled but AutoDev cannot query that account setting, record:
+When account-level Groq ZDR has been verified outside AutoDev but cannot be queried by the runner, record:
 
 ```json
 {
@@ -129,7 +144,7 @@ Without that attestation, `no-training` may proceed while the reviewed no-traini
 
 ### OpenAI API ZDR attestation
 
-OpenAI API data is not used for training by default, but ordinary abuse-monitoring logs may retain customer content. Eligible organizations/projects can enable Zero Data Retention. If that setting has been checked outside AutoDev and cannot be queried by the runner, record:
+For a direct OpenAI API route where eligible organization/project ZDR has been verified outside AutoDev, record:
 
 ```json
 {
@@ -162,34 +177,76 @@ If an administrator has verified the effective OpenCode/OpenAI product has the r
 }
 ```
 
-Otherwise strict/no-training policy asks for consent or blocks, depending on run mode.
+Otherwise strict/no-training policy asks for consent or blocks, depending on run mode and repository policy.
 
-## Other provider policy classifications
+## Reviewed provider-policy classifications
 
-AutoDev keeps reviewed provider-policy metadata with a freshness limit. Current classifications include:
+AutoDev keeps time-bounded reviewed provider-policy metadata. Current classifications include:
 
 - Groq: customer content is not used for training; ordinary processing can involve bounded reliability/abuse retention unless ZDR is enabled.
 - direct OpenAI API: API content is not used for training by default; ordinary abuse-monitoring retention can exist unless eligible ZDR controls are enabled.
-- Ollama Cloud: prompt/response content is processed transiently and not used for training according to Ollama's current privacy statement.
+- Ollama Cloud: prompt/response content is processed transiently and not used for training according to the reviewed policy metadata.
 - local inference: customer content remains local for purposes of this gate.
 
-Provider-policy metadata is time-bounded. Once stale, it becomes unknown and strict runs fail closed/require consent instead of trusting an old promise forever.
+Provider-policy metadata is not permanent trust. Once a reviewed policy entry becomes stale, its classification becomes unknown and strict runs fail closed or require permitted explicit consent rather than trusting an old promise indefinitely.
 
-## Explicit consent
+## Explicit consent and persistent grants
 
-If enforcement, verification, and permitted fresh attestation still cannot meet the active policy, AutoDev asks for consent when it has an interactive input channel. The prompt identifies the role, route, known training/retention status, and the unmet requirement. The default answer is No.
+If enforcement, verification, and permitted fresh attestations still cannot meet the active policy, AutoDev may request explicit consent through an interactive terminal. The consent view identifies the affected role/routes and the unmet privacy requirement; the default is rejection.
 
-Non-interactive/headless execution cannot manufacture consent. It blocks before the prompt is sent.
+Create or pre-authorize consent from the target repository with:
 
-For a deliberately pre-authorized exception in a non-interactive run, use an exact role+route entry:
-
-```powershell
-$env:AUTODEV_PRIVACY_CONSENT = "implementer=groq/groq/model-id"
+```text
+autodev privacy consent
 ```
 
-Multiple exact entries may be comma-separated. This is intentionally narrow: authorizing one role/route does not authorize another role or a later provider/model change.
+The interactive command can choose one of these durations:
 
-Prefer fixing/enabling a provider's privacy controls or refreshing a verified account-setting attestation rather than relying on consent exceptions.
+```text
+run
+24h
+7d
+30d
+until-revoked
+```
+
+You can provide the duration explicitly, for example:
+
+```text
+autodev privacy consent --duration 7d
+autodev privacy consent --duration 24h --scope provider
+autodev privacy consent --duration until-revoked --scope exact --role implementer
+```
+
+Supported persistent scopes are:
+
+- `configured` — the currently configured consent-required routes selected by the command;
+- `provider` — provider/policy scope for the selected consent-required providers;
+- `exact` — exactly one selected route; use `--role` when needed to select that route.
+
+`--duration run` is not persistent and requires an active AutoDev run. `24h`, `7d`, `30d`, and `until-revoked` create user-local grants tied to the repository identity and the privacy-policy/route information recorded when consent was granted.
+
+Persistent grants are stored under the user's AutoDev state (by default `~/.autodev/privacy-grants.json`, with restrictive file permissions where supported). They are not written to `.autodev/privacy.json`, source control, prompts, or target-repository run artifacts as secret material.
+
+Inspect or revoke grants with:
+
+```text
+autodev privacy status
+autodev privacy revoke <grant-id>
+autodev privacy revoke --all
+```
+
+Grant IDs may be supplied by unique prefix when revoking one active grant.
+
+A headless or scheduled run can consume a matching active grant. It cannot interactively create, widen, renew, or replace consent. Missing, expired, revoked, mismatched, or policy-invalidated consent stops before model content is sent.
+
+Prefer making a route compliant through provider controls or fresh permitted attestations rather than using a consent exception. Use the narrowest scope and duration appropriate to the actual need.
+
+## Scheduler behavior
+
+Scheduler ticks use the same privacy gate as interactive issue-to-PR runs. A scheduler may continue only when every model route it needs is already compliant or covered by a valid grant. Installing a scheduler does not grant consent, and `scheduler run-once` does not bypass privacy policy.
+
+This means unattended operation can remain genuinely unattended during an approved grant window without allowing a headless process to manufacture new authorization after that grant expires.
 
 ## Audit trail
 
@@ -219,9 +276,9 @@ consent scope, if any
 
 They do not contain API keys, Authorization headers, prompts, repository source, or hidden reasoning.
 
-## Direct/headless target repository resolution
+## Target repository resolution
 
-The privacy layer uses the explicit target repository when supplied by the caller. For CLI workflows it also supports `AUTODEV_TARGET_REPO` and target-repository arguments such as `--repo` / `--working-directory`; otherwise the active working directory is used.
+Privacy commands and model workflows apply policy for the explicit target repository when supplied by the caller. CLI integrations also support the configured target-repository environment/arguments used by AutoDev; otherwise the active working directory is used. Normal users should run `autodev privacy ...` from the target repository whose grants/policy they intend to inspect or change.
 
 ## Important limits
 
@@ -229,6 +286,6 @@ Passing this gate is a technical AutoDev data-handling decision, not a legal-com
 
 The gate covers model calls made by AutoDev and the isolated OpenCode role subprocesses AutoDev launches. It cannot govern unrelated tools a developer manually invokes outside AutoDev.
 
-A fresh administrator/user attestation is intentionally distinct from machine verification. It exists only for provider/account controls that AutoDev cannot currently query. If your collaboration policy requires machine-verifiable controls only, omit attestations; the route will require explicit consent or block.
+A fresh administrator/user attestation is intentionally distinct from machine verification. It exists only for provider/account controls that AutoDev cannot currently query. If collaboration policy requires machine-verifiable controls only, omit attestations and configure `consent_mode: "deny"` as appropriate; an unverified route will block.
 
 “No training” and “zero retention” are separate requirements. Encryption in transit, smaller/compressed prompts, or a provider being called “enterprise” do not by themselves satisfy either requirement.

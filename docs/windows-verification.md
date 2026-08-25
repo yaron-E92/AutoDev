@@ -25,13 +25,13 @@ Because `autodev_ref` is supplied at dispatch time, updating AutoDev does **not*
 
 ## Installation
 
-The canonical installer is:
+Install or refresh target-repository AutoDev assets with the public repository setup command:
 
 ```text
-python -m automation.opencode_install --target-repo <TARGET_REPOSITORY>
+autodev repo install
 ```
 
-Use `python3` where appropriate.
+This is the canonical user-facing path. The internal Python installer modules are implementation details and are not required for normal repository setup.
 
 If `.github/workflows/autodev-windows-verification.yml` is new or changed, commit and merge it to the target repository's default branch. GitHub requires a `workflow_dispatch` workflow to exist on the default branch before it can be dispatched. AutoDev preflight checks that Actions is enabled and that the configured workflow is visible there.
 
@@ -70,13 +70,13 @@ Repositories that need Windows verification configure `.autodev/windows-verifica
 
 ### Repository setup
 
-`setup` is optional. When configured, the installer renders one repository-specific PowerShell setup step after both exact checkouts and before the AutoDev verification worker. The command runs from the checked-out target repository and can invoke either repository tooling or tooling from the exact AutoDev revision under `$env:GITHUB_WORKSPACE\autodev-tooling`.
+`setup` is optional. When configured, `autodev repo install` renders one repository-specific PowerShell setup step after both exact checkouts and before the AutoDev verification worker. The command runs from the checked-out target repository and can invoke either repository tooling or tooling from the exact AutoDev revision under `$env:GITHUB_WORKSPACE\autodev-tooling`.
 
 `secret_env` maps the environment-variable contract used by the command to the actual GitHub Actions secret name in that repository. Only secret names are rendered into the installed workflow; values remain in GitHub Actions and are exposed only to the generated setup step. This allows repositories to use different secret names while presenting the same variable, such as `NUGET_TOKEN`, to AutoDev tooling. Missing mapped secrets fail with an explicit setup error before any product verification command starts.
 
 AutoDev includes `windows/scripts/configure-nuget-source.ps1` for private NuGet feeds. It accepts the source URL, source name, and username as non-secret parameters, requires an HTTPS source, and reads the credential only from `NUGET_TOKEN`. The example configuration invokes that helper from the already-pinned AutoDev checkout; no helper is copied into the target repository and normal CI remains independent of AutoDev.
 
-After adding or changing `setup`, rerun the AutoDev installer and merge the regenerated caller workflow to the default branch. A reusable workflow is not used for this hook because GitHub reusable workflows replace an entire job; the setup must run inside the exact-SHA Windows verification job.
+After adding or changing `setup`, rerun `autodev repo install` and merge the regenerated caller workflow to the default branch. A reusable workflow is not used for this hook because GitHub reusable workflows replace an entire job; the setup must run inside the exact-SHA Windows verification job.
 
 ## Execution order
 

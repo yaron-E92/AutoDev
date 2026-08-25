@@ -20,21 +20,29 @@ That means:
 
 AutoDev does not independently parse Git ignore files. This avoids divergent interpretations between verification and Git.
 
-## Local privacy and tool configuration
+## Repository-owned AutoDev policy versus local state
 
-Repository-local machine/user configuration may safely remain Git-excluded when it is not intended for the PR. For example, a project can place local privacy/provider/tooling paths in `.git/info/exclude`:
+The `.autodev/` directory is the target repository's AutoDev policy/configuration boundary. Files such as `.autodev/repo.json`, `.autodev/queue.json`, `.autodev/roadmap.yaml`, and `.autodev/privacy.json` are repository-owned configuration and should normally be committed when the repository depends on them. Scheduled workers in particular must see the same committed repository policy as the interactive checkout.
 
-```text
-.autodev/
-.serena/
-opencode.jsonc
-```
+Do **not** treat the whole `.autodev/` directory as machine-local scratch configuration.
 
-If those files are **untracked and Git-excluded**, changing them does not alter `VerifiedSourceIdentity`, does not appear in `VerifiedChanges`, and cannot enter an AutoDev GitHub-API commit.
+Machine/user-specific state belongs outside the repository-owned policy boundary. Examples include:
 
-This is useful for local privacy attestations, provider settings, editor/agent memories, and other machine-specific state. It is not a secrets-management mechanism by itself; sensitive values should still use the appropriate secret store/environment mechanism.
+- persistent privacy consent grants in AutoDev's user-local state;
+- provider credentials in the provider/OpenCode/user environment or appropriate secret store;
+- scheduler registrations and worker identity in user-local AutoDev state;
+- optional user-owned OpenCode configuration such as an untracked `opencode.jsonc`, when the repository deliberately keeps it local;
+- editor/agent caches or memories that the project does not intend to ship.
+
+Those machine-local files may safely remain Git-excluded when they are not intended for the PR. For example, a project can place an untracked local `opencode.jsonc` or tool-specific cache path in `.git/info/exclude`.
+
+If such a file is **untracked and Git-excluded**, changing it does not alter `VerifiedSourceIdentity`, does not appear in `VerifiedChanges`, and cannot enter an AutoDev GitHub-API commit. This is not a secrets-management mechanism by itself; sensitive values should still use the appropriate secret store/environment mechanism.
 
 If a file is tracked, Git considers it repository content even if an ignore rule later matches it. AutoDev therefore continues to verify and ship changes to that tracked file.
+
+## Run state
+
+`.autodev-run/` is durable execution state, not repository policy. It contains checkpoints and bounded run evidence used for safe resume. It should not be folded into committed `.autodev/` configuration or deliberately shipped as source changes.
 
 ## API shipment safety
 
@@ -44,6 +52,6 @@ Deleted paths that were present in the verified baseline remain eligible so repa
 
 ## Non-Git fixtures
 
-Some tests and helper fixtures intentionally operate on plain directories. When a directory is not a Git worktree, AutoDev retains the previous filesystem-walk fallback and its existing operational exclusions such as `.autodev-run/`, build outputs, virtual environments, and `memory.md`.
+Some tests and helper fixtures intentionally operate on plain directories. When a directory is not a Git worktree, AutoDev retains the filesystem-walk fallback and its operational exclusions such as `.autodev-run/`, build outputs, virtual environments, and `memory.md`.
 
 The fallback is for non-Git compatibility only. Production Git repositories use Git's own tracked/nonignored-untracked view.
