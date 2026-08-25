@@ -1,4 +1,4 @@
-name: Reusable native package verification
+name: Reusable native packaging
 
 on:
   workflow_call:
@@ -9,17 +9,23 @@ on:
         type: string
         default: ''
       version:
-        description: Canonical vMAJOR.MINOR.PATCH package version; ordinary CI uses synthetic v0.0.0 and releases pass the exact release tag
+        description: Canonical vMAJOR.MINOR.PATCH package version; verification defaults to synthetic v0.0.0 and release packaging passes the exact release tag
         required: false
         type: string
         default: v0.0.0
+      release_packaging:
+        description: Build one canonical artifact set for release instead of running reproducibility/install verification
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 jobs:
-  windows:
-    name: Native Windows MSI
+  windows-verify:
+    name: Native Windows MSI verification
+    if: ${{ inputs.release_packaging == false }}
     runs-on: windows-latest
 
     steps:
@@ -197,16 +203,9 @@ jobs:
             }
           }
 
-      - name: Upload Windows native installer
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: autodev-native-windows
-          path: ${{ runner.temp }}/msi-a/*.msi
-          if-no-files-found: error
-          retention-days: 7
-
-  linux:
-    name: Native Linux DEB and RPM
+  linux-verify:
+    name: Native Linux DEB and RPM verification
+    if: ${{ inputs.release_packaging == false }}
     runs-on: ubuntu-24.04
 
     steps:
@@ -263,11 +262,8 @@ jobs:
           rpm_a="$RUNNER_TEMP/linux-packages-a/autodev-${plain}-1.x86_64.rpm"
           rpm_b="$RUNNER_TEMP/linux-packages-b/autodev-${plain}-1.x86_64.rpm"
 
-          # Debian packages are fully byte-reproducible under SOURCE_DATE_EPOCH.
           cmp "$deb_a" "$deb_b"
 
-          # RPM's cpio stream carries generated archive metadata, so compare the
-          # extracted installed tree instead: path, type, mode, content and links.
           mkdir -p "$RUNNER_TEMP/rpm-tree-a" "$RUNNER_TEMP/rpm-tree-b"
           (cd "$RUNNER_TEMP/rpm-tree-a" && rpm2cpio "$rpm_a" | cpio -idm --quiet)
           (cd "$RUNNER_TEMP/rpm-tree-b" && rpm2cpio "$rpm_b" | cpio -idm --quiet)
@@ -295,8 +291,6 @@ jobs:
           rpm_tree_manifest "$RUNNER_TEMP/rpm-tree-b" > "$RUNNER_TEMP/rpm-b.payload"
           diff -u "$RUNNER_TEMP/rpm-a.payload" "$RUNNER_TEMP/rpm-b.payload"
 
-          # Important package metadata must also remain identical. Generated RPM
-          # build/signature/header metadata is intentionally outside this gate.
           for side in a b; do
             package_var="rpm_${side}"
             package="${!package_var}"
@@ -345,27 +339,18 @@ jobs:
           test -f "$target/.autodev/sentinel.txt"
           test -f "$target/.autodev-run/sentinel.txt"
 
-      - name: Upload Linux native installers
+      - name: Upload RPM upgrade fixtures for Fedora smoke test
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: autodev-native-linux
-          path: |
-            ${{ runner.temp }}/linux-packages-a/*.deb
-            ${{ runner.temp }}/linux-packages-a/*.rpm
-          if-no-files-found: error
-          retention-days: 7
-
-      - name: Upload RPM upgrade fixtures
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: autodev-native-rpm-upgrade-fixtures
+          name: autodev-native-rpm-upgrade-fixtures-ci
           path: ${{ runner.temp }}/linux-upgrades/*.rpm
           if-no-files-found: error
           retention-days: 1
 
   rpm-smoke:
-    name: Native RPM install and upgrade
-    needs: linux
+    name: Native RPM install and upgrade verification
+    if: ${{ inputs.release_packaging == false }}
+    needs: linux-verify
     runs-on: ubuntu-latest
     container: fedora:latest
 
@@ -373,7 +358,7 @@ jobs:
       - name: Download RPM upgrade fixtures
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: autodev-native-rpm-upgrade-fixtures
+          name: autodev-native-rpm-upgrade-fixtures-ci
           path: /tmp/autodev-rpms
 
       - name: Verify RPM install, upgrade, and uninstall
@@ -390,3 +375,115 @@ jobs:
           dnf remove -y autodev
           test ! -e /usr/bin/autodev
           test -f "$HOME/.autodev/native-installer-sentinel.txt"
+
+  windows-release:
+    name: Prepare Windows MSI for release
+    if: ${{ inputs.release_packaging == true }}
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.11"
+
+      - name: Install frozen-runtime builder
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          python -m pip install --disable-pip-version-check "pyinstaller==6.16.0"
+
+      - name: Locate pinned WiX toolchain
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $wix = Join-Path ${env:ProgramFiles(x86)} 'WiX Toolset v3.14\bin'
+          foreach ($tool in @('candle.exe', 'light.exe')) {
+            if (-not (Test-Path (Join-Path $wix $tool))) {
+              throw "GitHub Windows runner does not provide WiX Toolset v3.14 $tool at $wix"
+            }
+          }
+          "WIX=$wix" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $wix | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Build canonical unsigned MSI once
+        shell: pwsh
+        env:
+          PACKAGE_VERSION: ${{ inputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $sha = (git rev-parse HEAD).Trim()
+          $epoch = (git show -s --format=%ct $sha).Trim()
+          python -m automation.native_packaging --repo . --out "$env:RUNNER_TEMP\native-win-release" --version $env:PACKAGE_VERSION --commit $sha --platform windows
+          $payload = "$env:RUNNER_TEMP\native-win-release\payload\autodev"
+          & (Join-Path $payload 'autodev.exe') --version
+          python -m automation.native_windows --repo . --payload $payload --out "$env:RUNNER_TEMP\msi-release" --version $env:PACKAGE_VERSION --commit $sha
+          $name = "AutoDev-$($env:PACKAGE_VERSION.TrimStart('v'))-Setup.msi"
+          python -m automation.msi_reproducibility --msi "$env:RUNNER_TEMP\msi-release\$name" --epoch $epoch
+
+      - name: Upload unsigned Windows release installer
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: autodev-native-windows
+          path: ${{ runner.temp }}/msi-release/*.msi
+          if-no-files-found: error
+          retention-days: 7
+
+  linux-release:
+    name: Prepare Linux DEB and RPM for release
+    if: ${{ inputs.release_packaging == true }}
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.11"
+
+      - name: Install native build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check 'pyinstaller==6.16.0'
+          sudo apt-get update
+          sudo apt-get install -y rpm
+
+      - name: Build canonical Linux packages once
+        shell: bash
+        env:
+          PACKAGE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          sha="$(git rev-parse HEAD)"
+          python -m automation.native_packaging --repo . --out "$RUNNER_TEMP/native-linux-release" --version "$PACKAGE_VERSION" --commit "$sha" --platform posix
+          payload="$RUNNER_TEMP/native-linux-release/payload/autodev"
+          "$payload/autodev" --version
+          python -m automation.native_linux --repo . --payload "$payload" --out "$RUNNER_TEMP/linux-release-packages" --version "$PACKAGE_VERSION" --commit "$sha"
+          plain="${PACKAGE_VERSION#v}"
+          dpkg-deb --info "$RUNNER_TEMP/linux-release-packages/autodev_${plain}_amd64.deb"
+          rpm -qpi "$RUNNER_TEMP/linux-release-packages/autodev-${plain}-1.x86_64.rpm"
+          rpm -qpl "$RUNNER_TEMP/linux-release-packages/autodev-${plain}-1.x86_64.rpm" | grep -Fx '/usr/bin/autodev'
+
+      - name: Upload Linux release installers
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: autodev-native-linux
+          path: |
+            ${{ runner.temp }}/linux-release-packages/*.deb
+            ${{ runner.temp }}/linux-release-packages/*.rpm
+          if-no-files-found: error
+          retention-days: 7
