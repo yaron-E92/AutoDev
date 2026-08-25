@@ -80,15 +80,11 @@ Python runtime; model/runtime integrations remain separately configured.
 rm -rf "%{{buildroot}}"
 mkdir -p "%{{buildroot}}/opt/autodev" "%{{buildroot}}/usr/bin"
 cp -a . "%{{buildroot}}/opt/autodev/"
-ln -s /opt/autodev/autodev "%{{buildroot}}/usr/bin/autodev"
+ln -s ../../opt/autodev/autodev "%{{buildroot}}/usr/bin/autodev"
 
 %files
 /opt/autodev
 /usr/bin/autodev
-
-%changelog
-* Thu Jan 01 1970 AutoDev <noreply@users.noreply.github.com> - {package_version}-1
-- Reproducible native package generated from the release source identity.
 """
 
 
@@ -112,7 +108,7 @@ def stage_deb(payload: Path, staging: Path, version: str, epoch: int) -> Path:
     _copy_payload(payload, product)
     bin_dir = staging / "usr" / "bin"
     bin_dir.mkdir(parents=True, exist_ok=True)
-    (bin_dir / "autodev").symlink_to("/opt/autodev/autodev")
+    (bin_dir / "autodev").symlink_to("../../opt/autodev/autodev")
     debian = staging / "DEBIAN"
     debian.mkdir(parents=True)
     control = deb_control(version)
@@ -207,7 +203,11 @@ def rpm_build_command(topdir: Path, spec: Path, epoch: int) -> list[str]:
         "--define",
         "_buildhost autodev.invalid",
         "--define",
+        "source_date_epoch_from_changelog 0",
+        "--define",
         "use_source_date_epoch_as_buildtime 1",
+        "--define",
+        f"_buildtime {epoch}",
         "--define",
         "build_mtime_policy clamp_to_source_date_epoch",
         "--define",
