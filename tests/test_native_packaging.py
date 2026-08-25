@@ -87,6 +87,10 @@ class NativePackagingTests(unittest.TestCase):
         self.assertIn('<RemoveFolder ', first)
         self.assertIn('Directory="INSTALLFOLDER" On="uninstall"', first)
         self.assertIn('Directory="AutoDevProgramsFolder" On="uninstall"', first)
+        self.assertIn(
+            '<RegistrySearch Id="AutoDevInstallPathSearch" Root="HKCU" Key="Software\\AutoDev" Name="InstallPath" Type="directory" />',
+            first,
+        )
         self.assertNotIn('Source="', first.split('KeyPath="yes"', 1)[0].splitlines()[-1])
         self.assertIn('Name="PATH"', first)
         self.assertIn('System="no"', first)
