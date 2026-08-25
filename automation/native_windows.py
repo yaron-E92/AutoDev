@@ -68,6 +68,24 @@ def _directory_tree(payload: Path, files: list[Path]) -> dict[str, object]:
     return root
 
 
+def _directory_cleanup_component(
+    directory_id: str,
+    relative_dir: str,
+    indent: str,
+    component_ids: list[str],
+) -> list[str]:
+    identity = relative_dir or "INSTALLFOLDER"
+    component_id = _id("CDIR", identity)
+    remove_id = _id("RDIR", identity)
+    component_ids.append(component_id)
+    return [
+        f'{indent}<Component Id="{component_id}" Guid="{_guid("autodev/windows/directory/" + identity)}">',
+        f'{indent}  <RegistryValue Root="HKCU" Key="Software\\AutoDev\\Directories" Name="{component_id}" Type="integer" Value="1" KeyPath="yes" />',
+        f'{indent}  <RemoveFolder Id="{remove_id}" Directory="{directory_id}" On="uninstall" />',
+        f"{indent}</Component>",
+    ]
+
+
 def _render_directory(
     payload: Path,
     name: str,
@@ -82,6 +100,19 @@ def _render_directory(
         lines.append(f'{indent}<Directory Id="{directory_id}" Name="{escape(name)}">')
         indent += "  "
 
+    # Every directory below LocalAppDataFolder gets an installer-owned component
+    # so the RemoveFile table can remove the empty directory on uninstall. The
+    # HKCU registry key path also satisfies Windows Installer's per-user component
+    # rules without treating installed payload files as key paths.
+    lines.extend(
+        _directory_cleanup_component(
+            directory_id,
+            relative_dir,
+            indent,
+            component_ids,
+        )
+    )
+
     files = node.get("files", [])
     assert isinstance(files, list)
     for file_path in files:
@@ -94,7 +125,8 @@ def _render_directory(
         lines.extend(
             [
                 f'{indent}<Component Id="{component_id}" Guid="{_guid("autodev/windows/component/" + relative)}">',
-                f'{indent}  <File Id="{file_id}" Source="{source}" KeyPath="yes" Checksum="yes" />',
+                f'{indent}  <File Id="{file_id}" Source="{source}" Checksum="yes" />',
+                f'{indent}  <RegistryValue Root="HKCU" Key="Software\\AutoDev\\Payload" Name="{component_id}" Type="integer" Value="1" KeyPath="yes" />',
                 f"{indent}</Component>",
             ]
         )
@@ -138,11 +170,12 @@ def render_wix_source(payload: Path, version: str, commit: str) -> str:
         "",
         tree,
         "",
-        "          ",
+        "            ",
         component_ids,
     )
+    programs_cleanup = "C_ProgramsFolderCleanup"
     path_component = "C_ProductPath"
-    component_ids.append(path_component)
+    component_ids.extend((programs_cleanup, path_component))
 
     lines = [
         '<?xml version="1.0" encoding="utf-8"?>',
@@ -155,12 +188,16 @@ def render_wix_source(payload: Path, version: str, commit: str) -> str:
         '    <Directory Id="TARGETDIR" Name="SourceDir">',
         '      <Directory Id="LocalAppDataFolder">',
         '        <Directory Id="AutoDevProgramsFolder" Name="Programs">',
+        f'          <Component Id="{programs_cleanup}" Guid="{_guid("autodev/windows/directory/AutoDevProgramsFolder")}">',
+        f'            <RegistryValue Root="HKCU" Key="Software\\AutoDev\\Directories" Name="{programs_cleanup}" Type="integer" Value="1" KeyPath="yes" />',
+        '            <RemoveFolder Id="R_ProgramsFolderCleanup" Directory="AutoDevProgramsFolder" On="uninstall" />',
+        '          </Component>',
         '          <Directory Id="INSTALLFOLDER" Name="AutoDev">',
         *payload_lines,
-        f'          <Component Id="{path_component}" Guid="{_guid("autodev/windows/path-component")}">',
-        '            <RegistryValue Root="HKCU" Key="Software\\AutoDev" Name="InstallPath" Type="string" Value="[INSTALLFOLDER]" KeyPath="yes" />',
-        '            <Environment Id="AutoDevUserPath" Name="PATH" Action="set" Part="last" System="no" Permanent="no" Value="[INSTALLFOLDER]" />',
-        '          </Component>',
+        f'            <Component Id="{path_component}" Guid="{_guid("autodev/windows/path-component")}">',
+        '              <RegistryValue Root="HKCU" Key="Software\\AutoDev" Name="InstallPath" Type="string" Value="[INSTALLFOLDER]" KeyPath="yes" />',
+        '              <Environment Id="AutoDevUserPath" Name="PATH" Action="set" Part="last" System="no" Permanent="no" Value="[INSTALLFOLDER]" />',
+        '            </Component>',
         '          </Directory>',
         '        </Directory>',
         '      </Directory>',
