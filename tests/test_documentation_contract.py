@@ -36,12 +36,16 @@ class DocumentationContractTests(unittest.TestCase):
     def _read(self, relative: str) -> str:
         return (ROOT / relative).read_text(encoding="utf-8")
 
-    def test_readme_uses_installed_cli_and_canonical_issue_workflow(self) -> None:
+    def test_readme_uses_native_installers_and_canonical_issue_workflow(self) -> None:
         readme = self._read("README.md")
+        self.assertIn("AutoDev-X.Y.Z-Setup.msi", readme)
+        self.assertIn("autodev_X.Y.Z_amd64.deb", readme)
+        self.assertIn("autodev-X.Y.Z-1.x86_64.rpm", readme)
+        self.assertIn("autodev --version", readme)
         self.assertIn("autodev issue-to-pr 123", readme)
         self.assertIn("autodev repo install", readme)
         self.assertIn("autodev doctor", readme)
-        self.assertNotIn("From an AutoDev checkout", readme)
+        self.assertNotIn("python -m automation.autodev_cli install --user --add-to-path", readme)
         self.assertNotIn("autodev-vX.Y.Z-linux.zip", readme)
 
     def test_installation_separates_user_repo_and_contributor_workflows(self) -> None:
@@ -53,7 +57,11 @@ class DocumentationContractTests(unittest.TestCase):
         ):
             self.assertIn(heading, installation)
         self.assertIn("autodev issue-to-pr 123", installation)
-        self.assertIn("does not need to clone", installation)
+        self.assertIn("do not need a source checkout", installation)
+        self.assertIn("Settings > Apps > Installed apps > AutoDev", installation)
+        self.assertIn("sudo apt install ./autodev_X.Y.Z_amd64.deb", installation)
+        self.assertIn("sudo dnf install ./autodev-X.Y.Z-1.x86_64.rpm", installation)
+        self.assertNotIn("python -m automation.autodev_cli install --user --add-to-path", installation)
 
     def test_opencode_guide_uses_first_class_issue_to_pr_spelling(self) -> None:
         opencode = self._read("docs/opencode.md")
@@ -102,13 +110,23 @@ class DocumentationContractTests(unittest.TestCase):
         self.assertIn("headless or scheduled run can consume a matching active grant", privacy)
         self.assertNotIn("AUTODEV_PRIVACY_CONSENT", privacy)
 
-    def test_release_guide_matches_current_packager_outputs(self) -> None:
+    def test_release_guide_matches_native_and_source_artifact_set(self) -> None:
         releases = self._read("docs/releases.md")
-        self.assertIn("autodev-vX.Y.Z-common.zip", releases)
-        self.assertIn("autodev-vX.Y.Z-windows.zip", releases)
+        for artifact in (
+            "AutoDev-X.Y.Z-Setup.msi",
+            "autodev_X.Y.Z_amd64.deb",
+            "autodev-X.Y.Z-1.x86_64.rpm",
+            "autodev-vX.Y.Z-common.zip",
+            "autodev-vX.Y.Z-windows.zip",
+        ):
+            self.assertIn(artifact, releases)
+        self.assertIn("manifest schema v2", releases)
+        self.assertIn("most recent **published GitHub Release** tag", releases)
+        self.assertIn("signing-ready", releases)
+        self.assertIn("NOASSERTION", releases)
         self.assertIn("workflow_dispatch", releases)
         self.assertNotIn("autodev-vX.Y.Z-linux.zip", releases)
-        self.assertIn("Native Windows MSI and Linux DEB/RPM packages are **not available yet**", releases)
+        self.assertNotIn("Native Windows MSI and Linux DEB/RPM packages are **not available yet**", releases)
 
     def test_scheduler_prerequisites_assume_installed_cli(self) -> None:
         scheduler = self._read("docs/scheduler.md")
@@ -133,6 +151,7 @@ class DocumentationContractTests(unittest.TestCase):
     def test_release_common_bundle_declares_shipped_docs(self) -> None:
         packaging = self._read("automation/package_release.py")
         self.assertIn('    "docs",', packaging)
+        self.assertIn('"native_installers"', packaging)
 
     def test_changed_public_docs_have_no_broken_local_links(self) -> None:
         broken: list[str] = []
