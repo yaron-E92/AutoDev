@@ -145,9 +145,30 @@ jobs:
             exit 0
           fi
 
+          # AutoDev may have newer version tags that have never been published as
+          # releases. Generated release notes must therefore start at the most
+          # recent published release, not at GitHub's nearest preceding Git tag.
+          previous_release_tag="$(
+            gh release list \
+              --repo "$GITHUB_REPOSITORY" \
+              --exclude-drafts \
+              --order desc \
+              --limit 1 \
+              --json tagName \
+              --jq '.[0].tagName // ""'
+          )"
+          notes_start_args=()
+          if [[ -n "$previous_release_tag" ]]; then
+            echo "Generating release notes from previous published release $previous_release_tag."
+            notes_start_args=(--notes-start-tag "$previous_release_tag")
+          else
+            echo "No previous published release found; generating release notes without an explicit start tag."
+          fi
+
           gh release create "$RELEASE_TAG" dist/* \
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
             --target "$RELEASE_SHA" \
             --title "$RELEASE_TAG" \
-            --generate-notes
+            --generate-notes \
+            "${notes_start_args[@]}"

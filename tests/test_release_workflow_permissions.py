@@ -20,6 +20,20 @@ class ReleaseWorkflowPermissionTests(unittest.TestCase):
         self.assertIn("contents: write", release_ci_job)
         self.assertIn("pull-requests: read", release_ci_job)
 
+    def test_generated_notes_start_at_previous_published_release(self) -> None:
+        release = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+        publish_step = release.split("      - name: Create release or prove identical idempotent rerun\n", 1)[1]
+
+        self.assertIn("gh release list", publish_step)
+        self.assertIn("--exclude-drafts", publish_step)
+        self.assertIn("--order desc", publish_step)
+        self.assertIn("--limit 1", publish_step)
+        self.assertIn("--json tagName", publish_step)
+        self.assertIn('notes_start_args=(--notes-start-tag "$previous_release_tag")', publish_step)
+        self.assertIn('"${notes_start_args[@]}"', publish_step)
+        self.assertNotIn("git describe", publish_step)
+        self.assertLess(publish_step.index("gh release list"), publish_step.index("gh release create"))
+
 
 if __name__ == "__main__":
     unittest.main()
