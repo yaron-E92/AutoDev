@@ -29,9 +29,122 @@ jobs:
       contents: write
       pull-requests: read
 
+  native-release:
+    name: Prepare native release packages
+    needs: ci
+    uses: ./.github/workflows/native-packaging.yml
+    with:
+      ref: ${{ inputs.tag }}
+      version: ${{ inputs.tag }}
+      release_packaging: true
+    permissions:
+      contents: read
+
+  sign-windows:
+    name: Sign Windows MSI
+    needs: native-release
+    runs-on: windows-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Resolve new-release or idempotent-rerun signing path
+        id: signed-input
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $plain = $env:RELEASE_TAG.TrimStart('v')
+          $name = "AutoDev-$plain-Setup.msi"
+          "name=$name" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "msi=native-signed/$name" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "unsigned=native-unsigned/$name" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          if (gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY *> $null) {
+            "reuse=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          }
+          else {
+            "reuse=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          }
+
+      - name: Check out release signer for a new release
+        if: steps.signed-input.outputs.reuse != 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Download prepared unsigned MSI for a new release
+        if: steps.signed-input.outputs.reuse != 'true'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: autodev-native-windows
+          path: native-unsigned
+
+      - name: Sign MSI with protected self-signed PFX
+        if: steps.signed-input.outputs.reuse != 'true'
+        shell: pwsh
+        env:
+          AUTODEV_WINDOWS_SIGNING_PFX_BASE64: ${{ secrets.AUTODEV_WINDOWS_SIGNING_PFX_BASE64 }}
+          AUTODEV_WINDOWS_SIGNING_PFX_PASSWORD: ${{ secrets.AUTODEV_WINDOWS_SIGNING_PFX_PASSWORD }}
+        run: >-
+          ./automation/sign_windows_release.ps1
+          -InputMsi '${{ steps.signed-input.outputs.unsigned }}'
+          -OutputMsi '${{ steps.signed-input.outputs.msi }}'
+
+      - name: Check out release signer for an idempotent rerun
+        if: steps.signed-input.outputs.reuse == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Download existing signed MSI for an idempotent rerun
+        if: steps.signed-input.outputs.reuse == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          MSI_NAME: ${{ steps.signed-input.outputs.name }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Path 'native-signed' -Force | Out-Null
+          gh release download $env:RELEASE_TAG `
+            --repo $env:GITHUB_REPOSITORY `
+            --pattern $env:MSI_NAME `
+            --dir 'native-signed'
+          $existing = Join-Path 'native-signed' $env:MSI_NAME
+          if (-not (Test-Path -LiteralPath $existing -PathType Leaf)) {
+            throw "Existing release $env:RELEASE_TAG does not contain expected signed MSI $env:MSI_NAME."
+          }
+
+      - name: Verify reused signed MSI against protected PFX
+        if: steps.signed-input.outputs.reuse == 'true'
+        shell: pwsh
+        env:
+          AUTODEV_WINDOWS_SIGNING_PFX_BASE64: ${{ secrets.AUTODEV_WINDOWS_SIGNING_PFX_BASE64 }}
+          AUTODEV_WINDOWS_SIGNING_PFX_PASSWORD: ${{ secrets.AUTODEV_WINDOWS_SIGNING_PFX_PASSWORD }}
+        run: >-
+          ./automation/sign_windows_release.ps1
+          -InputMsi '${{ steps.signed-input.outputs.msi }}'
+          -VerifyOnly
+
+      - name: Upload verified signed MSI
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: autodev-native-windows-signed
+          path: native-signed/*.msi
+          if-no-files-found: error
+          retention-days: 7
+
   publish:
     name: Package, attest, and publish
-    needs: ci
+    needs:
+      - native-release
+      - sign-windows
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -93,11 +206,25 @@ jobs:
             echo "- Tag: \`$RELEASE_TAG\`"
             echo "- Commit: \`$tag_sha\`"
             echo
-            echo "Required CI re-ran against this exact tag before publication."
+            echo "Required CI verified native reproducibility and install/upgrade behavior against this exact tag."
+            echo "A separate release-packaging path built MSI, DEB, and RPM artifacts once using the real release version."
+            echo "The Windows MSI was then Authenticode-signed in the trusted manual release path."
             echo "This release was started manually; version-tag creation alone does not publish releases."
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Build deterministic release bundles
+      - name: Download verified signed Windows installer
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: autodev-native-windows-signed
+          path: native
+
+      - name: Download prepared Linux native installers
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: autodev-native-linux
+          path: native
+
+      - name: Build deterministic release bundles and bind final native artifacts
         shell: bash
         env:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
@@ -108,7 +235,8 @@ jobs:
             --repo . \
             --out dist \
             --version "$RELEASE_TAG" \
-            --commit "$RELEASE_SHA"
+            --commit "$RELEASE_SHA" \
+            --native-dir native
           (cd dist && sha256sum -c SHA256SUMS)
 
       - name: Generate build provenance attestations
@@ -137,7 +265,7 @@ jobs:
                 exit 1
               }
               cmp --silent "$current" "$previous" || {
-                echo "Existing release asset $name differs from the deterministic artifact for $RELEASE_SHA; refusing replacement." >&2
+                echo "Existing release asset $name differs from the artifact set for $RELEASE_SHA; refusing replacement." >&2
                 exit 1
               }
             done

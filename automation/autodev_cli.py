@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from automation import claim_cli, cli_help, scheduler_health_cli
+from automation import claim_cli, cli_help, product_runtime, scheduler_health_cli
 
 import os
 import sys
-from pathlib import Path
 
 from automation import opencode_entrypoint, user_install
 
@@ -44,6 +43,7 @@ def _help() -> str:
     text = cli_help.render_top_level()
     extra = (
         "Configuration:\n"
+        "  autodev --version          Show the installed AutoDev product version.\n"
         "  autodev models             Show effective OpenCode role/model mappings.\n"
         "  --runtime NAME             Override role runtime for issue-to-pr/resume.\n"
         "  Runtime precedence         explicit > AUTODEV_ROLE_RUNTIME > repository > user > opencode.\n"
@@ -111,6 +111,10 @@ def _render_requested_help(values: list[str]) -> tuple[bool, int]:
 
 def run(argv: list[str] | None = None) -> int:
     raw_values = list(sys.argv[1:] if argv is None else argv)
+    if raw_values in (["--version"], ["-V"]):
+        print(product_runtime.version_text())
+        return 0
+
     values, explicit_interactive = _consume_interactive_consent_argument(raw_values)
 
     handled, help_code = _render_requested_help(values)
@@ -123,7 +127,7 @@ def run(argv: list[str] | None = None) -> int:
         return _friendly_error(f"unknown command {command!r}")
 
     if command == "install":
-        return user_install.run_cli(rest, autodev_root=Path(__file__).resolve().parents[1])
+        return user_install.run_cli(rest, autodev_root=product_runtime.product_root())
     if command in {"repo", "doctor"}:
         from automation import repo_setup
 

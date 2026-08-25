@@ -6,64 +6,110 @@ The CLI is intended to be self-discoverable: `autodev --help` shows normal workf
 
 ## User installation
 
-### Current release-bundle installation
+Published releases provide native **x86-64** packages containing AutoDev and its Python runtime. End users do not need a source checkout, system Python, `pip`, or a virtual environment.
 
-Until the native Windows/Linux installers tracked by #184 and #185 are available, the supported end-user distribution is a published GitHub Release bundle. A normal user does not need to clone the AutoDev repository.
+Verify release checksums/provenance first; see [`releases.md`](releases.md).
 
-Download the assets for one release:
+### Windows MSI
 
-- Linux/other POSIX hosts: `autodev-vX.Y.Z-common.zip`;
-- Windows: `autodev-vX.Y.Z-common.zip` plus `autodev-vX.Y.Z-windows.zip` from the same release;
-- `autodev-release-manifest.json` and `SHA256SUMS` for verification.
-
-Verify the downloaded assets as described in [`releases.md`](releases.md), then extract them into one **permanent** AutoDev directory. On Windows, overlay the common and Windows archives into that same directory.
-
-The current launcher records the extracted AutoDev root, so do not delete or move that directory while the launcher is installed.
-
-From the extracted release directory, perform the one-time bootstrap:
+Download:
 
 ```text
-python -m automation.autodev_cli install --user --add-to-path
+AutoDev-X.Y.Z-Setup.msi
 ```
 
-This bootstrap requires a supported Python interpreter because the current pre-native-package release is still Python-backed. It creates a single user-local `autodev` launcher. After opening a new shell, normal operation uses the installed CLI rather than internal Python module invocations:
+Run the MSI normally. It is a per-user installer, requires no administrator elevation, installs the product under the current user's local application-data `Programs/AutoDev` directory, registers AutoDev with Windows Installed Apps, and adds the product directory to the **user** `PATH`.
+
+Open a new shell after installation and verify:
 
 ```text
+autodev --version
 autodev --help
 autodev doctor
-autodev issue-to-pr 123
-autodev status
-autodev resume
-autodev privacy status
-autodev queue status
-autodev queue next
 ```
 
-`autodev issue-to-pr ISSUE` is the canonical user-facing spelling for working a specific issue. `autodev coordinate --arguments ISSUE` remains available only as the advanced/integration spelling over the same coordinator.
+Install a newer MSI to upgrade. AutoDev uses one stable Windows Installer upgrade identity across versions; installer replacement is scheduled transactionally so a failed upgrade can roll back to the previously installed product. The release CI also verifies that a rejected/corrupt upgrade does not destroy the working installation.
 
-### Launcher location and PATH
+Uninstall through **Settings > Apps > Installed apps > AutoDev**. MSI uninstall removes the installed product and its installer-owned PATH/registry entries. It intentionally does not remove user AutoDev state or target-repository state.
 
-On POSIX systems the default launcher directory is `~/.local/bin`. On Windows it is the user-local `AutoDev/bin` directory under `LOCALAPPDATA` when available.
+### Debian / Ubuntu
 
-`--add-to-path` allows AutoDev to add one bounded, reversible profile block. If you prefer to manage `PATH` yourself, bootstrap without that flag and add the reported launcher directory manually.
-
-Re-running launcher installation from the same permanent release directory is idempotent:
+Download:
 
 ```text
-autodev install --user
+autodev_X.Y.Z_amd64.deb
 ```
 
-The installer creates one launcher, not one alias/function per subcommand.
-
-### Uninstall the launcher
-
-Remove the user launcher and only the PATH profile block AutoDev recorded:
+Install with the package manager:
 
 ```text
-autodev install --user --uninstall
+sudo apt install ./autodev_X.Y.Z_amd64.deb
 ```
 
-Uninstalling the launcher does not delete target-repository `.autodev/` configuration, `.autodev-run/` history, GitHub issues, privacy audit history, scheduler workers, or unrelated OpenCode configuration. After uninstalling the launcher and any scheduler registrations, the extracted product directory can be removed separately if it is no longer needed.
+The package installs the self-contained product under `/opt/autodev` and the canonical command at `/usr/bin/autodev`. It declares the core external runtime dependencies (`git`, `gh`, and the platform C runtime) rather than hiding them inside scripts.
+
+Upgrade by installing the newer downloaded package with the same command. Uninstall with:
+
+```text
+sudo apt remove autodev
+```
+
+If a distro/package-manager failure prevents an upgrade from completing, reinstall the previously downloaded known-good `.deb` with `sudo apt install ./<previous-package>.deb`. AutoDev configuration and run state live outside `/opt/autodev`, so package replacement does not require deleting them.
+
+### Fedora / RPM-family Linux
+
+Download:
+
+```text
+autodev-X.Y.Z-1.x86_64.rpm
+```
+
+Install with:
+
+```text
+sudo dnf install ./autodev-X.Y.Z-1.x86_64.rpm
+```
+
+The RPM uses the same `/opt/autodev` payload and `/usr/bin/autodev` command as the Debian package. Upgrade by installing the newer RPM through `dnf`; uninstall with:
+
+```text
+sudo dnf remove autodev
+```
+
+If an RPM-family package transaction cannot complete the upgrade, reinstall or downgrade to the previously downloaded known-good RPM through the package manager. User/repository state is not stored in the package payload and remains available to the recovered version.
+
+### What native installation does not do
+
+Native package installation, upgrade, and removal do not silently:
+
+- enable an AutoDev scheduler or recurring task;
+- delete `~/.autodev/` user configuration, privacy grants, or privacy audit state;
+- delete target-repository `.autodev/` policy/configuration;
+- delete target-repository `.autodev-run/` checkpoints/evidence;
+- rewrite unrelated `opencode.json` / `opencode.jsonc` settings.
+
+If you explicitly installed a repository scheduler, remove that registration before removing the CLI:
+
+```text
+autodev scheduler uninstall
+```
+
+The package manager owns only the installed product files and launcher registration. Persistent user/repository state remains separately owned so upgrades and reinstalls are recoverable.
+
+### External runtime integrations
+
+The native package contains AutoDev's Python runtime. It does **not** bundle every external tool or model provider. Core GitHub workflows use `git` and the GitHub CLI (`gh`). Linux package managers resolve those declared dependencies. On Windows, install missing external tools normally and use:
+
+```text
+autodev doctor
+autodev doctor --fix
+```
+
+`opencode` remains the default role runtime but is separately configured; native installation does not overwrite OpenCode user configuration.
+
+### Source/release ZIPs
+
+The release still carries common and Windows ZIP snapshots for source inspection, reproducibility, advanced/manual workflows, and contributor use. They are no longer the preferred end-user installation path. Normal installed operation should start with the MSI, DEB, or RPM and then use only the public `autodev` command surface.
 
 ## Configure a target repository
 
@@ -93,6 +139,19 @@ autodev doctor --fix
 `autodev repo doctor` is a supported alias of the canonical top-level `autodev doctor` spelling.
 
 `doctor` is model-free. It checks the AutoDev CLI/configuration boundary, required external tools, queue policy and label metadata, roadmap validity, privacy policy, a secret-free privacy-grant count, optional OpenCode assets, and the effective OpenCode role/model mapping when OpenCode is enabled. `doctor --fix` repairs AutoDev-owned installation drift; it does not create/broaden privacy consent or rewrite malformed user policy merely to make the check green.
+
+Normal commands after repository setup include:
+
+```text
+autodev issue-to-pr 123
+autodev status
+autodev resume
+autodev privacy status
+autodev queue status
+autodev queue next
+```
+
+`autodev issue-to-pr ISSUE` is the canonical user-facing spelling for working a specific issue. `autodev coordinate --arguments ISSUE` remains available only as the advanced/integration spelling over the same coordinator.
 
 ## Runtime and provider configuration
 
@@ -154,7 +213,7 @@ Use `autodev scheduler --help` for backend choices, cadence defaults, health, no
 
 ## Contributor development
 
-Contributors may work directly from a repository checkout. That is intentionally distinct from the end-user release-bundle installation above.
+Contributors may work directly from a repository checkout. That is intentionally distinct from native end-user installation.
 
 Source-development checks for a source checkout are:
 

@@ -6,27 +6,41 @@ The supported product surface is the installed `autodev` CLI. OpenCode can be in
 
 ## Install AutoDev
 
-For the current release format, install from a published GitHub Release rather than cloning the repository as an end-user workflow:
+Published GitHub Releases now provide native x86-64 installers that include AutoDev's Python runtime. Normal users do **not** need to clone AutoDev, install Python, create a virtual environment, or invoke internal Python modules.
 
-1. Download `autodev-vX.Y.Z-common.zip` from the release you want to use.
-2. On Windows, also download `autodev-vX.Y.Z-windows.zip` from the same release and overlay both archives into one permanent AutoDev directory.
-3. Verify `SHA256SUMS` / release provenance as described in [`docs/releases.md`](docs/releases.md).
-4. From the extracted release directory, bootstrap the user-local launcher once:
+### Windows
 
-   ```text
-   python -m automation.autodev_cli install --user --add-to-path
-   ```
+Download `AutoDev-X.Y.Z-Setup.msi` and run it. The installer is per-user, does not require elevation, installs under the current user's local application data, registers AutoDev in Installed Apps, and adds the product directory to the user `PATH`. Open a new shell after installation.
 
-5. Open a new shell and use the public CLI:
+### Debian / Ubuntu
 
-   ```text
-   autodev --help
-   autodev doctor
-   ```
+Download `autodev_X.Y.Z_amd64.deb`, then install it with the package manager:
 
-The release-bundle bootstrap is the temporary installation boundary before the native Windows/Linux installers tracked by #184 and #185 exist. Normal operation after bootstrap uses `autodev`; users do not need to invoke internal Python modules for issue work, resume, setup, queueing, privacy, or scheduling.
+```text
+sudo apt install ./autodev_X.Y.Z_amd64.deb
+```
 
-For launcher ownership, PATH behavior, uninstall, and release-bundle details, see [`docs/installation.md`](docs/installation.md) and [`docs/releases.md`](docs/releases.md).
+### Fedora / RPM-family Linux
+
+Download `autodev-X.Y.Z-1.x86_64.rpm`, then install it with the package manager:
+
+```text
+sudo dnf install ./autodev-X.Y.Z-1.x86_64.rpm
+```
+
+Verify the release checksum/provenance before installation as described in [`docs/releases.md`](docs/releases.md). Then confirm the installed product from a fresh shell:
+
+```text
+autodev --version
+autodev --help
+autodev doctor
+```
+
+Native packages include the AutoDev runtime itself. Core Git/GitHub integration still uses `git` and the GitHub CLI (`gh`); Linux packages declare those dependencies, while `autodev doctor` reports missing external tools. OpenCode remains separately configured when used as the role runtime.
+
+Installing or upgrading AutoDev does not silently enable a scheduler, modify target-repository `.autodev/` policy, delete `.autodev-run/` state, or rewrite unrelated OpenCode configuration. Source ZIP bundles remain release/source artifacts and a contributor/advanced fallback, not the normal installation path.
+
+For upgrade, uninstall, state-preservation, architecture, and release details, see [`docs/installation.md`](docs/installation.md) and [`docs/releases.md`](docs/releases.md).
 
 ## Configure a target repository
 
@@ -177,6 +191,6 @@ python -m compileall -q automation area_reader tests
 python -m unittest discover -s tests -v
 ```
 
-Repository CI additionally checks Linux/Windows Python matrices, canonical CLI smoke tests, workflow references, shell syntax where maintained, release reproducibility, version intent, repository hygiene, and exact-source Windows verification.
+Repository CI additionally checks Linux/Windows Python matrices, canonical CLI smoke tests, native MSI/DEB/RPM build/install/upgrade/uninstall behavior, workflow references, shell syntax where maintained, release reproducibility, version intent, repository hygiene, and exact-source Windows verification.
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md).

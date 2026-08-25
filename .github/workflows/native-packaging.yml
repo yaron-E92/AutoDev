@@ -1,0 +1,489 @@
+name: Reusable native packaging
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Exact source ref/SHA to package
+        required: false
+        type: string
+        default: ''
+      version:
+        description: Canonical vMAJOR.MINOR.PATCH package version; verification defaults to synthetic v0.0.0 and release packaging passes the exact release tag
+        required: false
+        type: string
+        default: v0.0.0
+      release_packaging:
+        description: Build one canonical artifact set for release instead of running reproducibility/install verification
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  windows-verify:
+    name: Native Windows MSI verification
+    if: ${{ inputs.release_packaging == false }}
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.11"
+
+      - name: Install frozen-runtime builder
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          python -m pip install --disable-pip-version-check "pyinstaller==6.16.0"
+
+      - name: Locate pinned WiX toolchain
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $wix = Join-Path ${env:ProgramFiles(x86)} 'WiX Toolset v3.14\bin'
+          foreach ($tool in @('candle.exe', 'light.exe', 'dark.exe')) {
+            if (-not (Test-Path (Join-Path $wix $tool))) {
+              throw "GitHub Windows runner does not provide WiX Toolset v3.14 $tool at $wix"
+            }
+          }
+          "WIX=$wix" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $wix | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Build self-contained payload twice
+        shell: pwsh
+        env:
+          PACKAGE_VERSION: ${{ inputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $sha = (git rev-parse HEAD).Trim()
+          python -m automation.native_packaging --repo . --out "$env:RUNNER_TEMP\native-win-a" --version $env:PACKAGE_VERSION --commit $sha --platform windows
+          python -m automation.native_packaging --repo . --out "$env:RUNNER_TEMP\native-win-b" --version $env:PACKAGE_VERSION --commit $sha --platform windows
+          & "$env:RUNNER_TEMP\native-win-a\payload\autodev\autodev.exe" --version
+
+          $a = Get-ChildItem "$env:RUNNER_TEMP\native-win-a\payload\autodev" -File -Recurse | ForEach-Object {
+            $relative = $_.FullName.Substring(("$env:RUNNER_TEMP\native-win-a\payload\autodev").Length)
+            "$relative $((Get-FileHash $_.FullName -Algorithm SHA256).Hash)"
+          } | Sort-Object
+          $b = Get-ChildItem "$env:RUNNER_TEMP\native-win-b\payload\autodev" -File -Recurse | ForEach-Object {
+            $relative = $_.FullName.Substring(("$env:RUNNER_TEMP\native-win-b\payload\autodev").Length)
+            "$relative $((Get-FileHash $_.FullName -Algorithm SHA256).Hash)"
+          } | Sort-Object
+          if (Compare-Object $a $b) {
+            throw 'Repeated PyInstaller Windows payload builds are not byte-reproducible.'
+          }
+
+      - name: Build and verify equivalent MSI contents twice
+        shell: pwsh
+        env:
+          PACKAGE_VERSION: ${{ inputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $sha = (git rev-parse HEAD).Trim()
+          $epoch = (git show -s --format=%ct $sha).Trim()
+          $payloadA = "$env:RUNNER_TEMP\native-win-a\payload\autodev"
+          $payloadB = "$env:RUNNER_TEMP\native-win-b\payload\autodev"
+          python -m automation.native_windows --repo . --payload $payloadA --out "$env:RUNNER_TEMP\msi-a" --version $env:PACKAGE_VERSION --commit $sha
+          python -m automation.native_windows --repo . --payload $payloadB --out "$env:RUNNER_TEMP\msi-b" --version $env:PACKAGE_VERSION --commit $sha
+          $name = "AutoDev-$($env:PACKAGE_VERSION.TrimStart('v'))-Setup.msi"
+          $msiA = "$env:RUNNER_TEMP\msi-a\$name"
+          $msiB = "$env:RUNNER_TEMP\msi-b\$name"
+          python -m automation.msi_reproducibility --msi $msiA --epoch $epoch
+          python -m automation.msi_reproducibility --msi $msiB --epoch $epoch
+
+          $sourceA = Get-Content "$env:RUNNER_TEMP\msi-a\.native-build\windows\autodev.wxs" -Raw
+          $sourceB = Get-Content "$env:RUNNER_TEMP\msi-b\.native-build\windows\autodev.wxs" -Raw
+          if ($sourceA -cne $sourceB) {
+            throw 'Repeated MSI builds did not use identical path-independent WiX authoring.'
+          }
+
+          $dark = Join-Path $env:WIX 'dark.exe'
+          & $dark -nologo -x "$env:RUNNER_TEMP\msi-extract-a" -o "$env:RUNNER_TEMP\msi-a.decompiled.wxs" $msiA
+          & $dark -nologo -x "$env:RUNNER_TEMP\msi-extract-b" -o "$env:RUNNER_TEMP\msi-b.decompiled.wxs" $msiB
+
+          function Get-TreeManifest([string] $Root) {
+            Get-ChildItem $Root -File -Recurse | ForEach-Object {
+              $relative = $_.FullName.Substring($Root.Length).Replace('\\', '/')
+              "$relative $((Get-FileHash $_.FullName -Algorithm SHA256).Hash)"
+            } | Sort-Object
+          }
+          $contentsA = Get-TreeManifest "$env:RUNNER_TEMP\msi-extract-a"
+          $contentsB = Get-TreeManifest "$env:RUNNER_TEMP\msi-extract-b"
+          if (Compare-Object $contentsA $contentsB) {
+            throw 'Repeated MSI builds contain different packaged file contents.'
+          }
+
+          Write-Host "Unsigned MSI A SHA256: $((Get-FileHash $msiA -Algorithm SHA256).Hash)"
+          Write-Host "Unsigned MSI B SHA256: $((Get-FileHash $msiB -Algorithm SHA256).Hash)"
+          Write-Host 'MSI container bytes may differ; exact-source authoring and extracted package contents are equivalent.'
+
+      - name: Verify install, upgrade, failed upgrade preservation, and uninstall
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+
+          function Invoke-Msi([string[]] $Arguments, [bool] $ExpectSuccess = $true) {
+            $process = Start-Process -FilePath msiexec.exe -ArgumentList $Arguments -Wait -PassThru
+            $success = $process.ExitCode -eq 0 -or $process.ExitCode -eq 3010
+            if ($ExpectSuccess -and -not $success) {
+              throw "msiexec failed with exit code $($process.ExitCode): $($Arguments -join ' ')"
+            }
+            if (-not $ExpectSuccess -and $success) {
+              throw "msiexec unexpectedly succeeded: $($Arguments -join ' ')"
+            }
+          }
+
+          $sha = (git rev-parse HEAD).Trim()
+          $epoch = (git show -s --format=%ct $sha).Trim()
+          $payload = "$env:RUNNER_TEMP\native-win-a\payload\autodev"
+          $installDir = Join-Path $env:RUNNER_TEMP 'AutoDev Install With Spaces'
+          $state = Join-Path $HOME '.autodev'
+          $target = Join-Path $env:RUNNER_TEMP 'target repo with spaces'
+          New-Item -ItemType Directory -Force $state | Out-Null
+          New-Item -ItemType Directory -Force (Join-Path $target '.autodev') | Out-Null
+          New-Item -ItemType Directory -Force (Join-Path $target '.autodev-run') | Out-Null
+          Set-Content -Path (Join-Path $state 'native-installer-sentinel.txt') -Value 'preserve me'
+          Set-Content -Path (Join-Path $target '.autodev\sentinel.txt') -Value 'repo policy'
+          Set-Content -Path (Join-Path $target '.autodev-run\sentinel.txt') -Value 'run state'
+
+          python -m automation.native_windows --repo . --payload $payload --out "$env:RUNNER_TEMP\upgrade-1" --version v0.0.1 --commit $sha
+          python -m automation.native_windows --repo . --payload $payload --out "$env:RUNNER_TEMP\upgrade-2" --version v0.0.2 --commit $sha
+          python -m automation.native_windows --repo . --payload $payload --out "$env:RUNNER_TEMP\upgrade-3" --version v0.0.3 --commit $sha
+          foreach ($version in '1','2','3') {
+            $msi = "$env:RUNNER_TEMP\upgrade-$version\AutoDev-0.0.$version-Setup.msi"
+            python -m automation.msi_reproducibility --msi $msi --epoch $epoch
+          }
+
+          $first = "$env:RUNNER_TEMP\upgrade-1\AutoDev-0.0.1-Setup.msi"
+          $second = "$env:RUNNER_TEMP\upgrade-2\AutoDev-0.0.2-Setup.msi"
+          Invoke-Msi @('/i', "`"$first`"", '/qn', '/norestart', "INSTALLFOLDER=`"$installDir`"")
+          & (Join-Path $installDir 'autodev.exe') --version
+          Invoke-Msi @('/i', "`"$second`"", '/qn', '/norestart', "INSTALLFOLDER=`"$installDir`"")
+          & (Join-Path $installDir 'autodev.exe') --help | Out-Null
+
+          $registeredPath = (Get-ItemProperty -Path 'HKCU:\Environment' -Name Path -ErrorAction Stop).Path
+          if ($registeredPath -notlike "*$installDir*") {
+            throw "MSI did not register AutoDev on the user PATH: $registeredPath"
+          }
+          $scheduled = @(Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object { $_.TaskName -like 'AutoDev*' })
+          if ($scheduled.Count -ne 0) {
+            throw 'Installing AutoDev must not silently enable a scheduler task.'
+          }
+
+          $broken = "$env:RUNNER_TEMP\broken-upgrade.msi"
+          Copy-Item "$env:RUNNER_TEMP\upgrade-3\AutoDev-0.0.3-Setup.msi" $broken
+          [IO.File]::WriteAllBytes($broken, [byte[]](1,2,3,4,5))
+          Invoke-Msi @('/i', "`"$broken`"", '/qn', '/norestart', "INSTALLFOLDER=`"$installDir`"") $false
+          & (Join-Path $installDir 'autodev.exe') --version
+
+          Invoke-Msi @('/x', "`"$second`"", '/qn', '/norestart')
+          if (Test-Path (Join-Path $installDir 'autodev.exe')) {
+            throw 'MSI uninstall left the product executable installed.'
+          }
+          foreach ($preserved in @(
+            (Join-Path $state 'native-installer-sentinel.txt'),
+            (Join-Path $target '.autodev\sentinel.txt'),
+            (Join-Path $target '.autodev-run\sentinel.txt')
+          )) {
+            if (-not (Test-Path $preserved)) {
+              throw "MSI upgrade/uninstall removed preserved state: $preserved"
+            }
+          }
+
+  linux-verify:
+    name: Native Linux DEB and RPM verification
+    if: ${{ inputs.release_packaging == false }}
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.11"
+
+      - name: Install native build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check 'pyinstaller==6.16.0'
+          sudo apt-get update
+          sudo apt-get install -y rpm cpio
+
+      - name: Build self-contained payload twice
+        shell: bash
+        env:
+          PACKAGE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          sha="$(git rev-parse HEAD)"
+          python -m automation.native_packaging --repo . --out "$RUNNER_TEMP/native-linux-a" --version "$PACKAGE_VERSION" --commit "$sha" --platform posix
+          python -m automation.native_packaging --repo . --out "$RUNNER_TEMP/native-linux-b" --version "$PACKAGE_VERSION" --commit "$sha" --platform posix
+          "$RUNNER_TEMP/native-linux-a/payload/autodev/autodev" --version
+
+          (cd "$RUNNER_TEMP/native-linux-a/payload/autodev" && find . -type f -print0 | sort -z | xargs -0 sha256sum) > "$RUNNER_TEMP/payload-a.sha256"
+          (cd "$RUNNER_TEMP/native-linux-b/payload/autodev" && find . -type f -print0 | sort -z | xargs -0 sha256sum) > "$RUNNER_TEMP/payload-b.sha256"
+          diff -u "$RUNNER_TEMP/payload-a.sha256" "$RUNNER_TEMP/payload-b.sha256"
+          (cd "$RUNNER_TEMP/native-linux-a/payload/autodev" && find . -type l -printf '%p -> %l\n' | sort) > "$RUNNER_TEMP/payload-a.links"
+          (cd "$RUNNER_TEMP/native-linux-b/payload/autodev" && find . -type l -printf '%p -> %l\n' | sort) > "$RUNNER_TEMP/payload-b.links"
+          diff -u "$RUNNER_TEMP/payload-a.links" "$RUNNER_TEMP/payload-b.links"
+
+      - name: Build DEB and RPM reproducibly
+        shell: bash
+        env:
+          PACKAGE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          sha="$(git rev-parse HEAD)"
+          payload="$RUNNER_TEMP/native-linux-a/payload/autodev"
+          python -m automation.native_linux --repo . --payload "$payload" --out "$RUNNER_TEMP/linux-packages-a" --version "$PACKAGE_VERSION" --commit "$sha"
+          python -m automation.native_linux --repo . --payload "$payload" --out "$RUNNER_TEMP/linux-packages-b" --version "$PACKAGE_VERSION" --commit "$sha"
+          plain="${PACKAGE_VERSION#v}"
+          deb_a="$RUNNER_TEMP/linux-packages-a/autodev_${plain}_amd64.deb"
+          deb_b="$RUNNER_TEMP/linux-packages-b/autodev_${plain}_amd64.deb"
+          rpm_a="$RUNNER_TEMP/linux-packages-a/autodev-${plain}-1.x86_64.rpm"
+          rpm_b="$RUNNER_TEMP/linux-packages-b/autodev-${plain}-1.x86_64.rpm"
+
+          cmp "$deb_a" "$deb_b"
+
+          mkdir -p "$RUNNER_TEMP/rpm-tree-a" "$RUNNER_TEMP/rpm-tree-b"
+          (cd "$RUNNER_TEMP/rpm-tree-a" && rpm2cpio "$rpm_a" | cpio -idm --quiet)
+          (cd "$RUNNER_TEMP/rpm-tree-b" && rpm2cpio "$rpm_b" | cpio -idm --quiet)
+
+          rpm_tree_manifest() {
+            local root="$1"
+            (
+              cd "$root"
+              find . -mindepth 1 -print0 |
+                sort -z |
+                while IFS= read -r -d '' path; do
+                  if [[ -L "$path" ]]; then
+                    printf 'L %s %s -> %s\n' "$(stat -c '%a' "$path")" "$path" "$(readlink "$path")"
+                  elif [[ -f "$path" ]]; then
+                    printf 'F %s %s %s\n' "$(stat -c '%a' "$path")" "$(sha256sum "$path" | awk '{print $1}')" "$path"
+                  elif [[ -d "$path" ]]; then
+                    printf 'D %s %s\n' "$(stat -c '%a' "$path")" "$path"
+                  else
+                    printf 'O %s %s\n' "$(stat -c '%a' "$path")" "$path"
+                  fi
+                done
+            )
+          }
+          rpm_tree_manifest "$RUNNER_TEMP/rpm-tree-a" > "$RUNNER_TEMP/rpm-a.payload"
+          rpm_tree_manifest "$RUNNER_TEMP/rpm-tree-b" > "$RUNNER_TEMP/rpm-b.payload"
+          diff -u "$RUNNER_TEMP/rpm-a.payload" "$RUNNER_TEMP/rpm-b.payload"
+
+          for side in a b; do
+            package_var="rpm_${side}"
+            package="${!package_var}"
+            {
+              rpm -qp --qf '%{NAME}\n%{VERSION}\n%{RELEASE}\n%{ARCH}\n%{LICENSE}\n%{URL}\n' "$package"
+              rpm -qpR "$package" | LC_ALL=C sort
+              rpm -qpl "$package" | LC_ALL=C sort
+            } > "$RUNNER_TEMP/rpm-${side}.metadata"
+          done
+          diff -u "$RUNNER_TEMP/rpm-a.metadata" "$RUNNER_TEMP/rpm-b.metadata"
+
+          dpkg-deb --info "$deb_a"
+          rpm -qpi "$rpm_a"
+          rpm -qpl "$rpm_a" | grep -Fx '/usr/bin/autodev'
+
+      - name: Verify Debian install, upgrade, recovery, and uninstall
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha="$(git rev-parse HEAD)"
+          epoch="$(git show -s --format=%ct "$sha")"
+          state="$HOME/.autodev"
+          target="$RUNNER_TEMP/target repo with spaces"
+          mkdir -p "$state" "$target/.autodev" "$target/.autodev-run"
+          printf 'preserve me\n' > "$state/native-installer-sentinel.txt"
+          printf 'repo policy\n' > "$target/.autodev/sentinel.txt"
+          printf 'run state\n' > "$target/.autodev-run/sentinel.txt"
+
+          python -c "from pathlib import Path; from automation import native_linux; p=Path(r'$RUNNER_TEMP/native-linux-a/payload/autodev'); o=Path(r'$RUNNER_TEMP/linux-upgrades'); e=int('$epoch'); native_linux.build_deb(p,o,'v0.0.1',e); native_linux.build_deb(p,o,'v0.0.2',e); native_linux.build_rpm(p,o,'v0.0.1',e); native_linux.build_rpm(p,o,'v0.0.2',e)"
+          sudo apt-get install -y "$RUNNER_TEMP/linux-upgrades/autodev_0.0.1_amd64.deb"
+          autodev --version
+          sudo apt-get install -y "$RUNNER_TEMP/linux-upgrades/autodev_0.0.2_amd64.deb"
+          autodev --help >/dev/null
+
+          cp "$RUNNER_TEMP/linux-upgrades/autodev_0.0.2_amd64.deb" "$RUNNER_TEMP/broken.deb"
+          truncate -s 5 "$RUNNER_TEMP/broken.deb"
+          if sudo dpkg -i "$RUNNER_TEMP/broken.deb"; then
+            echo 'corrupted package unexpectedly installed' >&2
+            exit 1
+          fi
+          autodev --version
+
+          sudo apt-get remove -y autodev
+          test ! -e /usr/bin/autodev
+          test -f "$state/native-installer-sentinel.txt"
+          test -f "$target/.autodev/sentinel.txt"
+          test -f "$target/.autodev-run/sentinel.txt"
+
+      - name: Upload RPM upgrade fixtures for Fedora smoke test
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: autodev-native-rpm-upgrade-fixtures-ci
+          path: ${{ runner.temp }}/linux-upgrades/*.rpm
+          if-no-files-found: error
+          retention-days: 1
+
+  rpm-smoke:
+    name: Native RPM install and upgrade verification
+    if: ${{ inputs.release_packaging == false }}
+    needs: linux-verify
+    runs-on: ubuntu-latest
+    container: fedora:latest
+
+    steps:
+      - name: Download RPM upgrade fixtures
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: autodev-native-rpm-upgrade-fixtures-ci
+          path: /tmp/autodev-rpms
+
+      - name: Verify RPM install, upgrade, and uninstall
+        shell: bash
+        run: |
+          set -euo pipefail
+          dnf install -y git gh
+          mkdir -p "$HOME/.autodev"
+          printf 'preserve me\n' > "$HOME/.autodev/native-installer-sentinel.txt"
+          dnf install -y /tmp/autodev-rpms/autodev-0.0.1-1.x86_64.rpm
+          autodev --version
+          dnf install -y /tmp/autodev-rpms/autodev-0.0.2-1.x86_64.rpm
+          autodev --help >/dev/null
+          dnf remove -y autodev
+          test ! -e /usr/bin/autodev
+          test -f "$HOME/.autodev/native-installer-sentinel.txt"
+
+  windows-release:
+    name: Prepare Windows MSI for release
+    if: ${{ inputs.release_packaging == true }}
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.11"
+
+      - name: Install frozen-runtime builder
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          python -m pip install --disable-pip-version-check "pyinstaller==6.16.0"
+
+      - name: Locate pinned WiX toolchain
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $wix = Join-Path ${env:ProgramFiles(x86)} 'WiX Toolset v3.14\bin'
+          foreach ($tool in @('candle.exe', 'light.exe')) {
+            if (-not (Test-Path (Join-Path $wix $tool))) {
+              throw "GitHub Windows runner does not provide WiX Toolset v3.14 $tool at $wix"
+            }
+          }
+          "WIX=$wix" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $wix | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Build canonical unsigned MSI once
+        shell: pwsh
+        env:
+          PACKAGE_VERSION: ${{ inputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $sha = (git rev-parse HEAD).Trim()
+          $epoch = (git show -s --format=%ct $sha).Trim()
+          python -m automation.native_packaging --repo . --out "$env:RUNNER_TEMP\native-win-release" --version $env:PACKAGE_VERSION --commit $sha --platform windows
+          $payload = "$env:RUNNER_TEMP\native-win-release\payload\autodev"
+          & (Join-Path $payload 'autodev.exe') --version
+          python -m automation.native_windows --repo . --payload $payload --out "$env:RUNNER_TEMP\msi-release" --version $env:PACKAGE_VERSION --commit $sha
+          $name = "AutoDev-$($env:PACKAGE_VERSION.TrimStart('v'))-Setup.msi"
+          python -m automation.msi_reproducibility --msi "$env:RUNNER_TEMP\msi-release\$name" --epoch $epoch
+
+      - name: Upload unsigned Windows release installer
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: autodev-native-windows
+          path: ${{ runner.temp }}/msi-release/*.msi
+          if-no-files-found: error
+          retention-days: 7
+
+  linux-release:
+    name: Prepare Linux DEB and RPM for release
+    if: ${{ inputs.release_packaging == true }}
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.11"
+
+      - name: Install native build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check 'pyinstaller==6.16.0'
+          sudo apt-get update
+          sudo apt-get install -y rpm
+
+      - name: Build canonical Linux packages once
+        shell: bash
+        env:
+          PACKAGE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          sha="$(git rev-parse HEAD)"
+          python -m automation.native_packaging --repo . --out "$RUNNER_TEMP/native-linux-release" --version "$PACKAGE_VERSION" --commit "$sha" --platform posix
+          payload="$RUNNER_TEMP/native-linux-release/payload/autodev"
+          "$payload/autodev" --version
+          python -m automation.native_linux --repo . --payload "$payload" --out "$RUNNER_TEMP/linux-release-packages" --version "$PACKAGE_VERSION" --commit "$sha"
+          plain="${PACKAGE_VERSION#v}"
+          dpkg-deb --info "$RUNNER_TEMP/linux-release-packages/autodev_${plain}_amd64.deb"
+          rpm -qpi "$RUNNER_TEMP/linux-release-packages/autodev-${plain}-1.x86_64.rpm"
+          rpm -qpl "$RUNNER_TEMP/linux-release-packages/autodev-${plain}-1.x86_64.rpm" | grep -Fx '/usr/bin/autodev'
+
+      - name: Upload Linux release installers
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: autodev-native-linux
+          path: |
+            ${{ runner.temp }}/linux-release-packages/*.deb
+            ${{ runner.temp }}/linux-release-packages/*.rpm
+          if-no-files-found: error
+          retention-days: 7
