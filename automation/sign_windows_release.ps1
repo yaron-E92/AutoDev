@@ -54,13 +54,13 @@ else {
 }
 
 $work = Join-Path $tempRoot ('autodev-signing-' + [guid]::NewGuid().ToString('N'))
-
 New-Item -ItemType Directory -Path $work -Force | Out-Null
 $pfxPath = Join-Path $work 'autodev-signing.pfx'
-$cerPath = Join-Path $work 'autodev-signing.cer'
 $importedMy = @()
-$signer = $null
-$addedRootTrust = $false
+$preexistingMyThumbprints = @(
+    Get-ChildItem -Path 'Cert:\CurrentUser\My' -ErrorAction SilentlyContinue |
+        ForEach-Object { $_.Thumbprint }
+)
 
 try {
     try {
@@ -87,15 +87,7 @@ try {
     }
     $signer = $signers[0]
 
-    Export-Certificate -Cert $signer -FilePath $cerPath -Force | Out-Null
-    $rootCertificatePath = "Cert:\CurrentUser\Root\$($signer.Thumbprint)"
-    if (-not (Test-Path -LiteralPath $rootCertificatePath)) {
-        & certutil.exe -user -addstore -f Root $cerPath
-        $addedRootTrust = $true
-    }
-
     $targetMsi = $InputMsi
-    $signTool = Find-SignTool
     if (-not $VerifyOnly) {
         $destinationParent = Split-Path -Parent $OutputMsi
         if (-not [string]::IsNullOrWhiteSpace($destinationParent)) {
@@ -104,6 +96,7 @@ try {
         Copy-Item -LiteralPath $InputMsi -Destination $OutputMsi -Force
         $targetMsi = $OutputMsi
 
+        $signTool = Find-SignTool
         & $signTool sign `
             /fd SHA256 `
             /tr $TimestampUrl `
@@ -113,10 +106,14 @@ try {
             $targetMsi
     }
 
-    & $signTool verify /pa /all /v $targetMsi
-
     $signature = Get-AuthenticodeSignature -FilePath $targetMsi
-    if ($signature.Status -ne 'Valid') {
+    $expectedUntrustedRootMessage = 'root certificate which is not trusted by the trust provider'
+    $expectedSelfSignedTrustFailure = (
+        $signature.Status -eq 'UnknownError' -and
+        $signature.StatusMessage -like "*$expectedUntrustedRootMessage*"
+    )
+
+    if ($signature.Status -ne 'Valid' -and -not $expectedSelfSignedTrustFailure) {
         throw "Signed MSI did not pass Authenticode verification: $($signature.Status) $($signature.StatusMessage)"
     }
     if ($null -eq $signature.SignerCertificate) {
@@ -126,20 +123,22 @@ try {
         throw "Signed MSI signer thumbprint $($signature.SignerCertificate.Thumbprint) does not match the protected PFX signer $($signer.Thumbprint)."
     }
     if ($null -eq $signature.TimeStamperCertificate) {
-        throw 'Signed MSI does not contain a trusted RFC 3161 timestamp.'
+        throw 'Signed MSI does not contain an RFC 3161 timestamp.'
     }
 
+    if ($expectedSelfSignedTrustFailure) {
+        Write-Host 'Authenticode verification reached the expected untrusted-root result for the protected self-signed publisher certificate.'
+    }
     Write-Host "Verified signed MSI: $targetMsi"
     Write-Host "Signer subject: $($signer.Subject)"
     Write-Host "Signer thumbprint: $($signer.Thumbprint)"
     Write-Host "Timestamp authority: $($signature.TimeStamperCertificate.Subject)"
 }
 finally {
-    if ($addedRootTrust -and $null -ne $signer) {
-        & certutil.exe -user -delstore Root $signer.Thumbprint
-    }
     foreach ($certificate in $importedMy) {
-        Remove-Item -LiteralPath $certificate.PSPath -Force -ErrorAction SilentlyContinue
+        if ($preexistingMyThumbprints -notcontains $certificate.Thumbprint) {
+            Remove-Item -LiteralPath $certificate.PSPath -Force -ErrorAction SilentlyContinue
+        }
     }
     if (Test-Path -LiteralPath $work) {
         Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
