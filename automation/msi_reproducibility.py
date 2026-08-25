@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import ctypes
 import os
 from pathlib import Path
@@ -83,3 +84,21 @@ def normalize_summary_timestamps(path: Path, epoch: int) -> None:
             raise MsiNormalizationError(f"MsiSummaryInfoPersist failed with code {result}")
     finally:
         close(handle.value)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Normalize MSI SummaryInformation timestamps to SOURCE_DATE_EPOCH."
+    )
+    parser.add_argument("--msi", required=True)
+    parser.add_argument("--epoch", required=True, type=int)
+    args = parser.parse_args(argv)
+    try:
+        normalize_summary_timestamps(Path(args.msi), args.epoch)
+    except MsiNormalizationError as exc:
+        parser.error(str(exc))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
