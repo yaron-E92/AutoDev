@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from automation import native_packaging
+from automation import native_packaging, native_windows
 
 
 class NativePackagingTests(unittest.TestCase):
@@ -63,6 +63,44 @@ class NativePackagingTests(unittest.TestCase):
     def test_windows_add_data_uses_windows_separator(self) -> None:
         value = native_packaging._data_argument(Path(r"C:\Auto Dev\docs"), "docs", windows=True)
         self.assertIn(";docs", value)
+
+    def test_windows_msi_authoring_is_per_user_upgrade_safe_and_path_enabled(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            payload = Path(temp_dir) / "payload with spaces"
+            (payload / "_internal" / "automation").mkdir(parents=True)
+            (payload / "autodev.exe").write_bytes(b"exe")
+            (payload / "_internal" / "automation" / "module.pyc").write_bytes(b"module")
+            commit = "abcdef1234567890abcdef1234567890abcdef12"
+
+            first = native_windows.render_wix_source(payload, "v1.2.3", commit)
+            second = native_windows.render_wix_source(payload, "v1.2.3", commit)
+
+        self.assertEqual(first, second)
+        self.assertIn('InstallScope="perUser"', first)
+        self.assertIn('InstallPrivileges="limited"', first)
+        self.assertIn('Schedule="afterInstallInitialize"', first)
+        self.assertIn('Root="HKCU" Key="Software\\AutoDev"', first)
+        self.assertIn('Name="PATH"', first)
+        self.assertIn('System="no"', first)
+        self.assertIn('Value="[INSTALLFOLDER]"', first)
+        self.assertIn('Directory Id="LocalAppDataFolder"', first)
+        self.assertIn('Directory Id="AutoDevProgramsFolder" Name="Programs"', first)
+        self.assertNotIn(".autodev-run", first)
+        self.assertNotIn("privacy-grants", first)
+
+    def test_windows_msi_identity_is_stable_for_same_release_and_changes_by_version(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            payload = Path(temp_dir) / "payload"
+            payload.mkdir()
+            (payload / "autodev.exe").write_bytes(b"exe")
+            commit = "abcdef1234567890abcdef1234567890abcdef12"
+            same_a = native_windows.render_wix_source(payload, "v1.2.3", commit)
+            same_b = native_windows.render_wix_source(payload, "v1.2.3", commit)
+            newer = native_windows.render_wix_source(payload, "v1.2.4", commit)
+
+        self.assertEqual(same_a, same_b)
+        self.assertNotEqual(same_a, newer)
+        self.assertEqual(native_windows.artifact_name("v1.2.3"), "AutoDev-1.2.3-Setup.msi")
 
 
 if __name__ == "__main__":
