@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 from typing import Callable, TextIO
 
+from automation import cli_help
 from automation.queue_contract import DEFAULT_LIMIT, MANAGED_LABEL, QueueError, QueueIssue
 from automation.queue_github import (
     add_issue_label,
@@ -19,6 +20,48 @@ from automation.queue_github import (
 
 
 ISSUE_RE = re.compile(r"^#?([1-9][0-9]*)$")
+
+
+def register_help() -> None:
+    """Register the deterministic manage surface with the shared CLI help catalog."""
+    cli_help.HELP.setdefault(
+        ("manage",),
+        cli_help.HelpEntry(
+            usage="autodev manage (ISSUE | --all | --list) [options]",
+            summary="Opt open GitHub issues into AutoDev management without starting work.",
+            description=(
+                "`autodev:managed` is operator authorization, not readiness. This command never "
+                "adds `autodev:ready`, changes dependency relationships, or starts an issue-to-PR run. "
+                "`--list` is strictly read-only."
+            ),
+            arguments=(("ISSUE", "Open issue number; accepts 123 or a quoted '#123'."),),
+            options=cli_help.COMMON_LOCATION_OPTIONS
+            + (
+                ("--all", "Add `autodev:managed` to every open issue; pull requests are excluded."),
+                ("--list", "List open managed issues without mutation."),
+                ("--json", "Emit stable machine-readable output."),
+            ),
+            examples=(
+                "autodev manage 123",
+                "autodev manage '#123'",
+                "autodev manage --all",
+                "autodev manage --list",
+                "autodev manage --list --json",
+            ),
+        ),
+    )
+    cli_help.KNOWN_TOP_LEVEL.add("manage")
+    groups: list[tuple[str, tuple[tuple[str, str], ...]]] = []
+    for title, rows in cli_help.TOP_LEVEL_GROUPS:
+        if title == "Automation and operations" and not any(
+            name == "manage" for name, _description in rows
+        ):
+            rows = (
+                ("manage", "Opt open GitHub issues into management without starting work."),
+                *rows,
+            )
+        groups.append((title, rows))
+    cli_help.TOP_LEVEL_GROUPS = tuple(groups)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -54,12 +97,15 @@ def _issue_number(raw: str) -> int:
     return int(match.group(1))
 
 
-def _issue_json(issue: QueueIssue) -> dict[str, object]:
+def _issue_json(issue: QueueIssue, *, managed: bool | None = None) -> dict[str, object]:
+    labels = set(issue.labels)
+    if managed is True:
+        labels.add(MANAGED_LABEL)
     return {
         "number": issue.number,
         "title": issue.title,
         "url": issue.url,
-        "labels": list(issue.labels),
+        "labels": sorted(labels),
     }
 
 
@@ -135,7 +181,7 @@ def run_cli(
                         {
                             "repository": github_repo,
                             "mode": "single",
-                            "issue": _issue_json(issue),
+                            "issue": _issue_json(issue, managed=True),
                             "newly_managed": 0 if already else 1,
                             "already_managed": 1 if already else 0,
                         },
