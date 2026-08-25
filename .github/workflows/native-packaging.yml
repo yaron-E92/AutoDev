@@ -46,7 +46,7 @@ jobs:
             throw "GitHub Windows runner does not provide WiX Toolset v3.14 at $wix"
           }
           "WIX=$wix" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "$wix;$env:PATH" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          $wix | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Build self-contained payload twice
         shell: pwsh
@@ -108,8 +108,13 @@ jobs:
           $payload = "$env:RUNNER_TEMP\native-win-a\payload\autodev"
           $installDir = Join-Path $env:RUNNER_TEMP 'AutoDev Install With Spaces'
           $state = Join-Path $HOME '.autodev'
+          $target = Join-Path $env:RUNNER_TEMP 'target repo with spaces'
           New-Item -ItemType Directory -Force $state | Out-Null
+          New-Item -ItemType Directory -Force (Join-Path $target '.autodev') | Out-Null
+          New-Item -ItemType Directory -Force (Join-Path $target '.autodev-run') | Out-Null
           Set-Content -Path (Join-Path $state 'native-installer-sentinel.txt') -Value 'preserve me'
+          Set-Content -Path (Join-Path $target '.autodev\sentinel.txt') -Value 'repo policy'
+          Set-Content -Path (Join-Path $target '.autodev-run\sentinel.txt') -Value 'run state'
 
           python -m automation.native_windows --repo . --payload $payload --out "$env:RUNNER_TEMP\upgrade-1" --version v0.0.1 --commit $sha
           python -m automation.native_windows --repo . --payload $payload --out "$env:RUNNER_TEMP\upgrade-2" --version v0.0.2 --commit $sha
@@ -130,6 +135,10 @@ jobs:
           if ($registeredPath -notlike "*$installDir*") {
             throw "MSI did not register AutoDev on the user PATH: $registeredPath"
           }
+          $scheduled = @(Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object { $_.TaskName -like 'AutoDev*' })
+          if ($scheduled.Count -ne 0) {
+            throw 'Installing AutoDev must not silently enable a scheduler task.'
+          }
 
           $broken = "$env:RUNNER_TEMP\broken-upgrade.msi"
           Copy-Item "$env:RUNNER_TEMP\upgrade-3\AutoDev-0.0.3-Setup.msi" $broken
@@ -141,8 +150,14 @@ jobs:
           if (Test-Path (Join-Path $installDir 'autodev.exe')) {
             throw 'MSI uninstall left the product executable installed.'
           }
-          if (-not (Test-Path (Join-Path $state 'native-installer-sentinel.txt'))) {
-            throw 'MSI uninstall removed user AutoDev state.'
+          foreach ($preserved in @(
+            (Join-Path $state 'native-installer-sentinel.txt'),
+            (Join-Path $target '.autodev\sentinel.txt'),
+            (Join-Path $target '.autodev-run\sentinel.txt')
+          )) {
+            if (-not (Test-Path $preserved)) {
+              throw "MSI upgrade/uninstall removed preserved state: $preserved"
+            }
           }
 
       - name: Upload Windows native installer
@@ -212,7 +227,7 @@ jobs:
           rpm -qpi "$RUNNER_TEMP/linux-packages-a/autodev-${plain}-1.x86_64.rpm"
           rpm -qpl "$RUNNER_TEMP/linux-packages-a/autodev-${plain}-1.x86_64.rpm" | grep -Fx '/usr/bin/autodev'
 
-      - name: Verify Debian install, upgrade, recovery path, and uninstall
+      - name: Verify Debian install, upgrade, recovery, and uninstall
         shell: bash
         run: |
           set -euo pipefail
@@ -220,32 +235,13 @@ jobs:
           epoch="$(git show -s --format=%ct "$sha")"
           payload="$RUNNER_TEMP/native-linux-a/payload/autodev"
           state="$HOME/.autodev"
-          mkdir -p "$state"
+          target="$RUNNER_TEMP/target repo with spaces"
+          mkdir -p "$state" "$target/.autodev" "$target/.autodev-run"
           printf 'preserve me\n' > "$state/native-installer-sentinel.txt"
+          printf 'repo policy\n' > "$target/.autodev/sentinel.txt"
+          printf 'run state\n' > "$target/.autodev-run/sentinel.txt"
 
-          python - <<'PY'
-          import os
-          from pathlib import Path
-          from automation import native_linux
-
-          payload = Path(os.environ['RUNNER_TEMP']) / 'native-linux-a' / 'payload' / 'autodev'
-          out = Path(os.environ['RUNNER_TEMP']) / 'linux-upgrades'
-          epoch = int(os.environ['SOURCE_EPOCH'])
-          native_linux.build_deb(payload, out, 'v0.0.1', epoch)
-          native_linux.build_deb(payload, out, 'v0.0.2', epoch)
-          PY
-        env:
-          SOURCE_EPOCH: ${{ github.event.repository.updated_at && '0' || '0' }}
-
-      - name: Complete Debian transactional smoke
-        shell: bash
-        run: |
-          set -euo pipefail
-          # Recompute the exact source epoch here instead of depending on wall-clock time.
-          sha="$(git rev-parse HEAD)"
-          epoch="$(git show -s --format=%ct "$sha")"
-          payload="$RUNNER_TEMP/native-linux-a/payload/autodev"
-          python -c "from pathlib import Path; from automation import native_linux; native_linux.build_deb(Path(r'$RUNNER_TEMP/native-linux-a/payload/autodev'), Path(r'$RUNNER_TEMP/linux-upgrades'), 'v0.0.1', int('$epoch')); native_linux.build_deb(Path(r'$RUNNER_TEMP/native-linux-a/payload/autodev'), Path(r'$RUNNER_TEMP/linux-upgrades'), 'v0.0.2', int('$epoch'))"
+          python -c "from pathlib import Path; from automation import native_linux; p=Path(r'$RUNNER_TEMP/native-linux-a/payload/autodev'); o=Path(r'$RUNNER_TEMP/linux-upgrades'); e=int('$epoch'); native_linux.build_deb(p,o,'v0.0.1',e); native_linux.build_deb(p,o,'v0.0.2',e); native_linux.build_rpm(p,o,'v0.0.1',e); native_linux.build_rpm(p,o,'v0.0.2',e)"
           sudo apt-get install -y "$RUNNER_TEMP/linux-upgrades/autodev_0.0.1_amd64.deb"
           autodev --version
           sudo apt-get install -y "$RUNNER_TEMP/linux-upgrades/autodev_0.0.2_amd64.deb"
@@ -261,7 +257,9 @@ jobs:
 
           sudo apt-get remove -y autodev
           test ! -e /usr/bin/autodev
-          test -f "$HOME/.autodev/native-installer-sentinel.txt"
+          test -f "$state/native-installer-sentinel.txt"
+          test -f "$target/.autodev/sentinel.txt"
+          test -f "$target/.autodev-run/sentinel.txt"
 
       - name: Upload Linux native installers
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -272,3 +270,39 @@ jobs:
             ${{ runner.temp }}/linux-packages-a/*.rpm
           if-no-files-found: error
           retention-days: 7
+
+      - name: Upload RPM upgrade fixtures
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: autodev-native-rpm-upgrade-fixtures
+          path: ${{ runner.temp }}/linux-upgrades/*.rpm
+          if-no-files-found: error
+          retention-days: 1
+
+  rpm-smoke:
+    name: Native RPM install and upgrade
+    needs: linux
+    runs-on: ubuntu-latest
+    container: fedora:latest
+
+    steps:
+      - name: Download RPM upgrade fixtures
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: autodev-native-rpm-upgrade-fixtures
+          path: /tmp/autodev-rpms
+
+      - name: Verify RPM install, upgrade, and uninstall
+        shell: bash
+        run: |
+          set -euo pipefail
+          dnf install -y git gh
+          mkdir -p "$HOME/.autodev"
+          printf 'preserve me\n' > "$HOME/.autodev/native-installer-sentinel.txt"
+          dnf install -y /tmp/autodev-rpms/autodev-0.0.1-1.x86_64.rpm
+          autodev --version
+          dnf install -y /tmp/autodev-rpms/autodev-0.0.2-1.x86_64.rpm
+          autodev --help >/dev/null
+          dnf remove -y autodev
+          test ! -e /usr/bin/autodev
+          test -f "$HOME/.autodev/native-installer-sentinel.txt"
