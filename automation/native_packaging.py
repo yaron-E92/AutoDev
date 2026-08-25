@@ -23,6 +23,7 @@ DATA_ROOTS = (
     "docs",
     "README.md",
     "CONTRIBUTING.md",
+    "LICENSE",
     "codex-profiles.json",
 )
 
