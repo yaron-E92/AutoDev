@@ -2,6 +2,39 @@
 
 Tagged AutoDev releases provide native installers plus reproducible, provenance-attested source bundles for users who want a stable product snapshot. Development can still use a repository checkout, but cloning the repository is not the normal end-user installation path.
 
+## Generated artifact boundary
+
+`artifacts/` is AutoDev's top-level generated-output boundary and is Git-ignored. Final release handoffs use:
+
+```text
+artifacts/release/<target>/
+```
+
+The canonical publication target is `artifacts/release/publish/`. It contains the exact native installers, source bundles, `autodev-release-manifest.json`, and `SHA256SUMS` handed to provenance attestation and GitHub Release publication.
+
+Release workflows may use additional target directories beneath the same boundary while moving an artifact toward publication:
+
+```text
+artifacts/release/windows-unsigned/   unsigned MSI awaiting trusted signing
+artifacts/release/windows/            verified signed MSI
+artifacts/release/linux/              final DEB and RPM packages
+artifacts/release/native/             final native inputs aggregated for packaging
+artifacts/release/publish/            complete publication-ready asset set
+artifacts/release/existing/           downloaded assets used only for rerun comparison
+```
+
+Tool-native caches and deliberate scratch/reproducibility builds do not have to be moved out of runner-temporary directories merely to satisfy this convention. The boundary applies to generated outputs that are intentionally handed between build/sign/release stages or published to users.
+
+The release packager defaults to the publication target, so a normal source-bundle build does not need an ad-hoc output path:
+
+```text
+python -m automation.package_release --repo . --version vX.Y.Z --commit <exact-sha>
+```
+
+Use `--target NAME` to select another documented `artifacts/release/<target>/` handoff. `--out PATH` remains an explicit override for controlled tests/tools, not the normal release workflow.
+
+`artifacts/` is disposable generated state. Deleting it must not remove source, repository policy, user configuration, or durable AutoDev run state; rerunning the same exact-source packaging commands recreates the same expected release handoff.
+
 ## Current release assets
 
 A successful x86-64 release publishes the native installers, source bundles, manifest, and checksums for one exact tag commit:
@@ -43,14 +76,15 @@ The native-package CI gate is part of the version-tag prerequisite. A `main` ver
 Release publication is **manual and tag-selected**. `.github/workflows/release.yml` accepts an existing canonical `vMAJOR.MINOR.PATCH` tag through `workflow_dispatch`, then:
 
 1. reruns required CI against that exact tag, including native package builds and smoke tests;
-2. takes the exact-tag unsigned MSI from required CI into a Windows-only signing job;
-3. signs it with the protected AutoDev self-signed code-signing PFX using SHA-256 plus an RFC 3161 timestamp, then verifies the signer and timestamp before allowing publication;
-4. checks out the tag with full history and requires the ref to be an existing annotated tag whose commit equals the checked-out `HEAD`;
-5. reuses the signed MSI plus the DEB/RPM bytes produced by that exact-tag run;
-6. builds deterministic source bundles and binds the **final signed MSI** and Linux package hashes into manifest schema v2;
-7. validates the complete `SHA256SUMS` set;
-8. creates GitHub artifact provenance with `actions/attest` for the checksum subjects;
-9. creates the GitHub Release only after all of the above succeeds.
+2. stages the exact-tag unsigned MSI under `artifacts/release/windows-unsigned/` and takes it into a Windows-only signing job;
+3. signs it with the protected AutoDev self-signed code-signing PFX using SHA-256 plus an RFC 3161 timestamp, verifies the signer and timestamp, and places the verified signed MSI under `artifacts/release/windows/`;
+4. stages the final DEB/RPM under `artifacts/release/linux/`;
+5. checks out the tag with full history and requires the ref to be an existing annotated tag whose commit equals the checked-out `HEAD`;
+6. aggregates the signed MSI plus DEB/RPM under `artifacts/release/native/`;
+7. builds deterministic source bundles and binds the **final signed MSI** and Linux package hashes into `artifacts/release/publish/` with manifest schema v2;
+8. validates the complete `artifacts/release/publish/SHA256SUMS` set;
+9. creates GitHub artifact provenance with `actions/attest` for the publication checksum subjects;
+10. creates the GitHub Release from `artifacts/release/publish/` only after all of the above succeeds.
 
 The production Windows signing material exists only in the trusted manual release path. Ordinary PR/main native-package CI is unsigned and read-only. The release repository must define these protected Actions secrets:
 
@@ -63,7 +97,7 @@ AUTODEV_WINDOWS_SIGNING_PFX_PASSWORD
 
 The publish job uses only the repository-provided `GITHUB_TOKEN`; no PAT is required. Its permissions are limited to `contents: write`, `id-token: write`, and `attestations: write`. The signing job itself has only `contents: read` plus access to the two protected secrets. Ordinary CI remains read-only except for the reusable-workflow permission ceiling needed by the main-only version-tag job.
 
-If the same release workflow is rerun and the GitHub Release already exists, AutoDev reuses the already-published signed MSI, verifies that it is signed by the current protected PFX identity, rebuilds the remaining exact-tag artifacts, and then requires every expected release asset to be byte-identical. It does **not** use `--clobber`. This avoids generating a different timestamped Authenticode signature on rerun and prevents silent replacement of an already-published artifact.
+If the same release workflow is rerun and the GitHub Release already exists, AutoDev reuses the already-published signed MSI, verifies that it is signed by the current protected PFX identity, rebuilds the remaining exact-tag artifacts, downloads the existing published assets into `artifacts/release/existing/`, and then requires every expected file in `artifacts/release/publish/` to be byte-identical. It does **not** use `--clobber`. This avoids generating a different timestamped Authenticode signature on rerun and prevents silent replacement of an already-published artifact.
 
 Generated release notes explicitly start at the most recent **published GitHub Release** tag. Intermediate semantic-version tags that were never published do not truncate the changelog range.
 
@@ -149,7 +183,7 @@ Linux packages declare architecture, homepage, and runtime dependencies. The rep
 2. Allow the trusted version policy to create the intended annotated semantic-version tag on green `main`, or otherwise ensure the selected release tag is the exact trusted tag intended by repository policy.
 3. Ensure the two protected Windows PFX secrets are configured for the repository's trusted release path.
 4. Manually run the repository's **Release** workflow and provide that existing tag as its `tag` input.
-5. Let exact-tag CI, native installer smoke tests, Windows signing/verification, source-identity checks, deterministic packaging, checksum validation, provenance attestation, and publication complete.
+5. Let exact-tag CI, native installer smoke tests, Windows signing/verification, source-identity checks, deterministic packaging into `artifacts/release/publish/`, checksum validation, provenance attestation, and publication complete.
 6. Download the created assets, verify `SHA256SUMS`, and verify at least one native installer with `gh attestation verify` before announcing the release.
 
 Do not move or reuse a published tag for different source. If an existing release's assets differ from what the release pipeline produces for the selected tag commit, the workflow intentionally fails rather than replacing them.
