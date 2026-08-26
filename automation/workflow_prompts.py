@@ -82,12 +82,23 @@ def resolve_profiles(
     if explicit:
         local_check = explicit
     else:
-        local_check = local_verification.render_profile_command(
-            config,
-            profiles_csv=profiles_csv,
-            autodev_root=autodev_root,
-            platform=platform,
-        )
+        template = local_verification.resolve_template(config, platform=platform)
+        if "{~{CodexToolsDir}~}" in template:
+            local_check = local_verification.render_profile_command(
+                config,
+                profiles_csv=profiles_csv,
+                autodev_root=autodev_root,
+                platform=platform,
+            )
+        else:
+            # Do not consult Path.home() for profiles that do not use the
+            # CodexToolsDir placeholder. The shipped platform-neutral verifier
+            # intentionally has no home-directory dependency.
+            local_check = (
+                template.replace("{~{ProfilesCsv}~}", profiles_csv)
+                .replace("{~{AutomationRoot}~}", str(autodev_root))
+                .strip()
+            )
     local_verification.preflight_local_check(
         local_check,
         explicit=bool(explicit),
