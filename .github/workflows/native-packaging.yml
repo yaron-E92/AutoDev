@@ -425,15 +425,15 @@ jobs:
           python -m automation.native_packaging --repo . --out "$env:RUNNER_TEMP\native-win-release" --version $env:PACKAGE_VERSION --commit $sha --platform windows
           $payload = "$env:RUNNER_TEMP\native-win-release\payload\autodev"
           & (Join-Path $payload 'autodev.exe') --version
-          python -m automation.native_windows --repo . --payload $payload --out "$env:RUNNER_TEMP\msi-release" --version $env:PACKAGE_VERSION --commit $sha
+          python -m automation.native_windows --repo . --payload $payload --out "artifacts/release/windows-unsigned" --version $env:PACKAGE_VERSION --commit $sha
           $name = "AutoDev-$($env:PACKAGE_VERSION.TrimStart('v'))-Setup.msi"
-          python -m automation.msi_reproducibility --msi "$env:RUNNER_TEMP\msi-release\$name" --epoch $epoch
+          python -m automation.msi_reproducibility --msi "artifacts/release/windows-unsigned/$name" --epoch $epoch
 
       - name: Upload unsigned Windows release installer
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: autodev-native-windows
-          path: ${{ runner.temp }}/msi-release/*.msi
+          path: artifacts/release/windows-unsigned/*.msi
           if-no-files-found: error
           retention-days: 7
 
@@ -472,18 +472,18 @@ jobs:
           python -m automation.native_packaging --repo . --out "$RUNNER_TEMP/native-linux-release" --version "$PACKAGE_VERSION" --commit "$sha" --platform posix
           payload="$RUNNER_TEMP/native-linux-release/payload/autodev"
           "$payload/autodev" --version
-          python -m automation.native_linux --repo . --payload "$payload" --out "$RUNNER_TEMP/linux-release-packages" --version "$PACKAGE_VERSION" --commit "$sha"
+          python -m automation.native_linux --repo . --payload "$payload" --out "artifacts/release/linux" --version "$PACKAGE_VERSION" --commit "$sha"
           plain="${PACKAGE_VERSION#v}"
-          dpkg-deb --info "$RUNNER_TEMP/linux-release-packages/autodev_${plain}_amd64.deb"
-          rpm -qpi "$RUNNER_TEMP/linux-release-packages/autodev-${plain}-1.x86_64.rpm"
-          rpm -qpl "$RUNNER_TEMP/linux-release-packages/autodev-${plain}-1.x86_64.rpm" | grep -Fx '/usr/bin/autodev'
+          dpkg-deb --info "artifacts/release/linux/autodev_${plain}_amd64.deb"
+          rpm -qpi "artifacts/release/linux/autodev-${plain}-1.x86_64.rpm"
+          rpm -qpl "artifacts/release/linux/autodev-${plain}-1.x86_64.rpm" | grep -Fx '/usr/bin/autodev'
 
       - name: Upload Linux release installers
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: autodev-native-linux
           path: |
-            ${{ runner.temp }}/linux-release-packages/*.deb
-            ${{ runner.temp }}/linux-release-packages/*.rpm
+            artifacts/release/linux/*.deb
+            artifacts/release/linux/*.rpm
           if-no-files-found: error
           retention-days: 7
