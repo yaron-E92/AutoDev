@@ -13,6 +13,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
+from automation import repository_identity
 from automation.semantic_contract import SemanticVerifierError
 from automation.semantic_invocation import prepare_semantic_repair_prompt
 from automation.semantic_prompts import extract_acceptance_criteria
@@ -64,11 +65,11 @@ def ensure_prepared_issue(
     if requested_issue == 0:
         raise WorkflowStageError("no prepared AutoDev issue is available; pass an issue number")
 
-    owner = os.environ.get("GITHUB_OWNER", "").strip()
-    repo_name = os.environ.get("GITHUB_REPO", "").strip()
-    if not owner or not repo_name:
-        raise WorkflowStageError("GITHUB_OWNER and GITHUB_REPO are required to prepare an issue")
-    repo_full = f"{owner}/{repo_name}"
+    try:
+        repo_full = repository_identity.resolve_github_repository(repo, runner=runner)
+    except repository_identity.RepositoryIdentityError as exc:
+        raise WorkflowStageError(str(exc)) from exc
+    owner, repo_name = repository_identity.split_github_repository(repo_full)
 
     issue = gh_json(
         repo,
