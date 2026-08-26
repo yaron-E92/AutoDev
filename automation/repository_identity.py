@@ -182,8 +182,17 @@ def resolve_github_repository(
         owner, name = split_github_repository(configured)
         return f"{owner_override or owner}/{name_override or name}"
 
+    # Existing queue/repo/scheduler callers historically resolve through `gh repo view`.
+    # Keep that model-free fallback ahead of direct remote parsing for those callers while
+    # canonical issue preparation uses the deterministic remote path below.
+    if allow_gh_fallback:
+        fallback = _legacy_gh_repository(target, runner=runner)
+        if fallback:
+            owner, name = split_github_repository(fallback)
+            return f"{owner_override or owner}/{name_override or name}"
+
     remote_name = values.get("REMOTE_NAME", "").strip() or "origin"
-    remote_repository, remote_available = _remote_repository(
+    remote_repository, _ = _remote_repository(
         target,
         remote_name,
         runner=runner,
@@ -191,12 +200,6 @@ def resolve_github_repository(
     if remote_repository:
         owner, name = split_github_repository(remote_repository)
         return f"{owner_override or owner}/{name_override or name}"
-
-    if allow_gh_fallback and not remote_available:
-        fallback = _legacy_gh_repository(target, runner=runner)
-        if fallback:
-            owner, name = split_github_repository(fallback)
-            return f"{owner_override or owner}/{name_override or name}"
 
     raise RepositoryIdentityError(
         "could not resolve GitHub repository identity for "
