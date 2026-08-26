@@ -1,6 +1,8 @@
 {
   "defaultProfile": "auto",
-  "verifyCommandTemplate": "pwsh -File \"{~{CodexToolsDir}~}\\codex-verify.ps1\" -Profiles \"{~{ProfilesCsv}~}\"",
+  "verifyCommandTemplate": {
+    "default": "autodev verify-local"
+  },
   "profiles": {
     "backend": {
       "labels": [
