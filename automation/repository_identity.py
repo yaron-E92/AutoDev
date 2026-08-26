@@ -79,7 +79,7 @@ def _configured_repository(repo: Path) -> str:
     if not isinstance(value, dict):
         raise RepositoryIdentityError(f"AutoDev repository configuration must be an object: {path}")
     configured = value.get("github_repository", "")
-    if configured in {None, ""}:
+    if configured is None or configured == "":
         return ""
     if not isinstance(configured, str):
         raise RepositoryIdentityError(
