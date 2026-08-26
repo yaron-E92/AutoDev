@@ -13,6 +13,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
+from automation import local_verification
 from automation.semantic_contract import SemanticVerifierError
 from automation.semantic_invocation import prepare_semantic_repair_prompt
 from automation.semantic_prompts import extract_acceptance_criteria
@@ -40,6 +41,8 @@ def resolve_profiles(
     explicit_local_check: str,
     explicit_stack_context: str,
     autodev_root: Path,
+    which: Callable[[str], str | None] = shutil.which,
+    platform: str | None = None,
 ) -> tuple[str, str, str]:
     config = read_json(profiles_path)
     if not isinstance(config, dict):
@@ -74,20 +77,24 @@ def resolve_profiles(
         if context:
             contexts.append(context)
     profiles_csv = ",".join(dict.fromkeys(verify_profiles))
-    if explicit_local_check.strip():
-        local_check = explicit_local_check.strip()
+    explicit = explicit_local_check.strip()
+    if explicit:
+        local_check = explicit
     else:
-        template = str(config.get("verifyCommandTemplate", "")).strip()
-        if not template:
-            raise WorkflowStageError(
-                f"verification profile {profiles_path} has no verifyCommandTemplate; set LOCAL_CHECK explicitly"
-            )
-        codex_tools = os.environ.get("CODEX_TOOLS_DIR", str(Path.home() / "codex-tools"))
-        local_check = (
-            template.replace("{~{ProfilesCsv}~}", profiles_csv)
-            .replace("{~{AutomationRoot}~}", str(autodev_root))
-            .replace("{~{CodexToolsDir}~}", codex_tools)
+        local_check = local_verification.render_profile_command(
+            config,
+            profiles_csv=profiles_csv,
+            autodev_root=autodev_root,
+            platform=platform,
         )
+    local_verification.preflight_local_check(
+        local_check,
+        explicit=bool(explicit),
+        profiles_path=profiles_path,
+        autodev_root=autodev_root,
+        platform=platform,
+        which=which,
+    )
     stack_context = explicit_stack_context.strip() or "\n".join(contexts)
     if not stack_context:
         stack_context = (
