@@ -2,15 +2,16 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from automation import execution_classification as execution
-from automation import opencode_adapter_handoff, opencode_adapter_roles
+from automation import opencode_adapter_handoff, opencode_adapter_roles, workflow_stages
 from automation.opencode_adapter_contract import OpenCodeAdapterError
 
 
 EXTERNAL_BOUNDARY_FIELD = "external_boundaries"
+EXTERNAL_BOUNDARY_FILE = "execution-external-boundaries.json"
 BOUNDARY_KINDS = {
     "unavailable-external-resource",
     "human-legal-provider-approval",
@@ -213,6 +214,35 @@ def validate_reader_external_boundary(reader_text: str) -> tuple[ExternalBoundar
     return evidence
 
 
+def _persist_external_boundary_evidence(
+    current: Path,
+    evidence: tuple[ExternalBoundaryEvidence, ...],
+) -> None:
+    path = current / EXTERNAL_BOUNDARY_FILE
+    payload = [asdict(item) for item in evidence]
+    if payload:
+        path.write_text(
+            json.dumps(payload, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+    else:
+        path.unlink(missing_ok=True)
+
+    try:
+        state = workflow_stages.read_state(current)
+    except workflow_stages.WorkflowStageError:
+        return
+    if payload:
+        state["ExternalBoundaryEvidence"] = payload
+        state["ExternalBoundaryEvidenceFile"] = (
+            f".autodev-run/current/{EXTERNAL_BOUNDARY_FILE}"
+        )
+    else:
+        state.pop("ExternalBoundaryEvidence", None)
+        state.pop("ExternalBoundaryEvidenceFile", None)
+    workflow_stages.write_state(current, state)
+
+
 def reader_external_boundary_contract() -> str:
     kinds = "|".join(sorted(BOUNDARY_KINDS))
     return f"""
@@ -267,24 +297,30 @@ def _install_reader_acceptance_guard() -> None:
     original = current
 
     def _accept_role_once(role: str, current_dir: Path, input_path: Path | None):
+        evidence: tuple[ExternalBoundaryEvidence, ...] = ()
+        guarded_reader = False
         if role == "reader":
             try:
                 state = json.loads((current_dir / "state.json").read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 state = {}
             if isinstance(state, dict) and execution.protocol_enabled(state):
+                guarded_reader = True
                 source = input_path or current_dir / "reader-brief.md"
                 try:
                     reader_text = source.read_text(encoding="utf-8")
                 except OSError:
                     reader_text = ""
                 try:
-                    validate_reader_external_boundary(reader_text)
+                    evidence = validate_reader_external_boundary(reader_text)
                 except ExternalBoundaryEvidenceError as exc:
                     raise OpenCodeAdapterError(
                         f"reader execution-classification external-boundary contract rejected: {exc}"
                     ) from exc
-        return original(role, current_dir, input_path)
+        outputs = original(role, current_dir, input_path)
+        if guarded_reader:
+            _persist_external_boundary_evidence(current_dir, evidence)
+        return outputs
 
     _accept_role_once._autodev_external_boundary = True  # type: ignore[attr-defined]
     opencode_adapter_roles._accept_role_once = _accept_role_once  # type: ignore[attr-defined]
