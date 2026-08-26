@@ -43,6 +43,7 @@ def resolve_profiles(
     autodev_root: Path,
     which: Callable[[str], str | None] = shutil.which,
     platform: str | None = None,
+    cwd: Path | None = None,
 ) -> tuple[str, str, str]:
     config = read_json(profiles_path)
     if not isinstance(config, dict):
@@ -92,6 +93,7 @@ def resolve_profiles(
         explicit=bool(explicit),
         profiles_path=profiles_path,
         autodev_root=autodev_root,
+        cwd=cwd,
         platform=platform,
         which=which,
     )
