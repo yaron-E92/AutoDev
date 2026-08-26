@@ -54,6 +54,8 @@ FAILURE_TRANSIENT = "transient/retryable-infrastructure"
 
 FAILURE_DETERMINISTIC = "non-retryable-deterministic"
 
+FAILURE_SETUP = "setup/configuration"
+
 IGNORED_PREFIXES = (
     ".git/",
     ".autodev-run/",
@@ -117,7 +119,12 @@ def safe_slug(value: str) -> str:
 
 def _exception_classification(error: BaseException) -> str:
     classification = str(getattr(error, "classification", "") or "")
-    if classification in {FAILURE_CODE_REPAIRABLE, FAILURE_TRANSIENT, FAILURE_DETERMINISTIC}:
+    if classification in {
+        FAILURE_CODE_REPAIRABLE,
+        FAILURE_TRANSIENT,
+        FAILURE_DETERMINISTIC,
+        FAILURE_SETUP,
+    }:
         return classification
     if classification in {"rate_limited", "timeout", "network_error", "provider_unavailable"}:
         return FAILURE_TRANSIENT
