@@ -140,7 +140,7 @@ class RepositoryIdentityTests(unittest.TestCase):
             self.assertIn("REMOTE_NAME", message)
             self.assertIn(str(repo.resolve()), message)
 
-    def test_legacy_queue_fallback_remains_available_when_remote_is_absent(self):
+    def test_legacy_queue_fallback_remains_available_without_running_git(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = self._repo(Path(temp_dir))
             calls: list[list[str]] = []
@@ -148,8 +148,6 @@ class RepositoryIdentityTests(unittest.TestCase):
             def runner(argv, **_kwargs):
                 args = list(argv)
                 calls.append(args)
-                if args[:2] == ["git", "remote"]:
-                    return SimpleNamespace(returncode=2, stdout="", stderr="missing")
                 if args[:3] == ["gh", "repo", "view"]:
                     return SimpleNamespace(returncode=0, stdout="legacy/repository\n", stderr="")
                 raise AssertionError(args)
@@ -162,8 +160,7 @@ class RepositoryIdentityTests(unittest.TestCase):
             )
 
             self.assertEqual(actual, "legacy/repository")
-            self.assertEqual(calls[0], ["git", "remote", "get-url", "--all", "origin"])
-            self.assertEqual(calls[1][:3], ["gh", "repo", "view"])
+            self.assertEqual(calls, [["gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"]])
 
 
 if __name__ == "__main__":
