@@ -123,10 +123,86 @@ class RepoSetupTests(unittest.TestCase):
 
             self.assertTrue(result.healthy)
             checks = {item.name: item for item in result.checks}
+            self.assertEqual(checks["cli"].state, "ok")
+            self.assertIn("canonical CLI root:", checks["cli"].detail)
             self.assertEqual(checks["queue-labels"].state, "ok")
             self.assertEqual(checks["opencode-assets"].state, "info")
             self.assertIn("active=0", checks["privacy-grants"].detail)
             self.assertNotIn("route_identities", checks["privacy-grants"].detail)
+
+    def test_doctor_accepts_frozen_native_cli_without_source_checkout_layout(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            repo = make_repo(root)
+            fake = RepoSetupGitHub()
+            repo_setup.install_repo(
+                repo,
+                github_repo=fake.repo,
+                enable_opencode=False,
+                runner=fake,
+            )
+            native_root = root / "opt" / "autodev"
+            native_root.mkdir(parents=True)
+            executable = native_root / "autodev"
+            executable.write_text("native fixture\n", encoding="utf-8")
+            internal_root = native_root / "_internal"
+            internal_root.mkdir()
+
+            with (
+                patch.object(repo_setup.sys, "frozen", True, create=True),
+                patch.object(repo_setup.sys, "executable", str(executable)),
+            ):
+                result = repo_setup.doctor(
+                    repo,
+                    github_repo=fake.repo,
+                    autodev_root=internal_root,
+                    runner=fake,
+                    which=lambda name: f"/tools/{name}",
+                )
+
+            self.assertTrue(result.healthy)
+            cli_check = next(item for item in result.checks if item.name == "cli")
+            self.assertEqual(cli_check.state, "ok")
+            self.assertEqual(
+                cli_check.detail,
+                f"native CLI executable: {executable.resolve()}",
+            )
+            self.assertFalse((internal_root / "automation" / "autodev_cli.py").exists())
+
+    def test_doctor_rejects_frozen_native_cli_when_executable_is_missing(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            repo = make_repo(root)
+            fake = RepoSetupGitHub()
+            repo_setup.install_repo(
+                repo,
+                github_repo=fake.repo,
+                enable_opencode=False,
+                runner=fake,
+            )
+            missing_executable = root / "opt" / "autodev" / "autodev"
+            internal_root = root / "opt" / "autodev" / "_internal"
+            internal_root.mkdir(parents=True)
+
+            with (
+                patch.object(repo_setup.sys, "frozen", True, create=True),
+                patch.object(repo_setup.sys, "executable", str(missing_executable)),
+            ):
+                result = repo_setup.doctor(
+                    repo,
+                    github_repo=fake.repo,
+                    autodev_root=internal_root,
+                    runner=fake,
+                    which=lambda name: f"/tools/{name}",
+                )
+
+            self.assertFalse(result.healthy)
+            cli_check = next(item for item in result.checks if item.name == "cli")
+            self.assertEqual(cli_check.state, "error")
+            self.assertEqual(
+                cli_check.detail,
+                f"native CLI executable: {missing_executable.resolve()}",
+            )
 
     def test_doctor_fix_does_not_overwrite_malformed_user_roadmap(self):
         with tempfile.TemporaryDirectory() as temp_dir:
