@@ -31,15 +31,18 @@ _BLOCK = re.compile(
 # purported human action is exactly the repository/tool work AutoDev exists to do.
 _REPOSITORY_IMPLEMENTATION_ACTION = re.compile(
     r"\b(?:write|modify|edit|create|update|add|implement|refactor|generate|fix)\b"
-    r".{0,120}\b(?:source\s+code|code|controllers?|api\s+endpoints?|endpoints?|"
-    r"services?|ef(?:\s+core)?\s+migrations?|migrations?|permission\s+logic|"
+    r".{0,120}\b(?:source\s+code|api\s+code|application\s+code|repository\s+code|"
+    r"repo\s+code|typescript\s+code|\.net\s+code|controllers?|api\s+endpoints?|"
+    r"endpoints?|ef(?:\s+core)?\s+migrations?|migrations?|permission\s+logic|"
     r"authorization\s+logic|frontend\s+(?:api\s+)?integration|typescript\s+types?|"
     r"schema\s+bindings?|tests?|repository\s+config(?:uration)?|repo\s+config(?:uration)?)\b",
     re.IGNORECASE | re.DOTALL,
 )
 _REPOSITORY_TOOL_ACTION = re.compile(
-    r"\b(?:run|execute)\b.{0,100}\b(?:ef(?:\s+core)?|migrations?|tests?|build|lint|"
-    r"typecheck|type-check|format(?:ter)?|dotnet|npm|pnpm|yarn|pytest|gradle|maven)\b",
+    r"(?:\b(?:run|execute)\b.{0,100}\b(?:ef(?:\s+core)?\s+migrations?|"
+    r"migrations?\s+locally|repository[- ]local\s+(?:migrations?|tests?|build|lint)|"
+    r"repo[- ]local\s+(?:migrations?|tests?|build|lint)|dotnet(?:\s+(?:build|test))?|"
+    r"npm(?:\s+(?:test|run))?|pnpm|yarn|pytest|gradle|maven|typecheck|type-check|lint)\b)",
     re.IGNORECASE | re.DOTALL,
 )
 _REPOSITORY_IMPLEMENTATION_GAP = re.compile(
@@ -47,8 +50,9 @@ _REPOSITORY_IMPLEMENTATION_GAP = re.compile(
     r"(?:written|created|updated|implemented|added)|must\s+be\s+(?:written|created|updated|implemented|added))\b"
     r".{0,120}\b(?:source\s+code|controllers?|api\s+endpoints?|endpoints?|"
     r"ef(?:\s+core)?\s+migrations?|migrations?|permission\s+logic|authorization\s+logic|"
-    r"frontend\s+(?:api\s+)?integration|typescript\s+types?|schema\s+bindings?|tests?|"
-    r"repository\s+config(?:uration)?|repo\s+config(?:uration)?)\b",
+    r"frontend\s+(?:api\s+)?integration|typescript\s+types?|schema\s+bindings?|"
+    r"(?:unit|integration|repository|repo)\s+tests?|repository\s+config(?:uration)?|"
+    r"repo\s+config(?:uration)?)\b",
     re.IGNORECASE | re.DOTALL,
 )
 
@@ -262,7 +266,7 @@ For `mixed` and `manual-external`, add this non-empty field to the SAME {executi
   }}
 ]
 
-Every manual_criteria entry and every human_actions entry must be covered exactly by these records. `automatable` should use `external_boundaries: []` (omission remains backward-compatible).
+Every manual_criteria entry and every human_actions entry must be covered exactly by these records. `automatable` should use `external_boundaries: []` (omission remains backward-compatible). All external-boundary fields must remain secret-free: describe secret type/custody state when relevant, never a password, token, private key, credential value, or other secret material.
 
 Repository implementation is NOT an external boundary. Missing controllers/API endpoints, EF Core migration creation or repository-local migration commands, permission/authorization logic, frontend API integration, TypeScript type/schema updates, tests, committed configuration, and supported build/lint/test commands are normal AutoDev work. Never put those tasks in manual_criteria/human_actions and never invent an external-boundary record merely because code is incomplete, difficult, or absent.
 
