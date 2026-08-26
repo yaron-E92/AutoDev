@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 from pathlib import Path
 from typing import Callable, TextIO
 
+from automation import repository_identity
 from automation.queue_contract import (
     API_VERSION,
     Blocker,
@@ -63,23 +63,17 @@ def resolve_github_repo(
     runner: Callable[..., object] = subprocess.run,
 ) -> str:
     value = explicit.strip()
-    if value:
-        if value.count("/") != 1:
-            raise QueueError("--github-repo must use owner/name format")
-        return value
-    owner = os.environ.get("GITHUB_OWNER", "").strip()
-    name = os.environ.get("GITHUB_REPO", "").strip()
-    if owner and name:
-        return f"{owner}/{name}"
-    result = _run_gh(
-        repo,
-        ["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"],
-        runner=runner,
-    )
-    value = result.stdout.strip()
-    if value.count("/") != 1:
-        raise QueueError("could not resolve GitHub repository identity")
-    return value
+    if value and value.count("/") != 1:
+        raise QueueError("--github-repo must use owner/name format")
+    try:
+        return repository_identity.resolve_github_repository(
+            repo,
+            explicit=value,
+            runner=runner,
+            allow_gh_fallback=True,
+        )
+    except repository_identity.RepositoryIdentityError as exc:
+        raise QueueError(str(exc)) from exc
 
 def _queue_issue(raw: dict[str, object], fallback_number: int = 0) -> QueueIssue:
     return QueueIssue(
