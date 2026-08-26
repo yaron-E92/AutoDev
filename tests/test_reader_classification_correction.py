@@ -106,8 +106,11 @@ class ReaderClassificationCorrectionTests(unittest.TestCase):
                 )
                 outputs = opencode_adapter_roles.accept_role("reader", repo, reader_result)
 
-                self.assertIn(current / "reader-brief.md", outputs)
-                self.assertIn(current / "synthesized-handoff.md", outputs)
+                self.assertEqual(
+                    {path.name for path in outputs},
+                    {"reader-brief.md", "synthesized-handoff.md"},
+                )
+                self.assertTrue(all(path.is_file() for path in outputs))
                 state = workflow_stages.read_state(current)
                 self.assertEqual(state["ExecutionClassification"], execution.AUTOMATABLE)
                 self.assertEqual(state["ExecutionClassificationSource"], "reader")
