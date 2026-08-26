@@ -263,3 +263,27 @@ def ensure_queue_labels(
         )
         created.append(name)
     return tuple(created)
+
+
+def add_issue_label(
+    repo: Path,
+    github_repo: str,
+    issue_number: int,
+    label: str,
+    *,
+    runner: Callable[..., object] = subprocess.run,
+) -> None:
+    """Add one label without replacing any existing issue labels."""
+    _run_gh(
+        repo,
+        [
+            "issue",
+            "edit",
+            str(issue_number),
+            "--repo",
+            github_repo,
+            "--add-label",
+            label,
+        ],
+        runner=runner,
+    )
