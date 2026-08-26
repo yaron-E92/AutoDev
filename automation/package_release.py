@@ -13,6 +13,10 @@ from pathlib import Path
 SCHEMA_VERSION = 2
 ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
 VERSION_RE = re.compile(r"^v[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$")
+TARGET_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+ARTIFACTS_ROOT = Path("artifacts")
+RELEASE_ROOT = ARTIFACTS_ROOT / "release"
+DEFAULT_RELEASE_TARGET = "publish"
 COMMON_ROOTS = (
     "automation",
     "area_reader",
@@ -95,6 +99,20 @@ def validate_version(version: str) -> str:
             "release version must be a v-prefixed semantic version such as v1.2.3"
         )
     return value
+
+
+def validate_target(target: str) -> str:
+    value = target.strip()
+    if not TARGET_RE.fullmatch(value):
+        raise ReleasePackagingError(
+            "release target must contain only letters, numbers, '.', '_' or '-' and start with a letter or number"
+        )
+    return value
+
+
+def release_output_dir(repo: Path, target: str = DEFAULT_RELEASE_TARGET) -> Path:
+    """Return the canonical generated-output handoff for one release target."""
+    return repo.expanduser().resolve() / RELEASE_ROOT / validate_target(target)
 
 
 def native_artifact_names(version: str) -> dict[str, str]:
@@ -253,15 +271,32 @@ def main(argv: list[str] | None = None) -> int:
         description="Build deterministic AutoDev release bundles from the exact checked-out commit."
     )
     parser.add_argument("--repo", default=".")
-    parser.add_argument("--out", required=True)
+    parser.add_argument(
+        "--target",
+        default=DEFAULT_RELEASE_TARGET,
+        help=(
+            "Canonical release target beneath artifacts/release/. "
+            f"Default: {DEFAULT_RELEASE_TARGET}."
+        ),
+    )
+    parser.add_argument(
+        "--out",
+        default="",
+        help=(
+            "Explicit output-directory override for controlled tests/tools. "
+            "Normal release handoff defaults to artifacts/release/<target>/."
+        ),
+    )
     parser.add_argument("--version", required=True)
     parser.add_argument("--commit", default="")
     parser.add_argument("--native-dir", default="")
     args = parser.parse_args(argv)
     try:
+        repo = Path(args.repo)
+        out_dir = Path(args.out) if args.out else release_output_dir(repo, args.target)
         manifest = build_release(
-            Path(args.repo),
-            Path(args.out),
+            repo,
+            out_dir,
             args.version,
             args.commit,
             native_dir=Path(args.native_dir) if args.native_dir else None,
