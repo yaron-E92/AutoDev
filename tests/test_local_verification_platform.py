@@ -229,12 +229,14 @@ class LocalVerificationPlatformTests(unittest.TestCase):
                     )
 
             updated = read_state(current)
+            repair_exists = (current / "local-repair.md").exists()
+            log = (current / "local-check.log").read_text(encoding="utf-8")
 
         self.assertEqual(caught.exception.classification, FAILURE_SETUP)
         self.assertEqual(updated["Status"], "LocalCheckSetupFailed")
         self.assertEqual(updated["LocalCheckFailureClassification"], FAILURE_SETUP)
-        self.assertFalse((current / "local-repair.md").exists())
-        self.assertIn("pwsh", (current / "local-check.log").read_text(encoding="utf-8"))
+        self.assertFalse(repair_exists)
+        self.assertIn("pwsh", log)
 
     def test_legacy_linux_run_refreshes_old_shipped_pwsh_command_on_resume(self):
         with tempfile.TemporaryDirectory() as temp_dir:
