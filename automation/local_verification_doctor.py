@@ -4,7 +4,7 @@ import os
 import shutil
 from pathlib import Path
 
-from automation import workflow_prompts
+from automation import product_runtime, workflow_prompts
 from automation.workflow_contract import WorkflowStageError
 
 
@@ -18,10 +18,13 @@ def install() -> None:
 
     def doctor(repo: Path, **kwargs):
         result = original(repo, **kwargs)
-        root = Path(
-            kwargs.get("autodev_root")
-            or Path(repo_setup.__file__).resolve().parents[1]
-        ).expanduser().resolve()
+        # repo_setup's autodev_root override is a CLI-layout diagnostic input.
+        # Verification profiles are product resources: in a source checkout they
+        # live at the checkout root, while PyInstaller places them beside the
+        # frozen automation package under its product root. Keep those concerns
+        # separate so a native doctor never mistakes its _internal CLI root for a
+        # source checkout layout.
+        root = product_runtime.product_root().expanduser().resolve()
         which = kwargs.get("which", shutil.which)
         profiles_path = Path(
             os.environ.get("PROFILES_PATH", str(root / "codex-profiles.json"))
