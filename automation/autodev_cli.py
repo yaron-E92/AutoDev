@@ -118,6 +118,10 @@ def run(argv: list[str] | None = None) -> int:
         return 0
 
     values, explicit_interactive = _consume_interactive_consent_argument(raw_values)
+    if values and values[0] == "verify-local":
+        from automation import local_verification_cli
+
+        return local_verification_cli.run_cli(values[1:])
 
     handled, help_code = _render_requested_help(values)
     if handled:
@@ -131,8 +135,9 @@ def run(argv: list[str] | None = None) -> int:
     if command == "install":
         return user_install.run_cli(rest, autodev_root=product_runtime.product_root())
     if command in {"repo", "doctor"}:
-        from automation import repo_setup
+        from automation import local_verification_doctor, repo_setup
 
+        local_verification_doctor.install()
         return repo_setup.run_cli((["doctor"] if command == "doctor" else []) + rest)
     if command == "scheduler":
         if rest and rest[0] == "worker-id":

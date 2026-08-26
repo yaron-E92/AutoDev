@@ -13,6 +13,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
+from automation import local_verification
 from automation.semantic_contract import SemanticVerifierError
 from automation.semantic_invocation import prepare_semantic_repair_prompt
 from automation.semantic_prompts import extract_acceptance_criteria
@@ -27,6 +28,7 @@ from automation.workflow_contract import (
     DEFAULT_CI_CHECK_POLL_SECONDS,
     DEFAULT_MAX_REPAIR_ATTEMPTS,
     DEFAULT_MAX_SEMANTIC_REPAIR_ATTEMPTS,
+    FAILURE_SETUP,
     FAILURE_TRANSIENT,
     WorkflowStageError,
     configured_attempt_limit,
@@ -78,6 +80,15 @@ def _preflight(repo: Path, arguments: str, which: Callable[[str], str | None]) -
     configured_attempt_limit("CI_CHECK_POLL_ATTEMPTS", DEFAULT_CI_CHECK_POLL_ATTEMPTS)
     configured_nonnegative_float("CI_CHECK_POLL_SECONDS", DEFAULT_CI_CHECK_POLL_SECONDS)
 
+def _clear_local_verification_proof(state: dict[str, object]) -> None:
+    if state.get("VerificationProofVersion"):
+        state.pop("VerifiedParentSha", None)
+        state.pop("VerifiedSourceIdentity", None)
+        state.pop("VerifiedChanges", None)
+        state.pop("LastSemanticVerdict", None)
+        state.pop("SemanticSourceIdentity", None)
+        state.pop("CiProof", None)
+
 def run_local_check(
     repo: Path,
     current: Path,
@@ -88,18 +99,74 @@ def run_local_check(
 ) -> bool:
     command = str(state.get("LocalCheck", "")).strip()
     if not command:
-        raise WorkflowStageError("state.json has no LocalCheck command")
-    completed = _run_captured(
-        runner,
-        command,
-        cwd=repo,
-        shell=True,
-    )
-    output = _decoded_text(getattr(completed, "stdout", "")) + _decoded_text(
-        getattr(completed, "stderr", "")
-    )
+        raise WorkflowStageError(
+            "state.json has no LocalCheck command",
+            classification=FAILURE_SETUP,
+        )
+
+    try:
+        refreshed, source, profiles_path = local_verification.refreshed_local_check(
+            state,
+            autodev_root,
+            which=shutil.which,
+        )
+        if refreshed != command or source != str(state.get("LocalCheckSource", "")):
+            command = refreshed
+            state["LocalCheck"] = command
+            state["LocalCheckSource"] = source
+            state["ProfilesPath"] = str(profiles_path)
+            write_state(current, state)
+
+        # Newly prepared runs always have provenance. Legacy runs are checked
+        # when they contain the old shipped PowerShell verifier so upgrading
+        # AutoDev can recover them without consuming a Fixer attempt.
+        if source in {"explicit", "profile"} or local_verification.is_legacy_autodev_default(command):
+            local_verification.preflight_local_check(
+                command,
+                explicit=source == "explicit",
+                profiles_path=profiles_path,
+                autodev_root=autodev_root,
+                cwd=repo,
+                which=shutil.which,
+            )
+
+        if local_verification.is_builtin_local_check(command):
+            result = local_verification.run_recommended_verification(
+                repo,
+                current,
+                runner=runner,
+                which=shutil.which,
+            )
+            returncode = result.returncode
+            output = result.output
+        else:
+            completed = _run_captured(
+                runner,
+                command,
+                cwd=repo,
+                shell=True,
+            )
+            returncode = int(getattr(completed, "returncode", 1))
+            output = _decoded_text(getattr(completed, "stdout", "")) + _decoded_text(
+                getattr(completed, "stderr", "")
+            )
+    except WorkflowStageError as exc:
+        if exc.classification != FAILURE_SETUP:
+            raise
+        output = f"local verification setup/configuration failure: {exc}\n"
+        write_text(current / "local-check.log", output)
+        state["Status"] = "LocalCheckSetupFailed"
+        state["LastLocalCheckPassed"] = False
+        state["LocalCheckFailureClassification"] = FAILURE_SETUP
+        state["LocalCheckFailureReason"] = str(exc)
+        _clear_local_verification_proof(state)
+        write_state(current, state)
+        raise
+
     write_text(current / "local-check.log", output)
-    if int(getattr(completed, "returncode", 1)) == 0:
+    state.pop("LocalCheckFailureClassification", None)
+    state.pop("LocalCheckFailureReason", None)
+    if returncode == 0:
         state["Status"] = "LocalCheckPassed"
         state["LastLocalCheckPassed"] = True
         if state.get("VerificationProofVersion"):
@@ -138,13 +205,7 @@ def run_local_check(
     write_text(current / "local-repair.md", prompt)
     state["Status"] = "LocalCheckFailed"
     state["LastLocalCheckPassed"] = False
-    if state.get("VerificationProofVersion"):
-        state.pop("VerifiedParentSha", None)
-        state.pop("VerifiedSourceIdentity", None)
-        state.pop("VerifiedChanges", None)
-        state.pop("LastSemanticVerdict", None)
-        state.pop("SemanticSourceIdentity", None)
-        state.pop("CiProof", None)
+    _clear_local_verification_proof(state)
     write_state(current, state)
     return False
 

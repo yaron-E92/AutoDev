@@ -102,11 +102,12 @@ def ensure_prepared_issue(
     prepared_local_head = validate_prepared_worktree(repo, base_sha, runner=runner)
 
     profiles_path = Path(os.environ.get("PROFILES_PATH", str(autodev_root / "codex-profiles.json"))).expanduser()
+    explicit_local_check = os.environ.get("LOCAL_CHECK", "")
     profiles_csv, local_check, stack_context = resolve_profiles(
         labels,
         profiles_path,
         explicit_profiles=os.environ.get("PROFILES", ""),
-        explicit_local_check=os.environ.get("LOCAL_CHECK", ""),
+        explicit_local_check=explicit_local_check,
         explicit_stack_context=os.environ.get("STACK_CONTEXT", ""),
         autodev_root=autodev_root,
     )
@@ -157,6 +158,7 @@ def ensure_prepared_issue(
         "LastCommitSha": "",
         "ProfilesCsv": profiles_csv,
         "LocalCheck": local_check,
+        "LocalCheckSource": "explicit" if explicit_local_check.strip() else "profile",
         "StackContext": stack_context,
         "PromptDir": os.environ.get("PROMPT_DIR", str(autodev_root / "promptTemplates")),
         "ProfilesPath": str(profiles_path),

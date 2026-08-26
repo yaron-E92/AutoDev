@@ -66,7 +66,7 @@ class IssuePreparationIdentityTests(unittest.TestCase):
             with (
                 patch.dict(
                     os.environ,
-                    {"LOCAL_CHECK": "python -m unittest", "STACK_CONTEXT": "Python"},
+                    {"LOCAL_CHECK": "autodev verify-local", "STACK_CONTEXT": "Python"},
                     clear=True,
                 ),
                 patch("automation.workflow_preparation.gh_json", side_effect=[issue, base_ref, base_commit]) as gh_json,
@@ -105,7 +105,7 @@ class IssuePreparationIdentityTests(unittest.TestCase):
             issue, base_ref, base_commit = self._github_evidence()
 
             with (
-                patch.dict(os.environ, {"LOCAL_CHECK": "check"}, clear=True),
+                patch.dict(os.environ, {"LOCAL_CHECK": "autodev verify-local"}, clear=True),
                 patch("automation.workflow_preparation.gh_json", side_effect=[issue, base_ref, base_commit]),
                 patch("automation.workflow_preparation.validate_prepared_worktree", return_value="base-sha"),
                 patch("automation.workflow_preparation.write_workspace_snapshot", side_effect=self._snapshot),
