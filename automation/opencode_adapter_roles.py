@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from automation import opencode_resume_contract
-
+from automation import execution_classification as execution
+from automation import opencode_adapter_handoff
 from automation import opencode_resume_checkpoint
+from automation import opencode_resume_contract
 
 import json
 from pathlib import Path
@@ -33,7 +34,6 @@ from automation.opencode_adapter_handoff import (
     _fixer_source,
     _next_semantic_attempt,
     _plan_text,
-    _prepare_reader,
     _prepare_synthesizer,
     _write_plan_template,
 )
@@ -60,6 +60,7 @@ from automation.opencode_adapter_storage import (
     _write_text,
 )
 
+
 def prepare_role(
     role: str,
     repo: Path,
@@ -79,7 +80,7 @@ def prepare_role(
     policies = _resolved_policies(repo, state)
 
     if role == "reader":
-        prompt = _prepare_reader(repo, current, issue_text)
+        prompt = opencode_adapter_handoff._prepare_reader(repo, current, issue_text)  # type: ignore[attr-defined]
         path = current / "reader.md"
     elif role == "synthesizer":
         prompt = _prepare_synthesizer(current, issue_text)
@@ -163,6 +164,7 @@ def prepare_role(
     _write_text(path, effective)
     return path
 
+
 def accept_role(role: str, repo: Path, input_path: Path | None = None) -> list[Path]:
     repo = repo.expanduser().resolve()
     current = repo / CURRENT_DIR
@@ -179,6 +181,7 @@ def accept_role(role: str, repo: Path, input_path: Path | None = None) -> list[P
         mappings = resolve_opencode_model_mappings(repo)
         opencode_resume_checkpoint.checkpoint_role(repo, role, outputs, mappings)
     return outputs
+
 
 def _accept_role_once(role: str, current: Path, input_path: Path | None) -> list[Path]:
     if role == "reader":
@@ -228,6 +231,19 @@ def _accept_role_once(role: str, current: Path, input_path: Path | None) -> list
             final_path.unlink(missing_ok=True)
         return outputs
     raise OpenCodeAdapterError(f"unsupported OpenCode role: {role}")
+
+
+def _reader_correction_contract(current: Path, role: str) -> str:
+    if role != "reader":
+        return ""
+    if not execution.protocol_enabled(_read_state(current)):
+        return ""
+    return (
+        "Exact execution-classification contract:\n\n"
+        + execution.reader_contract_instructions().strip()
+        + "\n\n"
+    )
+
 
 def _raise_contract_rejection(
     current: Path,
@@ -282,6 +298,7 @@ def _raise_contract_rejection(
             "Exact role contract:\n\n```json\n"
             + json.dumps(contract, indent=2, sort_keys=True)
             + "\n```\n\n"
+            + _reader_correction_contract(current, role)
             + ("Exact generated template:\n\n```text\n" + template + "\n```\n\n" if template else "")
             + ("Bounded previous output:\n\n```text\n" + previous + "\n```\n\n" if previous else "")
             + f"Correct the designated output artifact once, then rerun exactly:\n\n`{contract.get('accept', '')}`\n"
