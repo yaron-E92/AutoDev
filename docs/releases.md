@@ -25,6 +25,8 @@ artifacts/release/existing/           downloaded assets used only for rerun comp
 
 Tool-native caches and deliberate scratch/reproducibility builds do not have to be moved out of runner-temporary directories merely to satisfy this convention. The boundary applies to generated outputs that are intentionally handed between build/sign/release stages or published to users.
 
+Language- and tool-native build outputs remain governed by the repository that owns them. AutoDev does not require or introduce target-repository build settings such as .NET `UseArtifactsOutput`; it centralizes only outputs that AutoDev itself intentionally stages or hands between packaging, signing, and release steps. Target repositories may independently choose their own build-output conventions, and AutoDev verification must respect those conventions rather than rewrite them.
+
 The release packager defaults to the publication target, so a normal source-bundle build does not need an ad-hoc output path:
 
 ```text
