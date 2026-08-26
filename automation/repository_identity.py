@@ -97,7 +97,7 @@ def _remote_repository(
     remote_name: str,
     *,
     runner: Callable[..., object],
-) -> tuple[str, bool]:
+) -> str:
     try:
         completed = runner(
             ["git", "remote", "get-url", "--all", remote_name],
@@ -108,13 +108,17 @@ def _remote_repository(
             capture_output=True,
             check=False,
         )
-    except OSError:
-        return "", False
+    except OSError as exc:
+        raise RepositoryIdentityError(f"cannot execute git while resolving repository identity: {exc}") from exc
 
     if int(getattr(completed, "returncode", 1)) != 0:
-        return "", False
+        return ""
 
-    urls = [line.strip() for line in str(getattr(completed, "stdout", "") or "").splitlines() if line.strip()]
+    urls = [
+        line.strip()
+        for line in str(getattr(completed, "stdout", "") or "").splitlines()
+        if line.strip()
+    ]
     if not urls:
         raise RepositoryIdentityError(f"Git remote {remote_name!r} has no configured URL")
 
@@ -128,13 +132,14 @@ def _remote_repository(
         raise RepositoryIdentityError(
             f"Git remote {remote_name!r} points to multiple GitHub repositories: {', '.join(sorted(repositories))}"
         )
-    return next(iter(repositories)), True
+    return next(iter(repositories))
 
 
 def _legacy_gh_repository(repo: Path, *, runner: Callable[..., object]) -> str:
+    argv = ["gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"]
     try:
         completed = runner(
-            ["gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"],
+            argv,
             cwd=repo,
             text=True,
             encoding="utf-8",
@@ -142,15 +147,23 @@ def _legacy_gh_repository(repo: Path, *, runner: Callable[..., object]) -> str:
             capture_output=True,
             check=False,
         )
-    except OSError:
-        return ""
-    if int(getattr(completed, "returncode", 1)) != 0:
-        return ""
+    except OSError as exc:
+        raise RepositoryIdentityError(f"cannot execute gh: {exc}") from exc
+
+    returncode = int(getattr(completed, "returncode", 1))
+    if returncode != 0:
+        stdout = str(getattr(completed, "stdout", "") or "").strip()
+        stderr = str(getattr(completed, "stderr", "") or "").strip()
+        detail = stderr or stdout or "no command output"
+        raise RepositoryIdentityError(
+            f"GitHub command failed ({returncode}): {' '.join(argv)}: {detail}"
+        )
+
     value = str(getattr(completed, "stdout", "") or "").strip()
     try:
         owner, name = split_github_repository(value, label="GitHub CLI repository identity")
-    except RepositoryIdentityError:
-        return ""
+    except RepositoryIdentityError as exc:
+        raise RepositoryIdentityError("could not resolve GitHub repository identity") from exc
     return f"{owner}/{name}"
 
 
@@ -182,21 +195,16 @@ def resolve_github_repository(
         owner, name = split_github_repository(configured)
         return f"{owner_override or owner}/{name_override or name}"
 
-    # Existing queue/repo/scheduler callers historically resolve through `gh repo view`.
-    # Keep that model-free fallback ahead of direct remote parsing for those callers while
-    # canonical issue preparation uses the deterministic remote path below.
+    # Existing queue/repo/scheduler callers historically make `gh repo view`
+    # authoritative. Preserve both its success and its actionable auth/repository
+    # failures rather than changing those commands to silently try another source.
     if allow_gh_fallback:
         fallback = _legacy_gh_repository(target, runner=runner)
-        if fallback:
-            owner, name = split_github_repository(fallback)
-            return f"{owner_override or owner}/{name_override or name}"
+        owner, name = split_github_repository(fallback)
+        return f"{owner_override or owner}/{name_override or name}"
 
     remote_name = values.get("REMOTE_NAME", "").strip() or "origin"
-    remote_repository, _ = _remote_repository(
-        target,
-        remote_name,
-        runner=runner,
-    )
+    remote_repository = _remote_repository(target, remote_name, runner=runner)
     if remote_repository:
         owner, name = split_github_repository(remote_repository)
         return f"{owner_override or owner}/{name_override or name}"
