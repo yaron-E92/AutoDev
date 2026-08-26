@@ -66,7 +66,7 @@ class IssuePreparationIdentityTests(unittest.TestCase):
             with (
                 patch.dict(
                     os.environ,
-                    {"LOCAL_CHECK": "python -m unittest", "STACK_CONTEXT": "Python"},
+                    {"LOCAL_CHECK": "autodev verify-local", "STACK_CONTEXT": "Python"},
                     clear=True,
                 ),
                 patch("automation.workflow_preparation.gh_json", side_effect=[issue, base_ref, base_commit]) as gh_json,
