@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from automation import opencode_resume_contract
-from automation import opencode_resume_checkpoint
 from automation import execution_classification as execution
+from automation import opencode_adapter_handoff
+from automation import opencode_resume_checkpoint
+from automation import opencode_resume_contract
 
 import json
 from pathlib import Path
@@ -33,7 +34,6 @@ from automation.opencode_adapter_handoff import (
     _fixer_source,
     _next_semantic_attempt,
     _plan_text,
-    _prepare_reader,
     _prepare_synthesizer,
     _write_plan_template,
 )
@@ -80,7 +80,7 @@ def prepare_role(
     policies = _resolved_policies(repo, state)
 
     if role == "reader":
-        prompt = _prepare_reader(repo, current, issue_text)
+        prompt = opencode_adapter_handoff._prepare_reader(repo, current, issue_text)  # type: ignore[attr-defined]
         path = current / "reader.md"
     elif role == "synthesizer":
         prompt = _prepare_synthesizer(current, issue_text)
