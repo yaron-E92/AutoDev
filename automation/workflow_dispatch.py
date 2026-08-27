@@ -118,7 +118,7 @@ def _execute_stage_impl(
         raise WorkflowStageError("workflow stage attempt must be zero or greater")
 
     if name == "preflight":
-        _preflight(repo, arguments, which)
+        _preflight(repo, arguments, which, runner=runner)
         return 0, stage_payload(
             repo,
             "CONTINUE",
