@@ -278,6 +278,7 @@ def run_role(
             runner=runner,
             which=which,
         )
+        deterministic_fallback_applied = False
         try:
             _accept_role(
                 repo,
@@ -355,6 +356,7 @@ def run_role(
                     correction_attempt=last_diagnostic,
                 )
             )
+            deterministic_fallback_applied = True
             print(
                 json.dumps(
                     {
@@ -367,13 +369,14 @@ def run_role(
                 ),
                 flush=True,
             )
-        last_diagnostic = _record_attempt(
-            repo,
-            role,
-            correction_result,
-            output,
-            accepted=True,
-        )
+        if not deterministic_fallback_applied:
+            last_diagnostic = _record_attempt(
+                repo,
+                role,
+                correction_result,
+                output,
+                accepted=True,
+            )
     else:
         last_diagnostic = _record_attempt(
             repo,
