@@ -1,22 +1,25 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+
+from automation.notification_contract import (
+    NOTIFICATION_BACKENDS,
+    NOTIFICATION_NATIVE,
+    NOTIFICATION_OFF,
+    NOTIFICATION_POLICY_SCHEMA,
+    NotificationPolicy,
+    NotificationResult,
+)
 from datetime import datetime, timedelta, timezone
 
 
 HEALTH_SCHEMA = 1
 
-NOTIFICATION_SCHEMA = 1
+NOTIFICATION_SCHEMA = NOTIFICATION_POLICY_SCHEMA
 
 HEALTH_FILE = "health.json"
 
 NOTIFICATION_FILE = "notifications.json"
-
-NOTIFICATION_OFF = "off"
-
-NOTIFICATION_NATIVE = "native"
-
-NOTIFICATION_BACKENDS = (NOTIFICATION_OFF, NOTIFICATION_NATIVE)
 
 REMINDER_STATES = {"ATTENTION_REQUIRED", "SCHEDULER_ERROR"}
 
@@ -32,22 +35,6 @@ HEALTH_STATES = {
 
 class SchedulerHealthError(RuntimeError):
     pass
-
-@dataclass(frozen=True)
-class NotificationPolicy:
-    backend: str = NOTIFICATION_OFF
-    reminder_hours: int = 0
-
-    @property
-    def enabled(self) -> bool:
-        return self.backend != NOTIFICATION_OFF
-
-    def to_json(self) -> dict[str, object]:
-        return {
-            "schema_version": NOTIFICATION_SCHEMA,
-            "backend": self.backend,
-            "reminder_hours": self.reminder_hours,
-        }
 
 @dataclass(frozen=True)
 class HealthSnapshot:
@@ -71,16 +58,6 @@ class HealthSnapshot:
         value["privacy_grants"] = dict(self.privacy_grants or {})
         value["blocker_counts"] = dict(self.blocker_counts or {})
         return value
-
-@dataclass(frozen=True)
-class NotificationResult:
-    attempted: bool
-    delivered: bool
-    backend: str
-    reason: str = ""
-
-    def to_json(self) -> dict[str, object]:
-        return asdict(self)
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
