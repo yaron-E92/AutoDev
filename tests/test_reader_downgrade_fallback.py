@@ -142,6 +142,41 @@ class ReaderDowngradeFallbackTests(unittest.TestCase):
             ],
         }
 
+    def _invalid_automatable_payload(
+        self,
+        *,
+        manual_criteria: bool = False,
+        human_actions: bool = False,
+        resume_evidence: bool = False,
+        blocks: bool = False,
+        independent: bool = False,
+    ) -> dict[str, object]:
+        return {
+            "classification": "automatable",
+            "reason": "Reader says automatable but leaves contradictory manual state.",
+            "autonomous_criteria": [
+                "Implement repository APIs, migrations, permission logic, and tests."
+            ],
+            "manual_criteria": (
+                ["Implement the remaining repository API work."]
+                if manual_criteria
+                else []
+            ),
+            "human_actions": (
+                ["Write the remaining repository code."]
+                if human_actions
+                else []
+            ),
+            "resume_evidence": (
+                ["Record completion of the repository implementation."]
+                if resume_evidence
+                else []
+            ),
+            "manual_prerequisite_blocks_implementation": blocks,
+            "autonomous_subset_independent": independent,
+            "external_boundaries": [],
+        }
+
     def _genuine_payload(self, *, mismatch: bool) -> dict[str, object]:
         criterion = "Complete publisher identity validation and certificate issuance."
         action = "Complete legal identity approval with the certificate provider."
@@ -321,6 +356,221 @@ class ReaderDowngradeFallbackTests(unittest.TestCase):
         self.assertTrue(fallback["correction_attempt"])
         self.assertFalse(last_failure_exists)
 
+    def test_explicit_automatable_core_contract_rejections_fall_back_after_one_retry(self):
+        cases = {
+            "manual_criteria": {"manual_criteria": True},
+            "human_actions": {"human_actions": True},
+            "resume_evidence": {"resume_evidence": True},
+            "blocking_flag": {"blocks": True},
+            "independent_flag": {"independent": True},
+        }
+        for name, kwargs in cases.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as temp_dir:
+                repo, current = self._setup_repo(
+                    temp_dir,
+                    explicit_automatable=True,
+                )
+                result, runtime = self._run_reader(
+                    repo,
+                    self._block(self._invalid_automatable_payload(**kwargs)),
+                    self._block(self._invalid_automatable_payload(**kwargs)),
+                )
+                state = workflow_stages.read_state(current)
+                fallback = json.loads(
+                    (current / boundary.FALLBACK_FILE).read_text(
+                        encoding="utf-8"
+                    )
+                )
+                diagnostics = json.loads(
+                    (current / workflow_stages.DIAGNOSTICS_FILE).read_text(
+                        encoding="utf-8"
+                    )
+                )
+                attempts = sorted(
+                    (current / role_runtime_diagnostics.ROLE_ATTEMPT_DIR).glob(
+                        "reader-*.json"
+                    )
+                )
+                manual_plan_exists = (
+                    current / execution.MANUAL_ACTION_PLAN_FILE
+                ).exists()
+                boundary_file_exists = (
+                    current / boundary.EXTERNAL_BOUNDARY_FILE
+                ).exists()
+
+            self.assertEqual(result["state"], "ACCEPTED")
+            self.assertEqual(runtime.calls, ["work", "correction"])
+            self.assertEqual(len(attempts), 2)
+            self.assertEqual(
+                diagnostics["protocol_correction_attempts"]["reader"],
+                1,
+            )
+            self.assertEqual(
+                diagnostics["role_physical_attempts"]["reader"],
+                2,
+            )
+            self.assertEqual(
+                state["ExecutionClassification"],
+                execution.AUTOMATABLE,
+            )
+            self.assertEqual(
+                state["ExecutionClassificationSource"],
+                boundary.OPERATOR_CLASSIFICATION_FALLBACK_SOURCE,
+            )
+            self.assertIn(
+                "automatable classification cannot contain unresolved manual",
+                fallback["first_rejection"],
+            )
+            self.assertIn(
+                "automatable classification cannot contain unresolved manual",
+                fallback["correction_rejection"],
+            )
+            self.assertFalse(manual_plan_exists)
+            self.assertFalse(boundary_file_exists)
+            self.assertNotEqual(state.get("QueueState"), "attention")
+
+    def test_explicit_automatable_core_then_external_boundary_rejection_falls_back(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo, current = self._setup_repo(temp_dir, explicit_automatable=True)
+            result, runtime = self._run_reader(
+                repo,
+                self._block(
+                    self._invalid_automatable_payload(manual_criteria=True)
+                ),
+                self._block(self._repo_payload()),
+            )
+            state = workflow_stages.read_state(current)
+            fallback = json.loads(
+                (current / boundary.FALLBACK_FILE).read_text(encoding="utf-8")
+            )
+
+        self.assertEqual(result["state"], "ACCEPTED")
+        self.assertEqual(runtime.calls, ["work", "correction"])
+        self.assertEqual(
+            state["ExecutionClassificationSource"],
+            boundary.OPERATOR_CLASSIFICATION_FALLBACK_SOURCE,
+        )
+        self.assertIn(
+            "automatable classification cannot contain unresolved manual",
+            fallback["first_rejection"],
+        )
+        self.assertIn("external_boundaries", fallback["correction_rejection"])
+
+    def test_explicit_automatable_external_boundary_then_core_rejection_falls_back(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo, current = self._setup_repo(temp_dir, explicit_automatable=True)
+            result, runtime = self._run_reader(
+                repo,
+                self._block(self._repo_payload()),
+                self._block(
+                    self._invalid_automatable_payload(human_actions=True)
+                ),
+            )
+            state = workflow_stages.read_state(current)
+            fallback = json.loads(
+                (current / boundary.FALLBACK_FILE).read_text(encoding="utf-8")
+            )
+
+        self.assertEqual(result["state"], "ACCEPTED")
+        self.assertEqual(runtime.calls, ["work", "correction"])
+        self.assertEqual(
+            state["ExecutionClassificationSource"],
+            boundary.OPERATOR_CLASSIFICATION_FALLBACK_SOURCE,
+        )
+        self.assertIn("external_boundaries", fallback["first_rejection"])
+        self.assertIn(
+            "automatable classification cannot contain unresolved manual",
+            fallback["correction_rejection"],
+        )
+
+    def test_unmarked_invalid_automatable_genuine_external_claim_remains_protocol_exhausted(self):
+        payload = self._invalid_automatable_payload(
+            manual_criteria=True,
+            human_actions=True,
+            resume_evidence=True,
+            blocks=True,
+        )
+        payload["reason"] = (
+            "Reader claims publisher certificate approval is still required."
+        )
+        payload["manual_criteria"] = [
+            "Complete publisher identity validation and certificate issuance."
+        ]
+        payload["human_actions"] = [
+            "Complete legal identity approval with the certificate provider."
+        ]
+        payload["resume_evidence"] = [
+            "Record the non-secret certificate identifier."
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo, current = self._setup_repo(
+                temp_dir,
+                explicit_automatable=False,
+            )
+            runtime = _ReaderRuntime(
+                {
+                    "work": self._block(payload),
+                    "correction": self._block(payload),
+                }
+            )
+            with patch.object(role_coordinator_runtime, "_prepare_role"):
+                with self.assertRaises(
+                    role_coordinator_contract.RoleCoordinatorError
+                ) as raised:
+                    role_coordinator_runtime.run_role(
+                        repo,
+                        "reader",
+                        runtime,
+                        self._snapshots(),
+                        runner=lambda *_args, **_kwargs: SimpleNamespace(
+                            returncode=0,
+                            stdout="",
+                            stderr="",
+                        ),
+                        which=lambda _name: "/usr/bin/opencode",
+                    )
+            fallback_exists = (current / boundary.FALLBACK_FILE).exists()
+
+        self.assertEqual(
+            raised.exception.classification,
+            role_runtime_diagnostics.FAILURE_ROLE_PROTOCOL_EXHAUSTED,
+        )
+        self.assertEqual(runtime.calls, ["work", "correction"])
+        self.assertFalse(fallback_exists)
+
+    def test_explicit_automatable_core_rejection_then_omitted_correction_falls_back(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo, current = self._setup_repo(temp_dir, explicit_automatable=True)
+            result, runtime = self._run_reader(
+                repo,
+                self._block(
+                    self._invalid_automatable_payload(resume_evidence=True)
+                ),
+                "Reader correction omitted the execution-classification JSON block.\n",
+            )
+            state = workflow_stages.read_state(current)
+            fallback = json.loads(
+                (current / boundary.FALLBACK_FILE).read_text(encoding="utf-8")
+            )
+            reader_text = (current / "reader-brief.md").read_text(encoding="utf-8")
+            parsed = execution.parse_reader_classification(
+                reader_text,
+                (current / "issue.md").read_text(encoding="utf-8"),
+            )
+
+        self.assertEqual(result["state"], "ACCEPTED")
+        self.assertEqual(runtime.calls, ["work", "correction"])
+        self.assertEqual(parsed.classification, execution.AUTOMATABLE)
+        self.assertEqual(
+            state["ExecutionClassificationSource"],
+            boundary.OPERATOR_CLASSIFICATION_FALLBACK_SOURCE,
+        )
+        self.assertIn(
+            "execution-classification:",
+            fallback["first_rejection"],
+        )
+        self.assertTrue(fallback["correction_rejection"])
+
     def test_explicit_automatable_malformed_genuine_looking_downgrade_cannot_override_operator(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo, current = self._setup_repo(temp_dir, explicit_automatable=True)
@@ -358,8 +608,35 @@ class ReaderDowngradeFallbackTests(unittest.TestCase):
         self.assertEqual(parsed.classification, execution.AUTOMATABLE)
         self.assertEqual(
             state["ExecutionClassificationSource"],
-            boundary.OPERATOR_FALLBACK_SOURCE,
+            boundary.OPERATOR_CLASSIFICATION_FALLBACK_SOURCE,
         )
+
+    def test_core_rejection_followed_by_valid_external_boundary_still_safety_downgrades(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo, current = self._setup_repo(temp_dir, explicit_automatable=True)
+            result, runtime = self._run_reader(
+                repo,
+                self._block(
+                    self._invalid_automatable_payload(manual_criteria=True)
+                ),
+                self._block(self._genuine_payload(mismatch=False)),
+            )
+            state = workflow_stages.read_state(current)
+            boundary_file_exists = (current / boundary.EXTERNAL_BOUNDARY_FILE).exists()
+            fallback_file_exists = (current / boundary.FALLBACK_FILE).exists()
+
+        self.assertEqual(result["state"], "ACCEPTED")
+        self.assertEqual(runtime.calls, ["work", "correction"])
+        self.assertEqual(
+            state["ExecutionClassification"],
+            execution.MANUAL_EXTERNAL,
+        )
+        self.assertEqual(
+            state["ExecutionClassificationSource"],
+            "reader-safety-downgrade",
+        )
+        self.assertTrue(boundary_file_exists)
+        self.assertFalse(fallback_file_exists)
 
     def test_valid_external_boundary_correction_still_fails_closed_as_manual(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -451,8 +728,12 @@ class ReaderDowngradeFallbackTests(unittest.TestCase):
             repo, current = self._setup_repo(temp_dir, explicit_automatable=True)
             self._run_reader(
                 repo,
-                self._block(self._repo_payload()),
-                self._block(self._mismatched_mapping_payload()),
+                self._block(
+                    self._invalid_automatable_payload(manual_criteria=True)
+                ),
+                self._block(
+                    self._invalid_automatable_payload(human_actions=True)
+                ),
             )
 
             active = mappings()
