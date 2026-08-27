@@ -13,6 +13,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
+from automation import operation_attribution
 from automation.semantic_contract import SemanticVerifierError
 from automation.semantic_invocation import prepare_semantic_repair_prompt
 from automation.semantic_prompts import extract_acceptance_criteria
@@ -97,6 +98,12 @@ def stage_payload(
         payload["max_repair_attempts"] = max_repair_attempts
     if max_semantic_repair_attempts is not None:
         payload["max_semantic_repair_attempts"] = max_semantic_repair_attempts
+    if requested_issue:
+        payload = operation_attribution.attribute_explicit_new_run(
+            repo,
+            payload,
+            requested_issue,
+        )
     return payload
 
 def record_stage_failure(
@@ -115,7 +122,11 @@ def record_stage_failure(
         f"{stage}|{classification}|{reason}|{input_fingerprint}".encode("utf-8", errors="replace")
     ).hexdigest()
     current = repo / CURRENT_DIR
-    if current.is_dir():
+    preserve_prior = operation_attribution.is_preserved_prior_run(
+        repo,
+        requested_issue,
+    )
+    if current.is_dir() and not preserve_prior:
         diagnostics = _diagnostics(current)
         failures = diagnostics.setdefault("failure_fingerprints", {})
         if isinstance(failures, dict):
