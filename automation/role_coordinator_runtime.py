@@ -231,6 +231,7 @@ def run_role(
     )
 
     output = _role_output_path(repo, role)
+    first_reader_text = ""
     first_diagnostic = ""
     last_diagnostic = ""
     try:
@@ -254,6 +255,11 @@ def run_role(
             reason=reason,
         )
         last_diagnostic = first_diagnostic
+        if role == "reader" and output is not None:
+            try:
+                first_reader_text = output.read_text(encoding="utf-8")
+            except OSError:
+                first_reader_text = ""
         correction = repo / workflow_stages.CURRENT_DIR / f"contract-correction-{role}.md"
         if not correction.is_file():
             raise RoleCoordinatorError(
@@ -302,6 +308,7 @@ def run_role(
                             output,
                             first_error,
                             second_error,
+                            first_reader_text=first_reader_text,
                         )
                     )
                 except (
