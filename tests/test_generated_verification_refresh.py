@@ -256,18 +256,21 @@ class GeneratedVerificationRefreshTests(unittest.TestCase):
             after_manifest = run_manifest.load_manifest(
                 current / run_manifest.MANIFEST_NAME
             )
+            after_semantic = {
+                name: (current / name).read_bytes()
+                for name in before
+            }
+            validation_problems = run_manifest.validate_artifacts(
+                after_manifest,
+                current,
+            )
+            kept_edit = (repo / "src" / "kept.txt").read_text(encoding="utf-8")
 
         self.assertIn("generated", reason)
         self.assertEqual([item["root"] for item in facts["package_roots"]], ["."])
         node = next(group for group in groups if group["name"] == "node-root")
         self.assertEqual([item["cwd"] for item in node["commands"]], ["."])
-        self.assertEqual(
-            before,
-            {
-                name: (current / name).read_bytes()
-                for name in before
-            },
-        )
+        self.assertEqual(before, after_semantic)
         self.assertEqual(
             after_manifest["stages"]["patch-applied"]["details"],
             patch_details,
@@ -280,14 +283,8 @@ class GeneratedVerificationRefreshTests(unittest.TestCase):
             "refreshable_artifacts"
         ]
         self.assertIn("detected-facts.json", refreshable)
-        self.assertEqual(
-            run_manifest.validate_artifacts(after_manifest, current),
-            [],
-        )
-        self.assertEqual(
-            (repo / "src" / "kept.txt").read_text(encoding="utf-8"),
-            "implementation edit\n",
-        )
+        self.assertEqual(validation_problems, [])
+        self.assertEqual(kept_edit, "implementation edit\n")
 
     def test_native_local_verifier_auto_refreshes_deleted_generated_cwd(self):
         with tempfile.TemporaryDirectory() as temp_dir:
