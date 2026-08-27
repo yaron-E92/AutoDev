@@ -608,7 +608,7 @@ class ReaderDowngradeFallbackTests(unittest.TestCase):
         self.assertEqual(parsed.classification, execution.AUTOMATABLE)
         self.assertEqual(
             state["ExecutionClassificationSource"],
-            boundary.OPERATOR_FALLBACK_SOURCE,
+            boundary.OPERATOR_CLASSIFICATION_FALLBACK_SOURCE,
         )
 
     def test_core_rejection_followed_by_valid_external_boundary_still_safety_downgrades(self):
