@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from automation import opencode_adapter_protocol
+from automation import opencode_adapter_protocol, operation_attribution
 
 import json
 import subprocess
@@ -44,7 +44,12 @@ def run_stage(
             which=which or workflow_stages.shutil.which,
         )
     except workflow_stages.WorkflowStageError as exc:
-        role_resume.checkpoint_failure(repo, name, exc)
+        requested_issue = workflow_stages.issue_number_from_arguments(arguments)
+        if not operation_attribution.is_preserved_prior_run(
+            repo,
+            requested_issue,
+        ):
+            role_resume.checkpoint_failure(repo, name, exc)
         raise RoleCoordinatorError(
             str(exc),
             classification=exc.classification,
@@ -88,30 +93,46 @@ def terminal_payload(
         return dict(payload)
     current = repo / workflow_stages.CURRENT_DIR
     reason = str(payload.get("reason", "AutoDev workflow stopped"))
-    issue = int(payload.get("issue_number", 0) or _issue_number(repo, arguments))
+    requested_issue = workflow_stages.issue_number_from_arguments(arguments)
+    issue = int(
+        requested_issue
+        or payload.get("issue_number", 0)
+        or _issue_number(repo, arguments)
+    )
+    preserve_prior = operation_attribution.is_preserved_prior_run(
+        repo,
+        requested_issue,
+    )
     if state == "BLOCKED":
-        try:
-            workflow_stages.mark_blocked(
-                current,
-                workflow_stages.read_state(current),
-                reason,
-            )
-        except (OSError, ValueError, workflow_stages.WorkflowStageError):
-            pass
-        if role_resume.has_manifest(repo):
-            role_resume.checkpoint_failure(
-                repo,
-                str(payload.get("failed_stage", "blocked")),
-                RoleCoordinatorError(
+        if not preserve_prior:
+            try:
+                workflow_stages.mark_blocked(
+                    current,
+                    workflow_stages.read_state(current),
                     reason,
-                    classification=str(
-                        payload.get("failure_classification", "")
-                        or workflow_stages.FAILURE_DETERMINISTIC
+                )
+            except (OSError, ValueError, workflow_stages.WorkflowStageError):
+                pass
+            if role_resume.has_manifest(repo):
+                role_resume.checkpoint_failure(
+                    repo,
+                    str(payload.get("failed_stage", "blocked")),
+                    RoleCoordinatorError(
+                        reason,
+                        classification=str(
+                            payload.get("failure_classification", "")
+                            or workflow_stages.FAILURE_DETERMINISTIC
+                        ),
                     ),
-                ),
-            )
+                )
         result = dict(payload)
         result["state"] = "BLOCKED"
+        if requested_issue:
+            result = operation_attribution.attribute_explicit_new_run(
+                repo,
+                result,
+                requested_issue,
+            )
         return result
 
     failure = RoleCoordinatorError(
@@ -122,7 +143,7 @@ def terminal_payload(
         ),
         diagnostic_path=str(payload.get("artifact", "")),
     )
-    if role_resume.has_manifest(repo):
+    if role_resume.has_manifest(repo) and not preserve_prior:
         role_resume.checkpoint_failure(
             repo,
             str(payload.get("failed_stage", "python-coordinator")),
