@@ -292,7 +292,7 @@ def _rewrite_reader_classification_as_automatable(
         + "\n"
         + execution.CLASSIFICATION_BLOCK_END
     )
-    return _BLOCK.sub(replacement, reader_text, count=1)
+    return _BLOCK.sub(lambda _match: replacement, reader_text, count=1)
 
 
 def prepare_reader_invalid_downgrade_fallback(
@@ -386,10 +386,12 @@ def finalize_reader_invalid_downgrade_fallback(
         "protocol_correction_attempts": 1,
     }
     path = current / FALLBACK_FILE
-    path.write_text(
+    fallback_temp = path.with_suffix(path.suffix + ".tmp")
+    fallback_temp.write_text(
         json.dumps(diagnostics, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+    fallback_temp.replace(path)
 
     try:
         raw = json.loads(
