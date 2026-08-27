@@ -348,16 +348,14 @@ class GeneratedVerificationRefreshTests(unittest.TestCase):
                     attempt=3,
                     runner=runner,
                 )
+                state = workflow_stages.read_state(current)
+                lineage_attempt = repair_lineage.current_local_repair_attempt(state)
 
         self.assertEqual(first["state"], "REPAIR")
         self.assertEqual(first["repair_attempt"], 0)
         self.assertTrue(first["failure_fingerprint"])
         self.assertEqual(same_lineage["state"], "BLOCKED")
-        state = workflow_stages.read_state(current)
-        self.assertEqual(
-            repair_lineage.current_local_repair_attempt(state),
-            0,
-        )
+        self.assertEqual(lineage_attempt, 0)
 
     def test_repair_lineage_counter_is_bounded_per_fingerprint(self):
         state: dict[str, object] = {}
