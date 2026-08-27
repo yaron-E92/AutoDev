@@ -358,16 +358,19 @@ def prepare_reader_invalid_downgrade_fallback(
         if _accepted_external_boundary_evidence(reader_text):
             return None
 
-        first_layer, first_rejection = first_classification_rejection
+        first_layer, first_detail = first_classification_rejection
+        first_rejection = f"{first_layer}: {first_detail}"
         if second_classification_rejection is not None:
-            second_layer, second_rejection = second_classification_rejection
+            second_layer, second_detail = second_classification_rejection
+            second_rejection = f"{second_layer}: {second_detail}"
         else:
             # #223 already allowed malformed/omitted correction output after a
             # rejected downgrade. Keep that behavior for core classification
             # rejections too, provided no valid external evidence survived.
             second_layer = "reader-protocol"
-            second_rejection = role_runtime_diagnostics.runtime_excerpt(
-                str(second_error)
+            second_rejection = (
+                "reader-protocol: "
+                + role_runtime_diagnostics.runtime_excerpt(str(second_error))
             )
 
         source = (
