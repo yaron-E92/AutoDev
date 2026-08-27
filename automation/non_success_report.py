@@ -9,6 +9,7 @@ from automation import run_manifest, workflow_stages
 
 REPORT_NAME = "non-success-report.md"
 REPORT_RELATIVE = f".autodev-run/current/{REPORT_NAME}"
+OPERATION_REPORT_RELATIVE = f".autodev-run/last-operation/{REPORT_NAME}"
 NON_SUCCESS_STATES = {"FAILED", "BLOCKED", "WAITING", "REPAIR"}
 MAX_EVIDENCE_CHARS = 2400
 
@@ -34,11 +35,23 @@ def update_report(repo: Path, payload: dict[str, object]) -> tuple[dict[str, obj
     repo = repo.expanduser().resolve()
     result = dict(payload)
     current = repo / workflow_stages.CURRENT_DIR
-    path = current / REPORT_NAME
+    detached_operation = (
+        int(result.get("requested_issue_number", 0) or 0) > 0
+        and result.get("new_run_prepared") is False
+    )
+    relative = OPERATION_REPORT_RELATIVE if detached_operation else REPORT_RELATIVE
+    path = (
+        repo / ".autodev-run" / "last-operation" / REPORT_NAME
+        if detached_operation
+        else current / REPORT_NAME
+    )
     state_name = str(result.get("state", ""))
 
     if state_name == "PR_READY":
-        path.unlink(missing_ok=True)
+        (current / REPORT_NAME).unlink(missing_ok=True)
+        (repo / ".autodev-run" / "last-operation" / REPORT_NAME).unlink(
+            missing_ok=True
+        )
         result.pop("non_success_report", None)
         result.pop("non_success_report_error", None)
         return result, ""
@@ -48,9 +61,9 @@ def update_report(repo: Path, payload: dict[str, object]) -> tuple[dict[str, obj
     try:
         text = render_report(repo, result)
         _write_atomic(path, text)
-        result["non_success_report"] = REPORT_RELATIVE
+        result["non_success_report"] = relative
         result.pop("non_success_report_error", None)
-        return result, REPORT_RELATIVE
+        return result, relative
     except Exception as exc:  # best-effort diagnostic artifact must never mask the primary outcome
         result["non_success_report_error"] = redact(exc)[:500]
         return result, ""
@@ -59,11 +72,22 @@ def update_report(repo: Path, payload: dict[str, object]) -> tuple[dict[str, obj
 def render_report(repo: Path, payload: dict[str, object]) -> str:
     repo = repo.expanduser().resolve()
     current = repo / workflow_stages.CURRENT_DIR
-    state_value = workflow_stages.read_json(current / "state.json")
-    state = state_value if isinstance(state_value, dict) else {}
-    diagnostics_value = workflow_stages.read_json(current / workflow_stages.DIAGNOSTICS_FILE)
-    diagnostics = diagnostics_value if isinstance(diagnostics_value, dict) else {}
-    manifest = _load_manifest(repo)
+    detached_operation = (
+        int(payload.get("requested_issue_number", 0) or 0) > 0
+        and payload.get("new_run_prepared") is False
+    )
+    if detached_operation:
+        state: dict[str, object] = {}
+        diagnostics: dict[str, object] = {}
+        manifest: dict[str, object] = {}
+    else:
+        state_value = workflow_stages.read_json(current / "state.json")
+        state = state_value if isinstance(state_value, dict) else {}
+        diagnostics_value = workflow_stages.read_json(
+            current / workflow_stages.DIAGNOSTICS_FILE
+        )
+        diagnostics = diagnostics_value if isinstance(diagnostics_value, dict) else {}
+        manifest = _load_manifest(repo)
 
     outcome = str(payload.get("state", ""))
     issue_number = int(payload.get("issue_number", 0) or state.get("IssueNumber", 0) or 0)
@@ -87,11 +111,15 @@ def render_report(repo: Path, payload: dict[str, object]) -> str:
         or ("required CI is still running" if outcome == "WAITING" else "AutoDev did not reach PR_READY")
     )
 
-    completed = _completed_work(manifest, state)
+    completed = [] if detached_operation else _completed_work(manifest, state)
     blocker = _blocker_summary(outcome, failed_stage, classification, reason, state)
     next_steps = _next_steps(outcome, classification, payload, state)
-    evidence = _evidence_paths(current, payload, state)
-    excerpt = _authoritative_excerpt(current, outcome, failed_stage)
+    evidence = [] if detached_operation else _evidence_paths(current, payload, state)
+    excerpt = (
+        ""
+        if detached_operation
+        else _authoritative_excerpt(current, outcome, failed_stage)
+    )
 
     lines = [
         "# AutoDev non-success report",
@@ -99,21 +127,72 @@ def render_report(repo: Path, payload: dict[str, object]) -> str:
         "## Outcome",
         "",
         f"- State: `{redact(outcome)}`",
-        f"- Issue: `#{issue_number}`" if issue_number else "- Issue: `(unknown)`",
-        f"- Branch: `{redact(branch)}`" if branch else "- Branch: `(unknown)`",
-        f"- Commit: `{redact(commit)}`" if commit else "- Commit: `(none)`",
-        f"- Exact PR head: `{redact(pr_head)}`" if pr_head else "- Exact PR head: `(none)`",
-        f"- PR: {redact(pr_url)}" if pr_url else "- PR: `(none)`",
-        f"- Stage: `{redact(failed_stage)}`" if failed_stage else "- Stage: `(unknown)`",
-        f"- Classification: `{redact(classification)}`" if classification else "- Classification: `(none)`",
-        "",
-        "## What succeeded",
-        "",
     ]
+    if detached_operation:
+        lines.extend(
+            [
+                f"- Requested operation: start issue `#{issue_number}`"
+                if issue_number
+                else "- Requested operation: start issue `(unknown)`",
+                "- New run preparation completed: `no`",
+                "- Branch for requested issue: `(none)`",
+                "- Commit for requested issue: `(none)`",
+                "- Exact PR head for requested issue: `(none)`",
+                "- PR for requested issue: `(none)`",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                f"- Issue: `#{issue_number}`" if issue_number else "- Issue: `(unknown)`",
+                f"- Branch: `{redact(branch)}`" if branch else "- Branch: `(unknown)`",
+                f"- Commit: `{redact(commit)}`" if commit else "- Commit: `(none)`",
+                f"- Exact PR head: `{redact(pr_head)}`" if pr_head else "- Exact PR head: `(none)`",
+                f"- PR: {redact(pr_url)}" if pr_url else "- PR: `(none)`",
+            ]
+        )
+    lines.extend(
+        [
+            f"- Stage: `{redact(failed_stage)}`" if failed_stage else "- Stage: `(unknown)`",
+            f"- Classification: `{redact(classification)}`" if classification else "- Classification: `(none)`",
+            "",
+            "## What succeeded",
+            "",
+        ]
+    )
     if completed:
         lines.extend(f"- {redact(item)}" for item in completed)
+    elif detached_operation:
+        lines.append(
+            "- No durable state for the requested issue was created before the failure."
+        )
     else:
         lines.append("- No durable completed stage could be confirmed from the current run artifacts.")
+
+    if detached_operation:
+        previous = payload.get("existing_durable_run", {})
+        previous = previous if isinstance(previous, dict) else {}
+        lines.extend(["", "## Existing durable run preserved", ""])
+        if previous:
+            prior_issue = int(previous.get("issue_number", 0) or 0)
+            prior_branch = str(previous.get("branch", ""))
+            prior_commit = str(previous.get("commit_sha", ""))
+            prior_pr = str(previous.get("pr_url", ""))
+            lines.extend(
+                [
+                    f"- Issue: `#{prior_issue}`" if prior_issue else "- Issue: `(unknown)`",
+                    f"- Branch: `{redact(prior_branch)}`" if prior_branch else "- Branch: `(none)`",
+                    f"- Commit: `{redact(prior_commit)}`" if prior_commit else "- Commit: `(none)`",
+                    f"- PR: {redact(prior_pr)}" if prior_pr else "- PR: `(none)`",
+                    "- This preserved run was not the failing operation.",
+                ]
+            )
+        else:
+            lines.append("- No prior durable run existed.")
+        if issue_number:
+            lines.append(
+                f"- No issue #{issue_number} branch, commit, or PR was created."
+            )
 
     lines.extend(
         [
@@ -252,6 +331,27 @@ def _next_steps(
     payload: dict[str, object],
     state: dict[str, object],
 ) -> list[str]:
+    if (
+        int(payload.get("requested_issue_number", 0) or 0) > 0
+        and payload.get("new_run_prepared") is False
+    ):
+        requested = int(payload.get("requested_issue_number", 0) or 0)
+        previous = payload.get("existing_durable_run", {})
+        previous_issue = (
+            int(previous.get("issue_number", 0) or 0)
+            if isinstance(previous, dict)
+            else 0
+        )
+        steps = [
+            "Correct the reported preflight/preparation cause without deleting the preserved durable run.",
+            f"Retry the requested operation with `autodev issue-to-pr {requested}`.",
+        ]
+        if previous_issue:
+            steps.append(
+                f"Use `autodev resume` only if you intentionally want to resume preserved issue #{previous_issue}; it does not resume the failed issue #{requested} request."
+            )
+        return steps
+
     if outcome == "WAITING":
         head = str(payload.get("pr_head_sha", "") or state.get("PrHeadSha", ""))
         return [

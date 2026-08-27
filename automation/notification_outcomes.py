@@ -111,9 +111,18 @@ def event_from_run_payload(
 
 def _record_diagnostic(
     repo: Path,
+    payload: dict[str, object],
     event: NotificationEvent | None,
     result: NotificationResult,
 ) -> None:
+    if (
+        int(payload.get("requested_issue_number", 0) or 0) > 0
+        and payload.get("new_run_prepared") is False
+    ):
+        # The current directory belongs to a different preserved run. Delivery
+        # state is already stored in the user-local notification event store;
+        # do not write issue-N notification diagnostics into issue-M state.
+        return
     current = repo / workflow_stages.CURRENT_DIR
     if not current.is_dir():
         return
@@ -170,5 +179,5 @@ def best_effort_notify_run_outcome(
             "native",
             f"notification reporting failed: {type(exc).__name__}",
         )
-    _record_diagnostic(repo, event, result)
+    _record_diagnostic(repo, payload, event, result)
     return result
