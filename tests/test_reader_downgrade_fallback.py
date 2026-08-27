@@ -538,6 +538,39 @@ class ReaderDowngradeFallbackTests(unittest.TestCase):
         self.assertEqual(runtime.calls, ["work", "correction"])
         self.assertFalse(fallback_exists)
 
+    def test_explicit_automatable_core_rejection_then_omitted_correction_falls_back(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo, current = self._setup_repo(temp_dir, explicit_automatable=True)
+            result, runtime = self._run_reader(
+                repo,
+                self._block(
+                    self._invalid_automatable_payload(resume_evidence=True)
+                ),
+                "Reader correction omitted the execution-classification JSON block.\n",
+            )
+            state = workflow_stages.read_state(current)
+            fallback = json.loads(
+                (current / boundary.FALLBACK_FILE).read_text(encoding="utf-8")
+            )
+            reader_text = (current / "reader-brief.md").read_text(encoding="utf-8")
+            parsed = execution.parse_reader_classification(
+                reader_text,
+                (current / "issue.md").read_text(encoding="utf-8"),
+            )
+
+        self.assertEqual(result["state"], "ACCEPTED")
+        self.assertEqual(runtime.calls, ["work", "correction"])
+        self.assertEqual(parsed.classification, execution.AUTOMATABLE)
+        self.assertEqual(
+            state["ExecutionClassificationSource"],
+            boundary.OPERATOR_CLASSIFICATION_FALLBACK_SOURCE,
+        )
+        self.assertIn(
+            "execution-classification:",
+            fallback["first_rejection"],
+        )
+        self.assertTrue(fallback["correction_rejection"])
+
     def test_explicit_automatable_malformed_genuine_looking_downgrade_cannot_override_operator(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo, current = self._setup_repo(temp_dir, explicit_automatable=True)
