@@ -383,6 +383,8 @@ def mark_stage_artifacts_refreshable(
         for value in existing
         if isinstance(value, str) and value
     } if isinstance(existing, list) else set()
+    refreshed_hashes = details.get("deterministic_refreshed_artifact_hashes", {})
+    refreshed_hashes = dict(refreshed_hashes) if isinstance(refreshed_hashes, dict) else {}
 
     run_root = path.parent
     refreshed: list[str] = []
@@ -393,22 +395,23 @@ def mark_stage_artifacts_refreshable(
         values.add(relative)
         target = run_root / relative
         if target.is_file() and relative in artifact_hashes:
-            artifact_hashes[relative] = hash_file(target)
+            refreshed_hashes[relative] = hash_file(target)
             refreshed.append(relative)
 
     details["refreshable_artifacts"] = sorted(values)
     if refreshed:
+        details["deterministic_refreshed_artifact_hashes"] = refreshed_hashes
         details["deterministic_refresh_count"] = int(
             details.get("deterministic_refresh_count", 0) or 0
         ) + 1
         details["deterministic_refreshed_at"] = utc_now()
         details["deterministic_refreshed_artifacts"] = sorted(refreshed)
-    record["artifacts"] = artifact_hashes
     record["details"] = details
     stages[stage] = record
-    # Deliberately preserve record["output_hash"]: downstream semantic stages were
-    # derived from Reader output, while these sidecars are deterministic current-
-    # workspace verification metadata.
+    # Keep the original artifact map/output_hash immutable: downstream semantic
+    # stages are bound to the accepted Reader checkpoint. Refreshed deterministic
+    # sidecars have their current hashes recorded separately and are still
+    # fail-closed by validate_artifacts().
     save_manifest(path, manifest)
     return manifest
 
@@ -427,12 +430,21 @@ def validate_artifacts(manifest: dict[str, object], run_root: Path) -> list[str]
         if not isinstance(artifacts, dict):
             problems.append(f"{stage}: artifact map is invalid")
             continue
+        details = record.get("details", {})
+        refreshed_hashes = (
+            details.get("deterministic_refreshed_artifact_hashes", {})
+            if isinstance(details, dict)
+            else {}
+        )
+        if not isinstance(refreshed_hashes, dict):
+            refreshed_hashes = {}
         for relative, expected in artifacts.items():
             artifact = run_root / str(relative)
             if not artifact.is_file():
                 problems.append(f"{stage}: missing artifact {relative}")
                 continue
-            if hash_file(artifact) != expected:
+            current_expected = str(refreshed_hashes.get(str(relative), expected))
+            if hash_file(artifact) != current_expected:
                 problems.append(f"{stage}: artifact drift detected for {relative}")
     return problems
 
