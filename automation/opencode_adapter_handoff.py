@@ -10,6 +10,7 @@ from area_reader import repository as area_reader_repository
 from area_reader import routing as area_reader_routing
 from area_reader import verification as area_reader_verification
 from automation.model_output_sanitizer import sanitize_model_output
+from automation import verification_discovery
 from automation.planner_output import (
     REQUIRED_PLAN_HEADINGS,
     PlannerOutputError,
@@ -38,21 +39,16 @@ def _next_semantic_attempt(current: Path) -> int:
     return max(attempts, default=-1) + 1
 
 def _prepare_reader(repo: Path, current: Path, issue_text: str) -> str:
-    files, skipped_large, skipped_unreadable = area_reader_repository.collect_repo_files(repo)
-    repo_map = area_reader_repository.build_repo_map(repo, files, skipped_large, skipped_unreadable)
-    areas, routing = area_reader_routing.route_areas(issue_text, "auto")
-    facts = area_reader_repository.detect_repo_facts(repo, files, areas, routing)
-    groups = area_reader_verification.build_verification_command_groups(facts, areas)
-    recommendations = area_reader_verification.recommended_command_groups(
-        groups,
+    discovery = verification_discovery.refresh_verification_discovery(
+        repo,
+        current,
         issue_text=issue_text,
         changed_paths=(),
+        preserve_routing=False,
     )
-    area_reader_verification.apply_recommended_command_groups(groups, recommendations)
-    _write_json(current / "routed-areas.json", {"areas": areas, **routing})
-    _write_json(current / "detected-facts.json", facts)
-    _write_json(current / "verification-command-groups.json", groups)
-    _write_json(current / "recommended-command-groups.json", recommendations)
+    files = discovery["files"]
+    areas = discovery["areas"]
+    repo_map = str(discovery["repo_map"])
 
     bundle, included = _bounded_reader_bundle(repo, files, areas, repo_map)
     metadata = {
