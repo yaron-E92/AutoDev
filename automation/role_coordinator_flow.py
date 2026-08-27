@@ -80,24 +80,50 @@ def coordinate(
                 arguments=arguments,
             )
     else:
-        preflight = run_stage(
-            repo,
-            "preflight",
-            runtime_name=runtime.name,
-            arguments=arguments,
-            runner=runner,
-            which=which,
-        )
+        try:
+            preflight = run_stage(
+                repo,
+                "preflight",
+                runtime_name=runtime.name,
+                arguments=arguments,
+                runner=runner,
+                which=which,
+            )
+        except RoleCoordinatorError as exc:
+            return terminal_payload(
+                repo,
+                {
+                    "state": "FAILED",
+                    "reason": str(exc),
+                    "failed_stage": "preflight",
+                    "failure_classification": exc.classification,
+                    "artifact": exc.diagnostic_path,
+                },
+                arguments=arguments,
+            )
         if preflight.get("state") != "CONTINUE":
             return terminal_payload(repo, preflight, arguments=arguments)
-        prepared = run_stage(
-            repo,
-            "prepare",
-            runtime_name=runtime.name,
-            arguments=arguments,
-            runner=runner,
-            which=which,
-        )
+        try:
+            prepared = run_stage(
+                repo,
+                "prepare",
+                runtime_name=runtime.name,
+                arguments=arguments,
+                runner=runner,
+                which=which,
+            )
+        except RoleCoordinatorError as exc:
+            return terminal_payload(
+                repo,
+                {
+                    "state": "FAILED",
+                    "reason": str(exc),
+                    "failed_stage": "prepare",
+                    "failure_classification": exc.classification,
+                    "artifact": exc.diagnostic_path,
+                },
+                arguments=arguments,
+            )
         if prepared.get("state") != "CONTINUE":
             return terminal_payload(repo, prepared, arguments=arguments)
         role_runtime.persist_selection(
