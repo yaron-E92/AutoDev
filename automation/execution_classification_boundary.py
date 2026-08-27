@@ -270,10 +270,6 @@ def _rewrite_reader_classification_as_automatable(
     reader_text: str,
     report: execution.ExecutionReport,
 ) -> str:
-    if _structured_block(reader_text) is None:
-        raise ExternalBoundaryEvidenceError(
-            "cannot apply deterministic Reader downgrade fallback without a parseable execution-classification block"
-        )
     payload = {
         "classification": execution.AUTOMATABLE,
         "reason": report.reason,
@@ -292,7 +288,9 @@ def _rewrite_reader_classification_as_automatable(
         + "\n"
         + execution.CLASSIFICATION_BLOCK_END
     )
-    return _BLOCK.sub(lambda _match: replacement, reader_text, count=1)
+    if _BLOCK.search(reader_text):
+        return _BLOCK.sub(lambda _match: replacement, reader_text, count=1)
+    return reader_text.rstrip() + "\n\n" + replacement + "\n"
 
 
 def prepare_reader_invalid_downgrade_fallback(
