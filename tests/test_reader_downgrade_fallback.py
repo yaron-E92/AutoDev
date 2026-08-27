@@ -116,6 +116,32 @@ class ReaderDowngradeFallbackTests(unittest.TestCase):
         ]
         return payload
 
+    def _mismatched_mapping_payload(self) -> dict[str, object]:
+        first_criterion = "Complete the remaining group-management integration acceptance."
+        second_criterion = "Complete the remaining persistence acceptance."
+        first_action = "Finish the group-management integration acceptance."
+        second_action = "Finish the persistence acceptance."
+        return {
+            "classification": "manual-external",
+            "reason": "Reader still claims manual work but cannot provide a consistent boundary mapping.",
+            "autonomous_criteria": [],
+            "manual_criteria": [first_criterion, second_criterion],
+            "human_actions": [first_action, second_action],
+            "resume_evidence": ["Record non-secret completion metadata."],
+            "manual_prerequisite_blocks_implementation": True,
+            "autonomous_subset_independent": False,
+            "external_boundaries": [
+                {
+                    "criterion": first_criterion,
+                    "boundary_kind": "unsupported-external-capability",
+                    "human_action": first_action,
+                    "external_system": "developer workstation",
+                    "unavailable_state": "the claimed acceptance state is incomplete",
+                    "why_unsupported": "Reader claims a human must complete it.",
+                }
+            ],
+        }
+
     def _genuine_payload(self, *, mismatch: bool) -> dict[str, object]:
         criterion = "Complete publisher identity validation and certificate issuance."
         action = "Complete legal identity approval with the certificate provider."
@@ -236,7 +262,7 @@ class ReaderDowngradeFallbackTests(unittest.TestCase):
             result, runtime = self._run_reader(
                 repo,
                 self._block(self._repo_payload()),
-                self._block(self._mismatched_repo_payload()),
+                self._block(self._mismatched_mapping_payload()),
             )
 
             state = workflow_stages.read_state(current)
@@ -403,7 +429,7 @@ class ReaderDowngradeFallbackTests(unittest.TestCase):
             self._run_reader(
                 repo,
                 self._block(self._repo_payload()),
-                self._block(self._mismatched_repo_payload()),
+                self._block(self._mismatched_mapping_payload()),
             )
 
             active = mappings()
