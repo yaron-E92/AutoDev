@@ -245,6 +245,12 @@ class GeneratedVerificationRefreshTests(unittest.TestCase):
             patch_details = dict(
                 before_manifest["stages"]["patch-applied"]["details"]
             )
+            reader_checkpoint_artifacts = dict(
+                before_manifest["stages"]["repository-read"]["artifacts"]
+            )
+            reader_output_hash = str(
+                before_manifest["stages"]["repository-read"]["output_hash"]
+            )
 
             reason = verification_discovery.refresh_stale_verification_discovery(
                 repo,
@@ -274,6 +280,14 @@ class GeneratedVerificationRefreshTests(unittest.TestCase):
         self.assertEqual(
             after_manifest["stages"]["patch-applied"]["details"],
             patch_details,
+        )
+        self.assertEqual(
+            after_manifest["stages"]["repository-read"]["artifacts"],
+            reader_checkpoint_artifacts,
+        )
+        self.assertEqual(
+            after_manifest["stages"]["repository-read"]["output_hash"],
+            reader_output_hash,
         )
         self.assertEqual(
             after_manifest["completed_stages"],
