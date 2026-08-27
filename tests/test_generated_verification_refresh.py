@@ -306,7 +306,10 @@ class GeneratedVerificationRefreshTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertIn("Refreshed deterministic verification discovery", result.output)
         self.assertTrue(
-            any(argv == ["npm", "ci"] and cwd == repo for argv, cwd in calls)
+            any(
+                argv == ["npm", "ci"] and cwd.resolve() == repo.resolve()
+                for argv, cwd in calls
+            )
         )
         self.assertFalse(any(".next" in cwd.as_posix() for _, cwd in calls))
 
