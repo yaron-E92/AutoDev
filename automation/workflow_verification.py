@@ -13,7 +13,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
-from automation import local_verification, repair_lineage
+from automation import local_verification, repair_lineage, repository_identity
 from automation.semantic_contract import SemanticVerifierError
 from automation.semantic_invocation import prepare_semantic_repair_prompt
 from automation.semantic_prompts import extract_acceptance_criteria
@@ -60,7 +60,13 @@ from automation.workflow_workspace import (
     write_workspace_snapshot,
 )
 
-def _preflight(repo: Path, arguments: str, which: Callable[[str], str | None]) -> None:
+def _preflight(
+    repo: Path,
+    arguments: str,
+    which: Callable[[str], str | None],
+    *,
+    runner: Callable[..., object] = subprocess.run,
+) -> None:
     if not repo.is_dir():
         raise WorkflowStageError(f"target repository is not a directory: {repo}")
     if not (repo / ".git").exists():
@@ -72,9 +78,10 @@ def _preflight(repo: Path, arguments: str, which: Callable[[str], str | None]) -
         raise WorkflowStageError("Python executable is unavailable")
     if issue_number_from_arguments(arguments) == 0:
         raise WorkflowStageError("pass an issue number to /autodev-issue-to-pr")
-    missing_config = [name for name in ("GITHUB_OWNER", "GITHUB_REPO") if not os.environ.get(name, "").strip()]
-    if missing_config:
-        raise WorkflowStageError("required AutoDev setting is unavailable: " + ", ".join(missing_config))
+    try:
+        repository_identity.resolve_github_repository(repo, runner=runner)
+    except repository_identity.RepositoryIdentityError as exc:
+        raise WorkflowStageError(str(exc)) from exc
     configured_attempt_limit("MAX_REPAIR_ATTEMPTS", DEFAULT_MAX_REPAIR_ATTEMPTS)
     configured_attempt_limit("MAX_SEMANTIC_REPAIR_ATTEMPTS", DEFAULT_MAX_SEMANTIC_REPAIR_ATTEMPTS)
     configured_attempt_limit("CI_CHECK_POLL_ATTEMPTS", DEFAULT_CI_CHECK_POLL_ATTEMPTS)
