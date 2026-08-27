@@ -341,12 +341,11 @@ def finalize_reader_invalid_downgrade_fallback(
 ) -> Path:
     state = workflow_stages.read_state(current)
     execution.apply_state_fields(state, report)
+    state["ExecutionClassificationFallback"] = True
     state["ExecutionClassificationFallbackReason"] = report.reason
     state["ExecutionClassificationFallbackFile"] = (
         f".autodev-run/current/{FALLBACK_FILE}"
     )
-    state.pop("QueueState", None)
-    state.pop("ManualAttentionNotificationKey", None)
     workflow_stages.write_state(current, state)
 
     execution.persist_artifacts(current, report)
