@@ -50,6 +50,7 @@ def stage_payload(
     failure_classification: str = "",
     failure_fingerprint: str = "",
     repeated_failure: bool = False,
+    repair_attempt: int | None = None,
 ) -> dict[str, object]:
     current = repo / CURRENT_DIR
     state_value = read_json(current / "state.json")
@@ -90,6 +91,8 @@ def stage_payload(
             "stage_wall_time_ms": diagnostics.get("stage_wall_time_ms", {}),
             "shipment_proof": diagnostics.get("shipment_proof", {}),
         }
+    if repair_attempt is not None:
+        payload["repair_attempt"] = max(0, int(repair_attempt))
     if max_repair_attempts is not None:
         payload["max_repair_attempts"] = max_repair_attempts
     if max_semantic_repair_attempts is not None:
