@@ -12,7 +12,7 @@ import subprocess
 from pathlib import Path
 from typing import Callable
 
-from automation import run_manifest, workflow_stages
+from automation import repair_lineage, run_manifest, workflow_stages
 
 
 class RoleResumeError(ValueError):
@@ -139,6 +139,13 @@ def checkpoint_role(
                     "issue_sha256": run_manifest.hash_file(current / "issue.md"),
                     "reader_fingerprint": run_manifest.stage_role_fingerprint(manifest, "reader"),
                 },
+                details={
+                    "refreshable_artifacts": [
+                        "detected-facts.json",
+                        "verification-command-groups.json",
+                        "recommended-command-groups.json",
+                    ]
+                },
             )
             return
         if role == "synthesizer":
@@ -235,11 +242,17 @@ def checkpoint_role(
                 kind=kind,
                 attempt=attempt,
             )
+            pending_details = {"attempt": attempt, "repair_kind": kind}
+            if kind == "local":
+                state = workflow_stages.read_state(current)
+                pending_details["failure_fingerprint"] = str(
+                    state.get(repair_lineage.LOCAL_FAILURE_FINGERPRINT_KEY, "") or ""
+                )
             run_manifest.record_stage_state(
                 path,
                 opencode_resume_checkpoint._stage_for_repair_kind(kind),
                 status="pending",
-                details={"attempt": attempt, "repair_kind": kind},
+                details=pending_details,
             )
             return
         if role == "verifier":
