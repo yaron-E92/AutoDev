@@ -362,6 +362,7 @@ def mark_stage_artifacts_refreshable(
     stage: str,
     artifacts: list[str] | tuple[str, ...],
 ) -> dict[str, object]:
+    """Refresh deterministic sidecar hashes without changing semantic stage identity."""
     manifest = load_manifest(path)
     stages = manifest.get("stages", {})
     if not isinstance(stages, dict):
@@ -369,6 +370,11 @@ def mark_stage_artifacts_refreshable(
     record = stages.get(stage)
     if not isinstance(record, dict):
         return manifest
+
+    artifact_hashes = record.get("artifacts", {})
+    if not isinstance(artifact_hashes, dict):
+        raise ManifestError(f"{stage}: artifact map is invalid")
+
     details = record.get("details", {})
     details = dict(details) if isinstance(details, dict) else {}
     existing = details.get("refreshable_artifacts", [])
@@ -377,10 +383,32 @@ def mark_stage_artifacts_refreshable(
         for value in existing
         if isinstance(value, str) and value
     } if isinstance(existing, list) else set()
-    values.update(str(value) for value in artifacts if str(value))
+
+    run_root = path.parent
+    refreshed: list[str] = []
+    for artifact in artifacts:
+        relative = str(artifact or "")
+        if not relative:
+            continue
+        values.add(relative)
+        target = run_root / relative
+        if target.is_file() and relative in artifact_hashes:
+            artifact_hashes[relative] = hash_file(target)
+            refreshed.append(relative)
+
     details["refreshable_artifacts"] = sorted(values)
+    if refreshed:
+        details["deterministic_refresh_count"] = int(
+            details.get("deterministic_refresh_count", 0) or 0
+        ) + 1
+        details["deterministic_refreshed_at"] = utc_now()
+        details["deterministic_refreshed_artifacts"] = sorted(refreshed)
+    record["artifacts"] = artifact_hashes
     record["details"] = details
     stages[stage] = record
+    # Deliberately preserve record["output_hash"]: downstream semantic stages were
+    # derived from Reader output, while these sidecars are deterministic current-
+    # workspace verification metadata.
     save_manifest(path, manifest)
     return manifest
 
@@ -399,15 +427,7 @@ def validate_artifacts(manifest: dict[str, object], run_root: Path) -> list[str]
         if not isinstance(artifacts, dict):
             problems.append(f"{stage}: artifact map is invalid")
             continue
-        details = record.get("details", {})
-        refreshable = {
-            str(value)
-            for value in details.get("refreshable_artifacts", [])
-            if isinstance(value, str) and value
-        } if isinstance(details, dict) and isinstance(details.get("refreshable_artifacts", []), list) else set()
         for relative, expected in artifacts.items():
-            if str(relative) in refreshable:
-                continue
             artifact = run_root / str(relative)
             if not artifact.is_file():
                 problems.append(f"{stage}: missing artifact {relative}")
