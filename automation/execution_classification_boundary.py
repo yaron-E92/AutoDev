@@ -14,8 +14,12 @@ EXTERNAL_BOUNDARY_FIELD = "external_boundaries"
 EXTERNAL_BOUNDARY_FILE = "execution-external-boundaries.json"
 FALLBACK_FILE = "execution-classification-fallback.json"
 OPERATOR_FALLBACK_SOURCE = "operator-fallback-after-invalid-reader-downgrade"
+OPERATOR_CLASSIFICATION_FALLBACK_SOURCE = (
+    "operator-fallback-after-invalid-reader-classification"
+)
 DETERMINISTIC_FALLBACK_SOURCE = "deterministic-fallback-after-invalid-reader-downgrade"
 _BOUNDARY_REJECTION_PREFIX = "reader execution-classification external-boundary contract rejected:"
+_CLASSIFICATION_REJECTION_PREFIX = "reader execution-classification contract rejected:"
 BOUNDARY_KINDS = {
     "unavailable-external-resource",
     "human-legal-provider-approval",
@@ -222,20 +226,47 @@ def validate_reader_external_boundary(reader_text: str) -> tuple[ExternalBoundar
     return evidence
 
 
-def _boundary_rejection_reason(error: BaseException) -> str:
+def _rejection_reason(error: BaseException, prefix: str) -> str:
     current: BaseException | None = error
     seen: set[int] = set()
+    lowered_prefix = prefix.casefold()
     while current is not None and id(current) not in seen:
         seen.add(id(current))
         text = str(current)
         lowered = text.casefold()
-        prefix = _BOUNDARY_REJECTION_PREFIX.casefold()
-        index = lowered.find(prefix)
+        index = lowered.find(lowered_prefix)
         if index >= 0:
-            detail = text[index + len(_BOUNDARY_REJECTION_PREFIX):].strip()
+            detail = text[index + len(prefix):].strip()
             return role_runtime_diagnostics.runtime_excerpt(detail)
         current = current.__cause__
     return ""
+
+
+def _boundary_rejection_reason(error: BaseException) -> str:
+    return _rejection_reason(error, _BOUNDARY_REJECTION_PREFIX)
+
+
+def _classification_rejection_reason(error: BaseException) -> str:
+    return _rejection_reason(error, _CLASSIFICATION_REJECTION_PREFIX)
+
+
+def _reader_classification_rejection(
+    error: BaseException,
+) -> tuple[str, str] | None:
+    boundary = _boundary_rejection_reason(error)
+    if boundary:
+        return "external-boundary", boundary
+    classification = _classification_rejection_reason(error)
+    if classification:
+        return "execution-classification", classification
+    return None
+
+
+def _accepted_external_boundary_evidence(reader_text: str) -> bool:
+    try:
+        return bool(validate_reader_external_boundary(reader_text))
+    except ExternalBoundaryEvidenceError:
+        return False
 
 
 def _repository_only_rejection(reason: str) -> bool:
@@ -301,46 +332,64 @@ def prepare_reader_invalid_downgrade_fallback(
     *,
     first_reader_text: str = "",
 ) -> tuple[execution.ExecutionReport, str, str] | None:
-    first_rejection = _boundary_rejection_reason(first_error)
-    if not first_rejection:
-        return None
-
     try:
         reader_text = input_path.read_text(encoding="utf-8")
     except OSError:
         return None
 
-    second_boundary_rejection = _boundary_rejection_reason(second_error)
+    first_classification_rejection = _reader_classification_rejection(first_error)
+    second_classification_rejection = _reader_classification_rejection(second_error)
     issue_text = workflow_stages.read_text(current / "issue.md")
     explicit = execution.explicit_classification(issue_text)
+
     if (
         explicit is not None
         and explicit.classification == execution.AUTOMATABLE
     ):
-        try:
-            correction_evidence = validate_reader_external_boundary(reader_text)
-        except ExternalBoundaryEvidenceError:
-            correction_evidence = ()
-        if correction_evidence:
-            # A malformed surrounding Reader contract is not permission to
-            # discard affirmative external-boundary evidence that itself passed
-            # the deterministic validator.
+        if first_classification_rejection is None:
             return None
-        second_rejection = (
-            second_boundary_rejection
-            or role_runtime_diagnostics.runtime_excerpt(str(second_error))
+
+        # Explicit operator-owned automatable intent remains authoritative
+        # after the one bounded Reader correction unless either physical
+        # attempt established affirmative external-boundary evidence that
+        # itself passes the deterministic #213 validator.
+        if _accepted_external_boundary_evidence(first_reader_text):
+            return None
+        if _accepted_external_boundary_evidence(reader_text):
+            return None
+
+        first_layer, first_rejection = first_classification_rejection
+        if second_classification_rejection is not None:
+            second_layer, second_rejection = second_classification_rejection
+        else:
+            # #223 already allowed malformed/omitted correction output after a
+            # rejected downgrade. Keep that behavior for core classification
+            # rejections too, provided no valid external evidence survived.
+            second_layer = "reader-protocol"
+            second_rejection = role_runtime_diagnostics.runtime_excerpt(
+                str(second_error)
+            )
+
+        source = (
+            OPERATOR_CLASSIFICATION_FALLBACK_SOURCE
+            if "execution-classification" in {first_layer, second_layer}
+            else OPERATOR_FALLBACK_SOURCE
         )
         report = execution.ExecutionReport(
             classification=execution.AUTOMATABLE,
             reason=(
-                "Operator automatable declaration retained after the Reader's rejected downgrade "
-                "and bounded correction established no valid affirmative external-boundary evidence."
+                "Operator automatable declaration retained after the Reader's rejected "
+                "classification and bounded correction established no valid affirmative "
+                "external-boundary evidence."
             ),
-            source=OPERATOR_FALLBACK_SOURCE,
+            source=source,
         )
     else:
-        if not second_boundary_rejection:
+        first_boundary_rejection = _boundary_rejection_reason(first_error)
+        second_boundary_rejection = _boundary_rejection_reason(second_error)
+        if not first_boundary_rejection or not second_boundary_rejection:
             return None
+        first_rejection = first_boundary_rejection
         second_rejection = second_boundary_rejection
         if not (
             explicit is None
@@ -356,6 +405,7 @@ def prepare_reader_invalid_downgrade_fallback(
             ),
             source=DETERMINISTIC_FALLBACK_SOURCE,
         )
+
     rewritten = _rewrite_reader_classification_as_automatable(reader_text, report)
     input_path.write_text(rewritten, encoding="utf-8")
     return report, first_rejection, second_rejection
