@@ -338,6 +338,29 @@ class ReaderDowngradeFallbackTests(unittest.TestCase):
         )
         self.assertEqual(state["ExecutionClassification"], execution.AUTOMATABLE)
 
+    def test_explicit_automatable_correction_serialization_failure_falls_back_without_external_evidence(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo, current = self._setup_repo(temp_dir, explicit_automatable=True)
+            result, runtime = self._run_reader(
+                repo,
+                self._block(self._repo_payload()),
+                "Substantive Reader correction, but the classification JSON block was malformed or omitted.\n",
+            )
+            state = workflow_stages.read_state(current)
+            reader_text = (current / "reader-brief.md").read_text(encoding="utf-8")
+            parsed = execution.parse_reader_classification(
+                reader_text,
+                (current / "issue.md").read_text(encoding="utf-8"),
+            )
+
+        self.assertEqual(result["state"], "ACCEPTED")
+        self.assertEqual(runtime.calls, ["work", "correction"])
+        self.assertEqual(parsed.classification, execution.AUTOMATABLE)
+        self.assertEqual(
+            state["ExecutionClassificationSource"],
+            boundary.OPERATOR_FALLBACK_SOURCE,
+        )
+
     def test_valid_external_boundary_correction_still_fails_closed_as_manual(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo, current = self._setup_repo(temp_dir, explicit_automatable=True)
