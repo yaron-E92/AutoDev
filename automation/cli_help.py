@@ -222,6 +222,41 @@ HELP: dict[tuple[str, ...], HelpEntry] = {
         examples=("autodev coordinate --arguments 123",),
         privacy_note=CLOUD_MODEL_NOTE,
     ),
+    ("notifications",): _entry(
+        "autodev notifications <enable|disable|status> [options]",
+        "Configure issue-to-PR outcome notifications.",
+        description=(
+            "Notification policy is user-local per GitHub repository and applies to both manual "
+            "issue-to-PR/resume outcomes and installed scheduler health events. Notifications "
+            "remain opt-in and native-only in this release."
+        ),
+        subcommands=(
+            ("enable", "Enable native notifications for manual and scheduled outcomes."),
+            ("disable", "Disable AutoDev notifications for this repository."),
+            ("status", "Show notification policy and last observed notification events."),
+        ),
+        examples=("autodev notifications enable", "autodev notifications status --json"),
+    ),
+    ("notifications", "enable"): _entry(
+        "autodev notifications enable [options]",
+        "Enable native AutoDev notifications.",
+        options=COMMON_LOCATION_OPTIONS
+        + (
+            ("--reminder-hours N", "Repeat unresolved blocked/attention reminders every N hours. Default: 0."),
+            ("--json", "Emit policy and event state as JSON."),
+        ),
+        examples=("autodev notifications enable --reminder-hours 24",),
+    ),
+    ("notifications", "disable"): _entry(
+        "autodev notifications disable [options]",
+        "Disable AutoDev notifications.",
+        options=COMMON_LOCATION_OPTIONS + (("--json", "Emit policy and event state as JSON."),),
+    ),
+    ("notifications", "status"): _entry(
+        "autodev notifications status [options]",
+        "Show shared manual/scheduled notification policy and event state.",
+        options=COMMON_LOCATION_OPTIONS + (("--json", "Emit policy and event state as JSON."),),
+    ),
     ("scheduler",): _entry(
         "autodev scheduler <command> [options]",
         "Install, inspect, and run autonomous AutoDev scheduling.",
@@ -277,7 +312,7 @@ HELP: dict[tuple[str, ...], HelpEntry] = {
     ),
     ("scheduler", "notifications"): _entry(
         "autodev scheduler notifications <enable|disable|status> [options]",
-        "Configure native scheduler attention-state notifications.",
+        "Supported alias for the shared repository notification policy.",
         subcommands=(
             ("enable", "Enable native notifications, optionally with periodic attention reminders."),
             ("disable", "Disable AutoDev scheduler notifications."),
@@ -442,6 +477,7 @@ TOP_LEVEL_GROUPS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
         "Automation and operations",
         (
             ("scheduler", "Install, inspect, and run autonomous scheduling."),
+            ("notifications", "Configure native ready/blocked/failed outcome notifications."),
             ("queue", "Inspect/reconcile/select managed issues without model calls."),
             ("privacy", "Inspect, grant, or revoke explicit privacy consent."),
             ("models", "Show effective OpenCode role/model mappings."),
@@ -463,6 +499,7 @@ KNOWN_TOP_LEVEL = {
     "doctor",
     "issue-to-pr",
     "scheduler",
+    "notifications",
     "status",
     "resume",
     "models",
