@@ -11,6 +11,7 @@ from pathlib import Path
 
 from automation import (
     github_cli_proxy,
+    notification_outcomes,
     non_success_report,
     opencode_failure_entrypoint,
     role_resume,
@@ -139,6 +140,11 @@ def run(argv: list[str] | None = None) -> int:
         ).unlink(missing_ok=True)
 
     payload, report_path = non_success_report.update_report(repo, payload)
+    notification_outcomes.best_effort_notify_run_outcome(
+        repo,
+        payload,
+        runner=diagnostic_runner,
+    )
     if report_path:
         print(f"AutoDev report: {report_path}", flush=True)
     print(json.dumps(payload, sort_keys=True), flush=True)

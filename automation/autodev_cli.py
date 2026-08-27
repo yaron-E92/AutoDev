@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from automation import claim_cli, cli_help, manage_cli, product_runtime, scheduler_health_cli
+from automation import claim_cli, cli_help, manage_cli, notification_cli, product_runtime, scheduler_health_cli
 
 import os
 import sys
@@ -143,6 +143,8 @@ def run(argv: list[str] | None = None) -> int:
         if rest and rest[0] == "worker-id":
             return claim_cli.run_worker_cli(rest[1:])
         return scheduler_health_cli.run_cli(rest)
+    if command == "notifications":
+        return notification_cli.run_cli(rest)
     if command == "manage":
         return manage_cli.run_cli(rest)
 

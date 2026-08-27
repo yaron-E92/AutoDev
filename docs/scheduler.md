@@ -225,39 +225,42 @@ RUN_HEALTH_BLOCKED
 
 ## Notifications
 
-Notifications are optional and default to **off**. Health persistence and `scheduler status` do not depend on notification delivery.
+Notifications are optional and default to **off**. Scheduler health now uses the same user-local notification policy and event/suppression contract as manual `issue-to-pr` and `resume` runs.
 
-Enable native local notifications for one installed repository:
+The preferred shared configuration surface is:
+
+```text
+autodev notifications enable
+autodev notifications status
+autodev notifications disable
+```
+
+The existing scheduler spelling remains a supported alias for installed schedulers and reads/writes the same policy file:
 
 ```text
 autodev scheduler notifications enable
+autodev scheduler notifications status
+autodev scheduler notifications disable
 ```
 
 Optionally allow a long reminder for unresolved actionable states:
 
 ```text
-autodev scheduler notifications enable --reminder-hours 24
+autodev notifications enable --reminder-hours 24
 ```
 
-Inspect or disable the policy:
+Native delivery uses a local developer-visible facility when available (`notify-send` on POSIX desktops and the existing `msg.exe` path on Windows). Delivery is deliberately best-effort: a missing desktop session, unavailable notifier, or notification command failure is recorded but never changes queue state, run state, or the scheduler's primary exit code.
 
-```text
-autodev scheduler notifications status
-autodev scheduler notifications disable
-```
-
-Native delivery uses a local developer-visible facility when available (`notify-send` on POSIX desktops and `msg.exe` on Windows). Delivery is deliberately best-effort: a missing desktop session, unavailable notifier, or notification command failure is recorded but never changes queue state, run state, or the scheduler's primary exit code.
-
-Notification suppression is stateful:
+Scheduler health maps into the shared notification event categories while preserving the existing transition behavior:
 
 - the first benign health observation is persisted quietly;
-- an initial actionable state such as attention, scheduler error, all-managed-blocked, or PR-ready may notify once;
+- initial attention, scheduler-error, all-managed-blocked, or PR-ready states may notify once;
 - a material health fingerprint transition notifies once when notifications are enabled;
 - an unchanged empty queue does not notify on every scheduler tick;
 - unresolved `ATTENTION_REQUIRED` / `SCHEDULER_ERROR` can re-notify only after the configured reminder cooldown;
 - a failed notification attempt is still recorded, so the scheduler does not hammer the same failed notifier every tick.
 
-Notification text is generated from the same bounded deterministic health metadata. It contains no source snippets, prompts, provider credentials, or secret values.
+Notification text remains bounded deterministic metadata only. See [Outcome notifications](notifications.md) for the shared manual/scheduled contract, privacy boundary, diagnostics, and provider design.
 
 ## Run one tick manually
 
@@ -275,7 +278,7 @@ This uses the same registration, local lock, distributed claim, worker, queue se
 autodev scheduler uninstall
 ```
 
-Uninstall removes only the native registration and AutoDev scheduler metadata for that repository, including its scheduler-health and notification-policy files. Cron removal is bounded to the AutoDev-managed marker block and preserves unrelated user cron entries.
+Uninstall removes only the native registration and scheduler-specific health metadata for that repository. The shared notification policy and event history are preserved because they also govern manual `issue-to-pr` / `resume` outcomes. Cron removal is bounded to the AutoDev-managed marker block and preserves unrelated user cron entries.
 
 The dedicated worker is intentionally left in user-local state rather than being recursively deleted during uninstall. This avoids destroying unexpected or diagnostically useful local state; it can be inspected and removed manually once no durable run or user work is needed.
 

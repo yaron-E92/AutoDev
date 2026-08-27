@@ -1,28 +1,29 @@
 from __future__ import annotations
 
-import os
-import shutil
-import subprocess
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from pathlib import Path
-from typing import Callable, TextIO
+from typing import Callable
 
+from automation import notification_delivery, notification_events, notification_storage
+from automation.notification_contract import (
+    EVENT_BLOCKED,
+    EVENT_FAILED,
+    EVENT_READY_FOR_REVIEW,
+    EVENT_SCHEDULER_HEALTH,
+    MODE_SCHEDULED,
+    NotificationEvent,
+    NotificationPolicy,
+    NotificationResult,
+)
 from automation.scheduler_health_contract import (
     HEALTH_SCHEMA,
     HEALTH_STATES,
     HealthSnapshot,
-    NOTIFICATION_NATIVE,
-    NotificationPolicy,
-    NotificationResult,
     REMINDER_STATES,
     SchedulerHealthError,
-    _iso,
     _now,
-    _parse_time,
 )
-from automation.scheduler_health_probes import (
-    render_health,
-)
+from automation.scheduler_health_probes import render_health
 from automation.scheduler_health_storage import (
     _read_json,
     _write_json,
@@ -30,69 +31,61 @@ from automation.scheduler_health_storage import (
     load_notification_policy,
 )
 
+
+_INITIAL_ACTIONABLE_STATES = {
+    "ATTENTION_REQUIRED",
+    "SCHEDULER_ERROR",
+    "ALL_MANAGED_WORK_BLOCKED",
+    "PR_READY",
+}
+
+
+def _event_kind(snapshot: HealthSnapshot) -> str:
+    if snapshot.state == "PR_READY":
+        return EVENT_READY_FOR_REVIEW
+    if snapshot.state in {"ATTENTION_REQUIRED", "ALL_MANAGED_WORK_BLOCKED"}:
+        return EVENT_BLOCKED
+    if snapshot.state == "SCHEDULER_ERROR":
+        return EVENT_FAILED
+    return EVENT_SCHEDULER_HEALTH
+
+
+def _event_from_snapshot(snapshot: HealthSnapshot) -> NotificationEvent:
+    return NotificationEvent(
+        repository=snapshot.repository,
+        mode=MODE_SCHEDULED,
+        event=_event_kind(snapshot),
+        fingerprint=snapshot.fingerprint,
+        observed_at=snapshot.observed_at,
+        issue_number=snapshot.issue_number,
+        stage=snapshot.next_stage or snapshot.state,
+        reason_code=snapshot.attention_kind or snapshot.state,
+        summary=render_health(snapshot),
+        notify_initial=snapshot.state in _INITIAL_ACTIONABLE_STATES,
+        notify_transition=True,
+        reminder_eligible=snapshot.state in REMINDER_STATES,
+    )
+
+
 def _notification_message(snapshot: HealthSnapshot) -> tuple[str, str]:
-    title = f"AutoDev · {snapshot.repository}"
-    # render_health is deliberately bounded to deterministic metadata only.
-    return title, render_health(snapshot)
+    return notification_events.render_event(_event_from_snapshot(snapshot))
+
 
 def _native_notify(
     title: str,
     message: str,
     *,
-    runner: Callable[..., object] = subprocess.run,
-    which: Callable[[str], str | None] = shutil.which,
+    runner=None,
+    which=None,
     platform_name: str | None = None,
 ) -> NotificationResult:
-    platform = (platform_name or ("windows" if os.name == "nt" else "posix")).casefold()
-    if platform == "windows":
-        executable = which("msg") or which("msg.exe")
-        if not executable:
-            return NotificationResult(True, False, NOTIFICATION_NATIVE, "msg.exe is unavailable")
-        argv = [executable, "*", "/TIME:10", f"{title}: {message}"]
-    else:
-        executable = which("notify-send")
-        if not executable:
-            return NotificationResult(True, False, NOTIFICATION_NATIVE, "notify-send is unavailable")
-        argv = [executable, title, message]
-    try:
-        completed = runner(
-            argv,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            capture_output=True,
-            check=False,
-        )
-    except OSError:
-        return NotificationResult(True, False, NOTIFICATION_NATIVE, "native notifier could not be launched")
-    if int(getattr(completed, "returncode", 1)) != 0:
-        return NotificationResult(True, False, NOTIFICATION_NATIVE, "native notifier returned a nonzero exit code")
-    return NotificationResult(True, True, NOTIFICATION_NATIVE)
+    kwargs = {"platform_name": platform_name}
+    if runner is not None:
+        kwargs["runner"] = runner
+    if which is not None:
+        kwargs["which"] = which
+    return notification_delivery.native_notify(title, message, **kwargs)
 
-def _should_notify(
-    previous: HealthSnapshot | None,
-    current: HealthSnapshot,
-    record: dict[str, object],
-    policy: NotificationPolicy,
-    *,
-    now: datetime,
-) -> tuple[bool, str]:
-    if not policy.enabled:
-        return False, "notifications-disabled"
-    if previous is None:
-        if current.state in {"ATTENTION_REQUIRED", "SCHEDULER_ERROR", "ALL_MANAGED_WORK_BLOCKED", "PR_READY"}:
-            return True, "initial-actionable-state"
-        return False, "initial-benign-state"
-    if previous.fingerprint != current.fingerprint:
-        return True, "material-transition"
-    if current.state not in REMINDER_STATES or policy.reminder_hours <= 0:
-        return False, "unchanged-state"
-    last_notification = record.get("last_notification", {})
-    last_notification = last_notification if isinstance(last_notification, dict) else {}
-    last_at = _parse_time(last_notification.get("at"))
-    if last_at is None or now - last_at >= timedelta(hours=policy.reminder_hours):
-        return True, "attention-reminder-cooldown"
-    return False, "cooldown-active"
 
 def _snapshot_from_json(raw: object) -> HealthSnapshot | None:
     if not isinstance(raw, dict):
@@ -103,7 +96,11 @@ def _snapshot_from_json(raw: object) -> HealthSnapshot | None:
     queue = raw.get("queue", {})
     privacy_counts = raw.get("privacy_grants", {})
     blocker_counts = raw.get("blocker_counts", {})
-    if not isinstance(queue, dict) or not isinstance(privacy_counts, dict) or not isinstance(blocker_counts, dict):
+    if (
+        not isinstance(queue, dict)
+        or not isinstance(privacy_counts, dict)
+        or not isinstance(blocker_counts, dict)
+    ):
         return None
     return HealthSnapshot(
         state=state,
@@ -122,6 +119,7 @@ def _snapshot_from_json(raw: object) -> HealthSnapshot | None:
         blocker_counts={str(k): int(v) for k, v in blocker_counts.items()},
     )
 
+
 def observe_health(
     registration_file: Path,
     snapshot: HealthSnapshot,
@@ -134,33 +132,33 @@ def observe_health(
     record = _read_json(path)
     if record and record.get("schema_version") != HEALTH_SCHEMA:
         raise SchedulerHealthError("unsupported scheduler health state schema")
+
     previous = _snapshot_from_json(record.get("current"))
-    current_time = (now or _now()).astimezone(timezone.utc)
     notification_policy = policy or load_notification_policy(registration_file)
-    should_notify, reason = _should_notify(previous, snapshot, record, notification_policy, now=current_time)
-    notification = NotificationResult(False, False, notification_policy.backend, reason)
-    if should_notify:
-        title, message = _notification_message(snapshot)
-        if notifier is not None:
-            try:
-                notification = notifier(title, message)
-            except Exception:
-                notification = NotificationResult(True, False, notification_policy.backend, "notification delivery raised an exception")
-        elif notification_policy.backend == NOTIFICATION_NATIVE:
-            notification = _native_notify(title, message)
-        else:
-            notification = NotificationResult(False, False, notification_policy.backend, "notifications-disabled")
-        notification_record = {
-            "at": _iso(current_time),
-            "fingerprint": snapshot.fingerprint,
-            "state": snapshot.state,
-            "backend": notification.backend,
-            "delivered": notification.delivered,
-            "reason": reason,
-        }
-    else:
-        prior = record.get("last_notification")
-        notification_record = dict(prior) if isinstance(prior, dict) else {}
+    event_path = registration_file.expanduser().resolve().parent / notification_storage.EVENT_STATE_FILE
+    try:
+        notification = notification_events.observe_event(
+            event_path,
+            _event_from_snapshot(snapshot),
+            policy=notification_policy,
+            notifier=notifier,
+            now=now or _now(),
+        )
+        event_state = notification_storage.load_event_state_path(event_path)
+        modes = event_state.get("modes", {})
+        scheduled = modes.get(MODE_SCHEDULED, {}) if isinstance(modes, dict) else {}
+        last_notification = (
+            scheduled.get("last_notification", {})
+            if isinstance(scheduled, dict)
+            else {}
+        )
+        notification_record = (
+            dict(last_notification)
+            if isinstance(last_notification, dict)
+            else {}
+        )
+    except notification_storage.NotificationError as exc:
+        raise SchedulerHealthError(str(exc)) from exc
 
     previous_state = previous.state if previous else ""
     transition = record.get("last_transition")

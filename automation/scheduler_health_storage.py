@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from automation import notification_storage
+
 from automation.scheduler_health_contract import (
     HEALTH_FILE,
     NOTIFICATION_BACKENDS,
@@ -38,22 +40,13 @@ def _write_json(path: Path, value: dict[str, object]) -> None:
         raise SchedulerHealthError(f"cannot write scheduler health state {path}: {exc}") from exc
 
 def load_notification_policy(registration_file: Path) -> NotificationPolicy:
-    raw = _read_json(notification_path(registration_file))
-    if not raw:
-        return NotificationPolicy()
-    if raw.get("schema_version") != NOTIFICATION_SCHEMA:
-        raise SchedulerHealthError("unsupported scheduler notification policy schema")
-    backend = str(raw.get("backend", NOTIFICATION_OFF)).casefold()
-    if backend not in NOTIFICATION_BACKENDS:
-        raise SchedulerHealthError(f"unsupported scheduler notification backend: {backend}")
-    reminder_hours = int(raw.get("reminder_hours", 0) or 0)
-    if reminder_hours < 0 or reminder_hours > 24 * 365:
-        raise SchedulerHealthError("notification reminder hours must be between 0 and 8760")
-    return NotificationPolicy(backend=backend, reminder_hours=reminder_hours)
+    try:
+        return notification_storage.load_policy_path(notification_path(registration_file))
+    except notification_storage.NotificationError as exc:
+        raise SchedulerHealthError(str(exc)) from exc
 
 def save_notification_policy(registration_file: Path, policy: NotificationPolicy) -> None:
-    if policy.backend not in NOTIFICATION_BACKENDS:
-        raise SchedulerHealthError(f"unsupported scheduler notification backend: {policy.backend}")
-    if policy.reminder_hours < 0 or policy.reminder_hours > 24 * 365:
-        raise SchedulerHealthError("notification reminder hours must be between 0 and 8760")
-    _write_json(notification_path(registration_file), policy.to_json())
+    try:
+        notification_storage.save_policy_path(notification_path(registration_file), policy)
+    except notification_storage.NotificationError as exc:
+        raise SchedulerHealthError(str(exc)) from exc

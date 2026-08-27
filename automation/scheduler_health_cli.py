@@ -177,7 +177,9 @@ def _cleanup_health_state(argv: list[str], *, home: Path | None, runner: Callabl
         )
     except Exception:
         return
-    for path in (health_path(registration_file), notification_path(registration_file)):
+    # Notification policy/event state is now shared with manual issue-to-PR
+    # outcomes, so scheduler uninstall must not disable or erase it.
+    for path in (health_path(registration_file),):
         try:
             path.unlink(missing_ok=True)
         except OSError:
