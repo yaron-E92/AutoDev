@@ -253,6 +253,11 @@ class ReaderDowngradeFallbackTests(unittest.TestCase):
                     "reader-*.json"
                 )
             )
+            manual_plan_exists = (current / execution.MANUAL_ACTION_PLAN_FILE).exists()
+            boundary_file_exists = (current / boundary.EXTERNAL_BOUNDARY_FILE).exists()
+            last_failure_exists = (
+                current / role_runtime_diagnostics.LAST_FAILURE_FILE
+            ).exists()
 
         self.assertEqual(result["state"], "ACCEPTED")
         self.assertEqual(runtime.calls, ["work", "correction"])
@@ -266,8 +271,8 @@ class ReaderDowngradeFallbackTests(unittest.TestCase):
         )
         self.assertTrue(state["ExecutionClassificationFallback"])
         self.assertNotEqual(state.get("QueueState"), "attention")
-        self.assertFalse((current / execution.MANUAL_ACTION_PLAN_FILE).exists())
-        self.assertFalse((current / boundary.EXTERNAL_BOUNDARY_FILE).exists())
+        self.assertFalse(manual_plan_exists)
+        self.assertFalse(boundary_file_exists)
         self.assertEqual(len(attempts), 2)
         self.assertEqual(
             diagnostics["protocol_correction_attempts"]["reader"],
@@ -288,9 +293,7 @@ class ReaderDowngradeFallbackTests(unittest.TestCase):
         )
         self.assertTrue(fallback["first_attempt"])
         self.assertTrue(fallback["correction_attempt"])
-        self.assertFalse(
-            (current / role_runtime_diagnostics.LAST_FAILURE_FILE).exists()
-        )
+        self.assertFalse(last_failure_exists)
 
     def test_explicit_automatable_malformed_genuine_looking_downgrade_cannot_override_operator(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -318,6 +321,8 @@ class ReaderDowngradeFallbackTests(unittest.TestCase):
                 self._block(self._genuine_payload(mismatch=False)),
             )
             state = workflow_stages.read_state(current)
+            boundary_file_exists = (current / boundary.EXTERNAL_BOUNDARY_FILE).exists()
+            fallback_file_exists = (current / boundary.FALLBACK_FILE).exists()
 
         self.assertEqual(result["state"], "ACCEPTED")
         self.assertEqual(runtime.calls, ["work", "correction"])
@@ -330,8 +335,8 @@ class ReaderDowngradeFallbackTests(unittest.TestCase):
             "reader-safety-downgrade",
         )
         self.assertFalse(state.get("ExecutionClassificationFallback", False))
-        self.assertTrue((current / boundary.EXTERNAL_BOUNDARY_FILE).exists())
-        self.assertFalse((current / boundary.FALLBACK_FILE).exists())
+        self.assertTrue(boundary_file_exists)
+        self.assertFalse(fallback_file_exists)
 
     def test_non_explicit_code_only_issue_has_conservative_automatable_fallback(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -382,6 +387,7 @@ class ReaderDowngradeFallbackTests(unittest.TestCase):
                     encoding="utf-8"
                 )
             )
+            fallback_file_exists = (current / boundary.FALLBACK_FILE).exists()
 
         self.assertEqual(
             raised.exception.classification,
@@ -389,7 +395,7 @@ class ReaderDowngradeFallbackTests(unittest.TestCase):
         )
         self.assertEqual(runtime.calls, ["work", "correction"])
         self.assertEqual(diagnostics["protocol_correction_attempts"]["reader"], 1)
-        self.assertFalse((current / boundary.FALLBACK_FILE).exists())
+        self.assertFalse(fallback_file_exists)
 
     def test_fallback_checkpoint_can_advance_reader_to_synthesizer_planner_and_implementer(self):
         with tempfile.TemporaryDirectory() as temp_dir:
