@@ -6,9 +6,6 @@ import re
 from pathlib import Path
 from area_reader import context as area_reader_context
 from area_reader import prompts as area_reader_prompts
-from area_reader import repository as area_reader_repository
-from area_reader import routing as area_reader_routing
-from area_reader import verification as area_reader_verification
 from automation.model_output_sanitizer import sanitize_model_output
 from automation import verification_discovery
 from automation.planner_output import (
@@ -25,7 +22,6 @@ from automation.opencode_adapter_contract import (
 from automation.opencode_adapter_storage import (
     _read_json,
     _read_text,
-    _write_json,
     _write_text,
 )
 
