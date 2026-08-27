@@ -357,6 +357,34 @@ def sanitized_invocation(record: dict[str, object]) -> dict[str, object]:
     return safe
 
 
+def mark_stage_artifacts_refreshable(
+    path: Path,
+    stage: str,
+    artifacts: list[str] | tuple[str, ...],
+) -> dict[str, object]:
+    manifest = load_manifest(path)
+    stages = manifest.get("stages", {})
+    if not isinstance(stages, dict):
+        raise ManifestError("run manifest stages must be an object")
+    record = stages.get(stage)
+    if not isinstance(record, dict):
+        return manifest
+    details = record.get("details", {})
+    details = dict(details) if isinstance(details, dict) else {}
+    existing = details.get("refreshable_artifacts", [])
+    values = {
+        str(value)
+        for value in existing
+        if isinstance(value, str) and value
+    } if isinstance(existing, list) else set()
+    values.update(str(value) for value in artifacts if str(value))
+    details["refreshable_artifacts"] = sorted(values)
+    record["details"] = details
+    stages[stage] = record
+    save_manifest(path, manifest)
+    return manifest
+
+
 def validate_artifacts(manifest: dict[str, object], run_root: Path) -> list[str]:
     problems: list[str] = []
     stages = manifest.get("stages", {})
@@ -371,7 +399,15 @@ def validate_artifacts(manifest: dict[str, object], run_root: Path) -> list[str]
         if not isinstance(artifacts, dict):
             problems.append(f"{stage}: artifact map is invalid")
             continue
+        details = record.get("details", {})
+        refreshable = {
+            str(value)
+            for value in details.get("refreshable_artifacts", [])
+            if isinstance(value, str) and value
+        } if isinstance(details, dict) and isinstance(details.get("refreshable_artifacts", []), list) else set()
         for relative, expected in artifacts.items():
+            if str(relative) in refreshable:
+                continue
             artifact = run_root / str(relative)
             if not artifact.is_file():
                 problems.append(f"{stage}: missing artifact {relative}")
