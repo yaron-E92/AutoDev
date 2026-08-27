@@ -63,10 +63,12 @@ class WorkflowStageTests(unittest.TestCase):
 
             self.assertEqual(code, 0)
             self.assertEqual(payload["state"], "CONTINUE")
+            self.assertEqual(len(calls), 1)
             self.assertEqual(
-                calls,
-                [(["git", "remote", "get-url", "--all", "origin"], repo)],
+                calls[0][0],
+                ["git", "remote", "get-url", "--all", "origin"],
             )
+            self.assertEqual(calls[0][1].resolve(), repo.resolve())
             self.assertFalse((repo / ".autodev-run").exists())
 
     def test_preflight_fails_before_mutation_when_tool_is_missing(self):
