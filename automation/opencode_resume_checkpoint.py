@@ -62,6 +62,13 @@ def checkpoint_role(
                     "issue_sha256": run_manifest.hash_file(current / "issue.md"),
                     "reader_fingerprint": run_manifest.stage_role_fingerprint(manifest, "reader"),
                 },
+                details={
+                    "refreshable_artifacts": [
+                        "detected-facts.json",
+                        "verification-command-groups.json",
+                        "recommended-command-groups.json",
+                    ]
+                },
             )
             return
         if role == "synthesizer":
