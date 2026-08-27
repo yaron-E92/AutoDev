@@ -13,7 +13,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
-from automation import local_verification
+from automation import local_verification, repair_lineage
 from automation.semantic_contract import SemanticVerifierError
 from automation.semantic_invocation import prepare_semantic_repair_prompt
 from automation.semantic_prompts import extract_acceptance_criteria
@@ -159,6 +159,7 @@ def run_local_check(
         state["LastLocalCheckPassed"] = False
         state["LocalCheckFailureClassification"] = FAILURE_SETUP
         state["LocalCheckFailureReason"] = str(exc)
+        repair_lineage.clear_current_local_failure(state)
         _clear_local_verification_proof(state)
         write_state(current, state)
         raise
@@ -169,6 +170,7 @@ def run_local_check(
     if returncode == 0:
         state["Status"] = "LocalCheckPassed"
         state["LastLocalCheckPassed"] = True
+        repair_lineage.clear_current_local_failure(state)
         if state.get("VerificationProofVersion"):
             proof = source_identity(repo, current, state)
             state["VerifiedParentSha"] = proof["parent_sha"]
@@ -205,6 +207,8 @@ def run_local_check(
     write_text(current / "local-repair.md", prompt)
     state["Status"] = "LocalCheckFailed"
     state["LastLocalCheckPassed"] = False
+    fingerprint = repair_lineage.local_failure_fingerprint(command, output, returncode)
+    repair_lineage.register_local_failure(state, fingerprint)
     _clear_local_verification_proof(state)
     write_state(current, state)
     return False

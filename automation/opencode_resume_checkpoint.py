@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from automation import run_manifest, workflow_stages
+from automation import repair_lineage, run_manifest, workflow_stages
 
 from automation.opencode_resume_contract import (
     OpenCodeResumeError,
@@ -23,6 +23,13 @@ def begin_role(repo: Path, role: str, arguments: str) -> None:
     manifest = run_manifest.load_manifest(path)
     target_stage = _stage_for_repair_kind(kind)
     attempt = _stage_attempt(manifest, target_stage) + 1
+    if kind == "local":
+        current = repo.expanduser().resolve() / workflow_stages.CURRENT_DIR
+        state = workflow_stages.read_state(current)
+        fingerprint = str(state.get(repair_lineage.LOCAL_FAILURE_FINGERPRINT_KEY, "") or "")
+        if fingerprint:
+            attempt = repair_lineage.consume_local_repair_attempt(state)
+            workflow_stages.write_state(current, state)
     run_manifest.record_stage_state(
         path,
         "repair-generated",
@@ -61,6 +68,13 @@ def checkpoint_role(
                 inputs={
                     "issue_sha256": run_manifest.hash_file(current / "issue.md"),
                     "reader_fingerprint": run_manifest.stage_role_fingerprint(manifest, "reader"),
+                },
+                details={
+                    "refreshable_artifacts": [
+                        "detected-facts.json",
+                        "verification-command-groups.json",
+                        "recommended-command-groups.json",
+                    ]
                 },
             )
             return
@@ -125,11 +139,17 @@ def checkpoint_role(
                 details={"kind": kind, "attempt": attempt, **_source_details(proof)},
             )
             _checkpoint_patch_applied(path, current, proof, kind=kind, attempt=attempt)
+            pending_details = {"attempt": attempt, "repair_kind": kind}
+            if kind == "local":
+                state = workflow_stages.read_state(current)
+                pending_details["failure_fingerprint"] = str(
+                    state.get(repair_lineage.LOCAL_FAILURE_FINGERPRINT_KEY, "") or ""
+                )
             run_manifest.record_stage_state(
                 path,
                 _stage_for_repair_kind(kind),
                 status="pending",
-                details={"attempt": attempt, "repair_kind": kind},
+                details=pending_details,
             )
             return
         if role == "verifier":
@@ -239,14 +259,16 @@ def _record_incomplete_stage(
     payload: dict[str, object],
 ) -> None:
     status = "repair-required" if outcome == "REPAIR" else outcome.casefold() or "failed"
+    effective_attempt = int(payload.get("repair_attempt", attempt) or 0)
     run_manifest.record_stage_state(
         path,
         stage,
         status=status,
         details={
-            "attempt": attempt,
+            "attempt": effective_attempt,
             "reason": str(payload.get("reason", "")),
             "failure_classification": str(payload.get("failure_classification", "")),
+            "failure_fingerprint": str(payload.get("failure_fingerprint", "")),
             "artifact": str(payload.get("artifact", "")),
         },
     )

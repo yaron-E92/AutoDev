@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 from automation.semantic_contract import SemanticVerifierError
+from automation import repair_lineage
 from automation.semantic_invocation import prepare_semantic_repair_prompt
 from automation.semantic_prompts import extract_acceptance_criteria
 from automation.semantic_schema import parse_semantic_output
@@ -175,6 +176,9 @@ def _execute_stage_impl(
             "MAX_REPAIR_ATTEMPTS",
             DEFAULT_MAX_REPAIR_ATTEMPTS,
         )
+        previous_fingerprint = str(
+            state.get(repair_lineage.LOCAL_FAILURE_FINGERPRINT_KEY, "") or ""
+        )
         passed = run_local_check(repo, current, state, autodev_root, runner=runner)
         if passed:
             return 0, stage_payload(
@@ -184,7 +188,13 @@ def _execute_stage_impl(
                 next_action="run semantic verification",
                 max_repair_attempts=max_attempts,
             )
-        if attempt >= max_attempts:
+
+        state = read_state(current)
+        effective_attempt = repair_lineage.current_local_repair_attempt(state)
+        fingerprint = str(state.get(repair_lineage.LOCAL_FAILURE_FINGERPRINT_KEY, "") or "")
+        if previous_fingerprint and previous_fingerprint == fingerprint:
+            effective_attempt = max(effective_attempt, attempt)
+        if effective_attempt >= max_attempts:
             return 0, stage_payload(
                 repo,
                 "BLOCKED",
@@ -192,6 +202,8 @@ def _execute_stage_impl(
                 reason="deterministic repair-attempt limit exhausted",
                 artifact=current / "local-repair.md",
                 failure_classification=FAILURE_DETERMINISTIC,
+                failure_fingerprint=fingerprint,
+                repair_attempt=effective_attempt,
                 next_action="mark the run blocked",
                 max_repair_attempts=max_attempts,
             )
@@ -202,6 +214,8 @@ def _execute_stage_impl(
             reason="deterministic verification failed",
             artifact=current / "local-repair.md",
             failure_classification=FAILURE_CODE_REPAIRABLE,
+            failure_fingerprint=fingerprint,
+            repair_attempt=effective_attempt,
             next_action="delegate the local repair to autodev-fixer, increment the attempt, then rerun local-check",
             max_repair_attempts=max_attempts,
         )

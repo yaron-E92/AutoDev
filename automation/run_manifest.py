@@ -357,6 +357,65 @@ def sanitized_invocation(record: dict[str, object]) -> dict[str, object]:
     return safe
 
 
+def mark_stage_artifacts_refreshable(
+    path: Path,
+    stage: str,
+    artifacts: list[str] | tuple[str, ...],
+) -> dict[str, object]:
+    """Refresh deterministic sidecar hashes without changing semantic stage identity."""
+    manifest = load_manifest(path)
+    stages = manifest.get("stages", {})
+    if not isinstance(stages, dict):
+        raise ManifestError("run manifest stages must be an object")
+    record = stages.get(stage)
+    if not isinstance(record, dict):
+        return manifest
+
+    artifact_hashes = record.get("artifacts", {})
+    if not isinstance(artifact_hashes, dict):
+        raise ManifestError(f"{stage}: artifact map is invalid")
+
+    details = record.get("details", {})
+    details = dict(details) if isinstance(details, dict) else {}
+    existing = details.get("refreshable_artifacts", [])
+    values = {
+        str(value)
+        for value in existing
+        if isinstance(value, str) and value
+    } if isinstance(existing, list) else set()
+    refreshed_hashes = details.get("deterministic_refreshed_artifact_hashes", {})
+    refreshed_hashes = dict(refreshed_hashes) if isinstance(refreshed_hashes, dict) else {}
+
+    run_root = path.parent
+    refreshed: list[str] = []
+    for artifact in artifacts:
+        relative = str(artifact or "")
+        if not relative:
+            continue
+        values.add(relative)
+        target = run_root / relative
+        if target.is_file() and relative in artifact_hashes:
+            refreshed_hashes[relative] = hash_file(target)
+            refreshed.append(relative)
+
+    details["refreshable_artifacts"] = sorted(values)
+    if refreshed:
+        details["deterministic_refreshed_artifact_hashes"] = refreshed_hashes
+        details["deterministic_refresh_count"] = int(
+            details.get("deterministic_refresh_count", 0) or 0
+        ) + 1
+        details["deterministic_refreshed_at"] = utc_now()
+        details["deterministic_refreshed_artifacts"] = sorted(refreshed)
+    record["details"] = details
+    stages[stage] = record
+    # Keep the original artifact map/output_hash immutable: downstream semantic
+    # stages are bound to the accepted Reader checkpoint. Refreshed deterministic
+    # sidecars have their current hashes recorded separately and are still
+    # fail-closed by validate_artifacts().
+    save_manifest(path, manifest)
+    return manifest
+
+
 def validate_artifacts(manifest: dict[str, object], run_root: Path) -> list[str]:
     problems: list[str] = []
     stages = manifest.get("stages", {})
@@ -371,12 +430,21 @@ def validate_artifacts(manifest: dict[str, object], run_root: Path) -> list[str]
         if not isinstance(artifacts, dict):
             problems.append(f"{stage}: artifact map is invalid")
             continue
+        details = record.get("details", {})
+        refreshed_hashes = (
+            details.get("deterministic_refreshed_artifact_hashes", {})
+            if isinstance(details, dict)
+            else {}
+        )
+        if not isinstance(refreshed_hashes, dict):
+            refreshed_hashes = {}
         for relative, expected in artifacts.items():
             artifact = run_root / str(relative)
             if not artifact.is_file():
                 problems.append(f"{stage}: missing artifact {relative}")
                 continue
-            if hash_file(artifact) != expected:
+            current_expected = str(refreshed_hashes.get(str(relative), expected))
+            if hash_file(artifact) != current_expected:
                 problems.append(f"{stage}: artifact drift detected for {relative}")
     return problems
 
