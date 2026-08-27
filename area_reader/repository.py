@@ -4,11 +4,13 @@ import fnmatch
 import json
 import os
 from pathlib import Path
+import subprocess
 import xml.etree.ElementTree as ET
 
 from area_reader.settings import (
     AREA_HINTS,
     EXCLUDED_DIRS,
+    GENERATED_DIRS,
     INCLUDED_FILENAMES,
     INCLUDED_SUFFIXES,
     MAX_FILE_BYTES,
@@ -135,6 +137,39 @@ def read_csproj_facts(path):
     ]
     return facts
 
+def is_generated_relative_path(relative_path):
+    parts = tuple(part.casefold() for part in Path(str(relative_path).replace("\\", "/")).parts)
+    generated = {name.casefold() for name in GENERATED_DIRS}
+    return any(part in generated for part in parts)
+
+def source_package_manifest_paths(repo, file_paths, runner=subprocess.run):
+    candidates = sorted(
+        path
+        for path in file_paths
+        if path.endswith("package.json") and not is_generated_relative_path(path)
+    )
+    if not candidates:
+        return set()
+
+    try:
+        completed = runner(
+            ["git", "ls-files", "--cached", "--others", "--exclude-standard", "--", *candidates],
+            cwd=repo,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    except (OSError, TypeError):
+        return set(candidates)
+
+    if int(getattr(completed, "returncode", 1)) != 0:
+        return set(candidates)
+    return {
+        line.strip().replace("\\", "/")
+        for line in str(getattr(completed, "stdout", "") or "").splitlines()
+        if line.strip()
+    }
+
 def package_root(package_json_path):
     parent = Path(package_json_path).parent.as_posix()
     return "." if parent == "." else parent
@@ -188,7 +223,8 @@ def detect_repo_facts(repo, files, areas, routing):
             )
 
     package_roots = []
-    for relative_path in sorted(path for path in file_paths if path.endswith("package.json")):
+    source_package_manifests = source_package_manifest_paths(repo, file_paths)
+    for relative_path in sorted(source_package_manifests):
         root = package_root(relative_path)
         package_json = read_json_object(repo / relative_path)
         scripts = package_json.get("scripts", {})
