@@ -304,30 +304,46 @@ def prepare_reader_invalid_downgrade_fallback(
     first_reader_text: str = "",
 ) -> tuple[execution.ExecutionReport, str, str] | None:
     first_rejection = _boundary_rejection_reason(first_error)
-    second_rejection = _boundary_rejection_reason(second_error)
-    if not first_rejection or not second_rejection:
+    if not first_rejection:
         return None
 
+    try:
+        reader_text = input_path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+    second_boundary_rejection = _boundary_rejection_reason(second_error)
     issue_text = workflow_stages.read_text(current / "issue.md")
     explicit = execution.explicit_classification(issue_text)
     if (
         explicit is not None
         and explicit.classification == execution.AUTOMATABLE
-        and not explicit.completion_evidence_present
     ):
+        try:
+            correction_evidence = validate_reader_external_boundary(reader_text)
+        except ExternalBoundaryEvidenceError:
+            correction_evidence = ()
+        if correction_evidence:
+            # A malformed surrounding Reader contract is not permission to
+            # discard affirmative external-boundary evidence that itself passed
+            # the deterministic validator.
+            return None
+        second_rejection = (
+            second_boundary_rejection
+            or role_runtime_diagnostics.runtime_excerpt(str(second_error))
+        )
         report = execution.ExecutionReport(
             classification=execution.AUTOMATABLE,
             reason=(
-                "Operator automatable declaration retained after Reader downgrade evidence "
-                "failed deterministic external-boundary validation on the initial and bounded correction attempts."
+                "Operator automatable declaration retained after the Reader's rejected downgrade "
+                "and bounded correction established no valid affirmative external-boundary evidence."
             ),
             source=OPERATOR_FALLBACK_SOURCE,
         )
     else:
-        try:
-            reader_text = input_path.read_text(encoding="utf-8")
-        except OSError:
+        if not second_boundary_rejection:
             return None
+        second_rejection = second_boundary_rejection
         if not (
             explicit is None
             and _reader_downgrade_is_repository_only(first_reader_text)
@@ -342,11 +358,6 @@ def prepare_reader_invalid_downgrade_fallback(
             ),
             source=DETERMINISTIC_FALLBACK_SOURCE,
         )
-
-    try:
-        reader_text = input_path.read_text(encoding="utf-8")
-    except OSError:
-        return None
     rewritten = _rewrite_reader_classification_as_automatable(reader_text, report)
     input_path.write_text(rewritten, encoding="utf-8")
     return report, first_rejection, second_rejection
