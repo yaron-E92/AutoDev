@@ -250,6 +250,22 @@ def _repository_only_rejection(reason: str) -> bool:
     )
 
 
+def _reader_downgrade_is_repository_only(reader_text: str) -> bool:
+    raw = _structured_block(reader_text)
+    if raw is None:
+        return False
+    classification = str(raw.get("classification", "")).strip().casefold()
+    if classification not in {execution.MIXED, execution.MANUAL_EXTERNAL}:
+        return False
+    try:
+        manual = _string_list(raw.get("manual_criteria"), "manual_criteria")
+        actions = _string_list(raw.get("human_actions"), "human_actions")
+    except ExternalBoundaryEvidenceError:
+        return False
+    claimed = (*manual, *actions)
+    return bool(claimed) and all(_repository_only_claim(value) for value in claimed)
+
+
 def _rewrite_reader_classification_as_automatable(
     reader_text: str,
     report: execution.ExecutionReport,
@@ -284,6 +300,8 @@ def prepare_reader_invalid_downgrade_fallback(
     input_path: Path,
     first_error: BaseException,
     second_error: BaseException,
+    *,
+    first_reader_text: str = "",
 ) -> tuple[execution.ExecutionReport, str, str] | None:
     first_rejection = _boundary_rejection_reason(first_error)
     second_rejection = _boundary_rejection_reason(second_error)
@@ -305,21 +323,25 @@ def prepare_reader_invalid_downgrade_fallback(
             ),
             source=OPERATOR_FALLBACK_SOURCE,
         )
-    elif (
-        explicit is None
-        and _repository_only_rejection(first_rejection)
-        and _repository_only_rejection(second_rejection)
-    ):
+    else:
+        try:
+            reader_text = input_path.read_text(encoding="utf-8")
+        except OSError:
+            return None
+        if not (
+            explicit is None
+            and _reader_downgrade_is_repository_only(first_reader_text)
+            and _reader_downgrade_is_repository_only(reader_text)
+        ):
+            return None
         report = execution.ExecutionReport(
             classification=execution.AUTOMATABLE,
             reason=(
-                "Reader downgrade attempts were rejected as ordinary repository/tool work; "
+                "Both rejected Reader downgrade attempts described only ordinary repository/tool work; "
                 "deterministic fallback keeps the issue automatable."
             ),
             source=DETERMINISTIC_FALLBACK_SOURCE,
         )
-    else:
-        return None
 
     try:
         reader_text = input_path.read_text(encoding="utf-8")
