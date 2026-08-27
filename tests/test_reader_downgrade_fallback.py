@@ -578,6 +578,33 @@ class ReaderDowngradeFallbackTests(unittest.TestCase):
             boundary.OPERATOR_FALLBACK_SOURCE,
         )
 
+    def test_core_rejection_followed_by_valid_external_boundary_still_safety_downgrades(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo, current = self._setup_repo(temp_dir, explicit_automatable=True)
+            result, runtime = self._run_reader(
+                repo,
+                self._block(
+                    self._invalid_automatable_payload(manual_criteria=True)
+                ),
+                self._block(self._genuine_payload(mismatch=False)),
+            )
+            state = workflow_stages.read_state(current)
+            boundary_file_exists = (current / boundary.EXTERNAL_BOUNDARY_FILE).exists()
+            fallback_file_exists = (current / boundary.FALLBACK_FILE).exists()
+
+        self.assertEqual(result["state"], "ACCEPTED")
+        self.assertEqual(runtime.calls, ["work", "correction"])
+        self.assertEqual(
+            state["ExecutionClassification"],
+            execution.MANUAL_EXTERNAL,
+        )
+        self.assertEqual(
+            state["ExecutionClassificationSource"],
+            "reader-safety-downgrade",
+        )
+        self.assertTrue(boundary_file_exists)
+        self.assertFalse(fallback_file_exists)
+
     def test_valid_external_boundary_correction_still_fails_closed_as_manual(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo, current = self._setup_repo(temp_dir, explicit_automatable=True)
