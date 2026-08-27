@@ -88,6 +88,14 @@ INCLUDED_FILENAMES = {
     "Program.cs",
 }
 
+GENERATED_DIRS = {
+    ".next",
+    ".nuxt",
+    ".svelte-kit",
+    ".turbo",
+    "out",
+}
+
 EXCLUDED_DIRS = {
     ".git",
     ".vs",
@@ -104,6 +112,7 @@ EXCLUDED_DIRS = {
     "dist",
     "build",
     "coverage",
+    *GENERATED_DIRS,
 }
 
 PRIORITY_PATTERNS = (
