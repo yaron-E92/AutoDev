@@ -176,6 +176,9 @@ def _execute_stage_impl(
             "MAX_REPAIR_ATTEMPTS",
             DEFAULT_MAX_REPAIR_ATTEMPTS,
         )
+        previous_fingerprint = str(
+            state.get(repair_lineage.LOCAL_FAILURE_FINGERPRINT_KEY, "") or ""
+        )
         passed = run_local_check(repo, current, state, autodev_root, runner=runner)
         if passed:
             return 0, stage_payload(
@@ -189,6 +192,8 @@ def _execute_stage_impl(
         state = read_state(current)
         effective_attempt = repair_lineage.current_local_repair_attempt(state)
         fingerprint = str(state.get(repair_lineage.LOCAL_FAILURE_FINGERPRINT_KEY, "") or "")
+        if previous_fingerprint and previous_fingerprint == fingerprint:
+            effective_attempt = max(effective_attempt, attempt)
         if effective_attempt >= max_attempts:
             return 0, stage_payload(
                 repo,
