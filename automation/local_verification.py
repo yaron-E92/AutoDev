@@ -310,8 +310,30 @@ def run_recommended_verification(
     *,
     runner: Callable[..., object] = subprocess.run,
     which: Callable[[str], str | None] = shutil.which,
+    refresh_stale: bool = True,
 ) -> LocalVerificationResult:
     repo = repo.expanduser().resolve()
+    refresh_note = ""
+    if refresh_stale:
+        from automation import verification_discovery
+
+        try:
+            refresh_reason = verification_discovery.refresh_stale_verification_discovery(
+                repo,
+                current,
+            )
+        except (OSError, ValueError) as exc:
+            raise WorkflowStageError(
+                f"could not refresh stale deterministic verification discovery: {exc}",
+                classification=FAILURE_SETUP,
+            ) from exc
+        if refresh_reason:
+            refresh_note = (
+                "Refreshed deterministic verification discovery before local verification: "
+                + refresh_reason
+                + "\n"
+            )
+
     groups_raw = read_json(current / "verification-command-groups.json")
     recommendations = read_json(current / "recommended-command-groups.json")
     if not isinstance(groups_raw, list):
@@ -341,7 +363,7 @@ def run_recommended_verification(
         for value in recommendations["recommended_command_groups"]
         if isinstance(value, str) and value
     ]
-    output: list[str] = []
+    output: list[str] = [refresh_note] if refresh_note else []
     ran = 0
     for name in requested:
         group = groups.get(name)
