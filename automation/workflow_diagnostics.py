@@ -126,11 +126,13 @@ def record_stage_failure(
         if preserve_prior
         else _stage_input_fingerprint(repo, stage)
     )
+    fingerprint_material = (
+        f"{stage}|{classification}|{reason}|{input_fingerprint}"
+    )
+    if preserve_prior:
+        fingerprint_material += f"|requested_issue={requested_issue}"
     fingerprint = hashlib.sha256(
-        (
-            f"{stage}|{classification}|{reason}|{input_fingerprint}|"
-            f"requested_issue={requested_issue if preserve_prior else 0}"
-        ).encode("utf-8", errors="replace")
+        fingerprint_material.encode("utf-8", errors="replace")
     ).hexdigest()
     current = repo / CURRENT_DIR
     if current.is_dir() and not preserve_prior:
