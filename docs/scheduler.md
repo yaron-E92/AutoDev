@@ -278,7 +278,7 @@ This uses the same registration, local lock, distributed claim, worker, queue se
 autodev scheduler uninstall
 ```
 
-Uninstall removes only the native registration and AutoDev scheduler metadata for that repository, including its scheduler-health and notification-policy files. Cron removal is bounded to the AutoDev-managed marker block and preserves unrelated user cron entries.
+Uninstall removes only the native registration and scheduler-specific health metadata for that repository. The shared notification policy and event history are preserved because they also govern manual `issue-to-pr` / `resume` outcomes. Cron removal is bounded to the AutoDev-managed marker block and preserves unrelated user cron entries.
 
 The dedicated worker is intentionally left in user-local state rather than being recursively deleted during uninstall. This avoids destroying unexpected or diagnostically useful local state; it can be inspected and removed manually once no durable run or user work is needed.
 
