@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from automation import opencode_adapter_roles
+from automation import execution_classification_boundary, opencode_adapter_roles
 
 from automation import opencode_adapter_protocol
 
@@ -231,6 +231,8 @@ def run_role(
     )
 
     output = _role_output_path(repo, role)
+    first_reader_text = ""
+    first_diagnostic = ""
     last_diagnostic = ""
     try:
         _accept_role(
@@ -242,7 +244,7 @@ def run_role(
         )
     except opencode_adapter_contract.OpenCodeAdapterError as first_error:
         reason = f"role {role} output was rejected: {first_error}"
-        last_diagnostic = _record_attempt(
+        first_diagnostic = _record_attempt(
             repo,
             role,
             initial,
@@ -252,6 +254,12 @@ def run_role(
             classification=role_runtime_diagnostics.FAILURE_ROLE_PROTOCOL,
             reason=reason,
         )
+        last_diagnostic = first_diagnostic
+        if role == "reader" and output is not None:
+            try:
+                first_reader_text = output.read_text(encoding="utf-8")
+            except OSError:
+                first_reader_text = ""
         correction = repo / workflow_stages.CURRENT_DIR / f"contract-correction-{role}.md"
         if not correction.is_file():
             raise RoleCoordinatorError(
@@ -270,6 +278,7 @@ def run_role(
             runner=runner,
             which=which,
         )
+        deterministic_fallback_applied = False
         try:
             _accept_role(
                 repo,
@@ -290,18 +299,84 @@ def run_role(
                 classification=role_runtime_diagnostics.FAILURE_ROLE_PROTOCOL_EXHAUSTED,
                 reason=reason,
             )
-            raise RoleCoordinatorError(
-                f"{reason}; diagnostic: {last_diagnostic}",
-                classification=role_runtime_diagnostics.FAILURE_ROLE_PROTOCOL_EXHAUSTED,
-                diagnostic_path=last_diagnostic,
-            ) from second_error
-        last_diagnostic = _record_attempt(
-            repo,
-            role,
-            correction_result,
-            output,
-            accepted=True,
-        )
+
+            fallback = None
+            if role == "reader" and output is not None:
+                try:
+                    fallback = (
+                        execution_classification_boundary.prepare_reader_invalid_downgrade_fallback(
+                            repo / workflow_stages.CURRENT_DIR,
+                            output,
+                            first_error,
+                            second_error,
+                            first_reader_text=first_reader_text,
+                        )
+                    )
+                except (
+                    execution_classification_boundary.ExternalBoundaryEvidenceError,
+                    OSError,
+                    ValueError,
+                ):
+                    fallback = None
+
+            if fallback is None:
+                raise RoleCoordinatorError(
+                    f"{reason}; diagnostic: {last_diagnostic}",
+                    classification=role_runtime_diagnostics.FAILURE_ROLE_PROTOCOL_EXHAUSTED,
+                    diagnostic_path=last_diagnostic,
+                ) from second_error
+
+            fallback_report, first_rejection, second_rejection = fallback
+            try:
+                _accept_role(
+                    repo,
+                    role,
+                    output,
+                    snapshots,
+                    runtime_name=runtime.name,
+                )
+            except opencode_adapter_contract.OpenCodeAdapterError as fallback_error:
+                fallback_reason = (
+                    "reader deterministic downgrade fallback could not be accepted: "
+                    f"{fallback_error}"
+                )
+                raise RoleCoordinatorError(
+                    f"{fallback_reason}; diagnostic: {last_diagnostic}",
+                    classification=role_runtime_diagnostics.FAILURE_ROLE_PROTOCOL_EXHAUSTED,
+                    diagnostic_path=last_diagnostic,
+                ) from fallback_error
+
+            fallback_path = (
+                execution_classification_boundary.finalize_reader_invalid_downgrade_fallback(
+                    repo / workflow_stages.CURRENT_DIR,
+                    fallback_report,
+                    first_rejection=first_rejection,
+                    second_rejection=second_rejection,
+                    first_attempt=first_diagnostic,
+                    correction_attempt=last_diagnostic,
+                )
+            )
+            deterministic_fallback_applied = True
+            print(
+                json.dumps(
+                    {
+                        "event": "reader-execution-classification-fallback",
+                        "classification": fallback_report.classification,
+                        "source": fallback_report.source,
+                        "artifact": str(fallback_path),
+                    },
+                    sort_keys=True,
+                ),
+                flush=True,
+            )
+        if not deterministic_fallback_applied:
+            last_diagnostic = _record_attempt(
+                repo,
+                role,
+                correction_result,
+                output,
+                accepted=True,
+            )
     else:
         last_diagnostic = _record_attempt(
             repo,

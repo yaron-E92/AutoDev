@@ -6,12 +6,16 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from automation import execution_classification as execution
-from automation import opencode_adapter_handoff, opencode_adapter_roles, workflow_stages
+from automation import opencode_adapter_handoff, opencode_adapter_roles, role_runtime_diagnostics, workflow_stages
 from automation.opencode_adapter_contract import OpenCodeAdapterError
 
 
 EXTERNAL_BOUNDARY_FIELD = "external_boundaries"
 EXTERNAL_BOUNDARY_FILE = "execution-external-boundaries.json"
+FALLBACK_FILE = "execution-classification-fallback.json"
+OPERATOR_FALLBACK_SOURCE = "operator-fallback-after-invalid-reader-downgrade"
+DETERMINISTIC_FALLBACK_SOURCE = "deterministic-fallback-after-invalid-reader-downgrade"
+_BOUNDARY_REJECTION_PREFIX = "reader execution-classification external-boundary contract rejected:"
 BOUNDARY_KINDS = {
     "unavailable-external-resource",
     "human-legal-provider-approval",
@@ -216,6 +220,204 @@ def validate_reader_external_boundary(reader_text: str) -> tuple[ExternalBoundar
         )
 
     return evidence
+
+
+def _boundary_rejection_reason(error: BaseException) -> str:
+    current: BaseException | None = error
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        text = str(current)
+        lowered = text.casefold()
+        prefix = _BOUNDARY_REJECTION_PREFIX.casefold()
+        index = lowered.find(prefix)
+        if index >= 0:
+            detail = text[index + len(_BOUNDARY_REJECTION_PREFIX):].strip()
+            return role_runtime_diagnostics.runtime_excerpt(detail)
+        current = current.__cause__
+    return ""
+
+
+def _repository_only_rejection(reason: str) -> bool:
+    lowered = (reason or "").casefold()
+    return any(
+        marker in lowered
+        for marker in (
+            "semantically contradictory",
+            "ordinary repository/source/build/test/migration work",
+            "cannot relabel missing code, migrations, tests, configuration, or supported build/tool work",
+        )
+    )
+
+
+def _reader_downgrade_is_repository_only(reader_text: str) -> bool:
+    raw = _structured_block(reader_text)
+    if raw is None:
+        return False
+    classification = str(raw.get("classification", "")).strip().casefold()
+    if classification not in {execution.MIXED, execution.MANUAL_EXTERNAL}:
+        return False
+    try:
+        manual = _string_list(raw.get("manual_criteria"), "manual_criteria")
+        actions = _string_list(raw.get("human_actions"), "human_actions")
+    except ExternalBoundaryEvidenceError:
+        return False
+    claimed = (*manual, *actions)
+    return bool(claimed) and all(_repository_only_claim(value) for value in claimed)
+
+
+def _rewrite_reader_classification_as_automatable(
+    reader_text: str,
+    report: execution.ExecutionReport,
+) -> str:
+    payload = {
+        "classification": execution.AUTOMATABLE,
+        "reason": report.reason,
+        "autonomous_criteria": list(report.autonomous_criteria),
+        "manual_criteria": [],
+        "human_actions": [],
+        "resume_evidence": [],
+        "manual_prerequisite_blocks_implementation": False,
+        "autonomous_subset_independent": False,
+        EXTERNAL_BOUNDARY_FIELD: [],
+    }
+    replacement = (
+        execution.CLASSIFICATION_BLOCK_START
+        + "\n"
+        + json.dumps(payload, indent=2, sort_keys=True)
+        + "\n"
+        + execution.CLASSIFICATION_BLOCK_END
+    )
+    if _BLOCK.search(reader_text):
+        return _BLOCK.sub(lambda _match: replacement, reader_text, count=1)
+    return reader_text.rstrip() + "\n\n" + replacement + "\n"
+
+
+def prepare_reader_invalid_downgrade_fallback(
+    current: Path,
+    input_path: Path,
+    first_error: BaseException,
+    second_error: BaseException,
+    *,
+    first_reader_text: str = "",
+) -> tuple[execution.ExecutionReport, str, str] | None:
+    first_rejection = _boundary_rejection_reason(first_error)
+    if not first_rejection:
+        return None
+
+    try:
+        reader_text = input_path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+    second_boundary_rejection = _boundary_rejection_reason(second_error)
+    issue_text = workflow_stages.read_text(current / "issue.md")
+    explicit = execution.explicit_classification(issue_text)
+    if (
+        explicit is not None
+        and explicit.classification == execution.AUTOMATABLE
+    ):
+        try:
+            correction_evidence = validate_reader_external_boundary(reader_text)
+        except ExternalBoundaryEvidenceError:
+            correction_evidence = ()
+        if correction_evidence:
+            # A malformed surrounding Reader contract is not permission to
+            # discard affirmative external-boundary evidence that itself passed
+            # the deterministic validator.
+            return None
+        second_rejection = (
+            second_boundary_rejection
+            or role_runtime_diagnostics.runtime_excerpt(str(second_error))
+        )
+        report = execution.ExecutionReport(
+            classification=execution.AUTOMATABLE,
+            reason=(
+                "Operator automatable declaration retained after the Reader's rejected downgrade "
+                "and bounded correction established no valid affirmative external-boundary evidence."
+            ),
+            source=OPERATOR_FALLBACK_SOURCE,
+        )
+    else:
+        if not second_boundary_rejection:
+            return None
+        second_rejection = second_boundary_rejection
+        if not (
+            explicit is None
+            and _reader_downgrade_is_repository_only(first_reader_text)
+            and _reader_downgrade_is_repository_only(reader_text)
+        ):
+            return None
+        report = execution.ExecutionReport(
+            classification=execution.AUTOMATABLE,
+            reason=(
+                "Both rejected Reader downgrade attempts described only ordinary repository/tool work; "
+                "deterministic fallback keeps the issue automatable."
+            ),
+            source=DETERMINISTIC_FALLBACK_SOURCE,
+        )
+    rewritten = _rewrite_reader_classification_as_automatable(reader_text, report)
+    input_path.write_text(rewritten, encoding="utf-8")
+    return report, first_rejection, second_rejection
+
+
+def finalize_reader_invalid_downgrade_fallback(
+    current: Path,
+    report: execution.ExecutionReport,
+    *,
+    first_rejection: str,
+    second_rejection: str,
+    first_attempt: str,
+    correction_attempt: str,
+) -> Path:
+    state = workflow_stages.read_state(current)
+    execution.apply_state_fields(state, report)
+    state["ExecutionClassificationFallback"] = True
+    state["ExecutionClassificationFallbackReason"] = report.reason
+    state["ExecutionClassificationFallbackFile"] = (
+        f".autodev-run/current/{FALLBACK_FILE}"
+    )
+    workflow_stages.write_state(current, state)
+
+    execution.persist_artifacts(current, report)
+    (current / execution.MANUAL_ACTION_PLAN_FILE).unlink(missing_ok=True)
+    _persist_external_boundary_evidence(current, ())
+
+    diagnostics = {
+        "version": 1,
+        "classification": report.classification,
+        "source": report.source,
+        "reason": report.reason,
+        "first_rejection": role_runtime_diagnostics.runtime_excerpt(first_rejection),
+        "correction_rejection": role_runtime_diagnostics.runtime_excerpt(second_rejection),
+        "first_attempt": first_attempt,
+        "correction_attempt": correction_attempt,
+        "protocol_correction_attempts": 1,
+    }
+    path = current / FALLBACK_FILE
+    fallback_temp = path.with_suffix(path.suffix + ".tmp")
+    fallback_temp.write_text(
+        json.dumps(diagnostics, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    fallback_temp.replace(path)
+
+    try:
+        raw = json.loads(
+            (current / workflow_stages.DIAGNOSTICS_FILE).read_text(encoding="utf-8")
+        )
+    except (OSError, json.JSONDecodeError):
+        raw = {}
+    run_diagnostics = raw if isinstance(raw, dict) else {}
+    run_diagnostics["execution_classification_fallback"] = diagnostics
+    temporary = (current / workflow_stages.DIAGNOSTICS_FILE).with_suffix(".json.tmp")
+    temporary.write_text(
+        json.dumps(run_diagnostics, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(current / workflow_stages.DIAGNOSTICS_FILE)
+    (current / role_runtime_diagnostics.LAST_FAILURE_FILE).unlink(missing_ok=True)
+    return path
 
 
 def _persist_external_boundary_evidence(
