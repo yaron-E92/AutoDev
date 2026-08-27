@@ -36,6 +36,39 @@ class WorkflowStageTests(unittest.TestCase):
             self.assertEqual(checked, ["git", "gh"])
             self.assertNotIn("pwsh", checked)
 
+    def test_preflight_derives_repository_identity_without_owner_repo_environment(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            (repo / ".git").mkdir()
+            calls = []
+
+            def runner(command, **kwargs):
+                calls.append((list(command), kwargs.get("cwd")))
+                if list(command) == ["git", "remote", "get-url", "--all", "origin"]:
+                    return SimpleNamespace(
+                        returncode=0,
+                        stdout="git@github.com:yaron-E92/SecondBrain.git\n",
+                        stderr="",
+                    )
+                raise AssertionError(f"unexpected command: {command}")
+
+            with patch.dict(os.environ, {}, clear=True):
+                code, payload = workflow_stages.execute_stage(
+                    "preflight",
+                    repo,
+                    arguments="102",
+                    runner=runner,
+                    which=lambda name: f"/tools/{name}",
+                )
+
+            self.assertEqual(code, 0)
+            self.assertEqual(payload["state"], "CONTINUE")
+            self.assertEqual(
+                calls,
+                [(["git", "remote", "get-url", "--all", "origin"], repo)],
+            )
+            self.assertFalse((repo / ".autodev-run").exists())
+
     def test_preflight_fails_before_mutation_when_tool_is_missing(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
