@@ -13,6 +13,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
+from automation import operation_attribution
 from automation.semantic_contract import SemanticVerifierError
 from automation import repair_lineage
 from automation.semantic_invocation import prepare_semantic_repair_prompt
@@ -78,7 +79,14 @@ def execute_stage(
 ) -> tuple[int, dict[str, object]]:
     repo = repo.expanduser().resolve()
     started = time.monotonic()
-    invocation_recorded = _record_stage_invocation(repo, name)
+    requested_issue = issue_number_from_arguments(arguments)
+    preserve_prior = (
+        name in {"preflight", "prepare"}
+        and operation_attribution.is_preserved_prior_run(repo, requested_issue)
+    )
+    invocation_recorded = (
+        False if preserve_prior else _record_stage_invocation(repo, name)
+    )
     try:
         repeated = _repeat_failure_payload(repo, name)
         if repeated is not None:
@@ -96,9 +104,18 @@ def execute_stage(
         payload["stage_elapsed_ms"] = int((time.monotonic() - started) * 1000)
         return code, payload
     finally:
-        if not invocation_recorded:
-            _record_stage_invocation(repo, name)
-        _record_stage_timing(repo, name, int((time.monotonic() - started) * 1000))
+        elapsed_ms = int((time.monotonic() - started) * 1000)
+        if preserve_prior:
+            # A successful prepare may have replaced current with the requested
+            # issue. Record timing only in that new run; never mutate the prior
+            # run merely because a different issue was requested.
+            if operation_attribution.durable_issue_number(repo) == requested_issue:
+                _record_stage_invocation(repo, name)
+                _record_stage_timing(repo, name, elapsed_ms)
+        else:
+            if not invocation_recorded:
+                _record_stage_invocation(repo, name)
+            _record_stage_timing(repo, name, elapsed_ms)
 
 def _execute_stage_impl(
     name: str,
