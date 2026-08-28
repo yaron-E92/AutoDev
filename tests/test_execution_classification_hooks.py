@@ -124,7 +124,7 @@ class ExecutionClassificationHookTests(unittest.TestCase):
             self.assertTrue(refreshed.completion_evidence_present)
             self.assertFalse(refreshed.attention_required)
             self.assertEqual(refreshed.classification, execution.PROBE)
-            self.assertEqual(refreshed.source, "operator-metadata-completed")
+            self.assertEqual(refreshed.source, "manual-evidence-completed")
             updated = workflow_stages.read_state(current)
             self.assertEqual(updated["Status"], "ManualEvidenceAccepted")
             self.assertEqual(updated["QueueState"], "running")
