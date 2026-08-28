@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 
+from automation import external_error_sanitizer
 from automation.model_output_sanitizer import sanitize_model_output
 
 
@@ -11,32 +11,21 @@ ROLE_ATTEMPT_DIR = "role-attempts"
 LAST_FAILURE_FILE = "opencode-last-failure.json"
 DIAGNOSTICS_FILE = "run-diagnostics.json"
 MAX_RUNTIME_EXCERPT_CHARS = 2000
+MAX_RUNTIME_EXCERPT_LINES = 12
 FAILURE_ROLE_PROTOCOL = "role-protocol-failure"
 FAILURE_ROLE_PROTOCOL_EXHAUSTED = "role-protocol-exhausted"
 
-_SECRET_PATTERNS = (
-    re.compile(r"(?i)\b(Bearer)\s+[A-Za-z0-9._~+/=-]+"),
-    re.compile(
-        r"(?i)\b(authorization|api[_-]?key|token|secret|password|cookie|proxy[_-]?authorization)"
-        r"\b\s*[:=]\s*([^\s,;]+)"
-    ),
-    re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b"),
-)
-
 
 def redact(value: object) -> str:
-    text = str(value or "")
-    text = _SECRET_PATTERNS[0].sub(r"\1 <redacted>", text)
-    text = _SECRET_PATTERNS[1].sub(r"\1=<redacted>", text)
-    text = _SECRET_PATTERNS[2].sub("<redacted>", text)
-    return text
+    return external_error_sanitizer.sanitize_external_text(
+        value,
+        max_chars=MAX_RUNTIME_EXCERPT_CHARS,
+        max_lines=MAX_RUNTIME_EXCERPT_LINES,
+    )
 
 
 def runtime_excerpt(value: object) -> str:
-    text = redact(value).strip()
-    if len(text) <= MAX_RUNTIME_EXCERPT_CHARS:
-        return text
-    return text[-MAX_RUNTIME_EXCERPT_CHARS:]
+    return redact(value)
 
 
 def inspect_artifact(path: Path | None, *, validation_error: str = "", accepted: bool = False) -> dict[str, object]:
@@ -129,6 +118,7 @@ def record_attempt(
     failure_reason: str = "",
     termination: str = "completed",
     model: str = "",
+    external_error: external_error_sanitizer.SafeExternalError | None = None,
 ) -> str:
     repo = repo.expanduser().resolve()
     current = repo / ".autodev-run" / "current"
@@ -178,6 +168,8 @@ def record_attempt(
         "failure_classification": str(failure_classification or ""),
         "failure_reason": runtime_excerpt(failure_reason),
     }
+    if external_error is not None:
+        record["external_error"] = external_error.to_json()
 
     attempt_dir = current / ROLE_ATTEMPT_DIR
     attempt_dir.mkdir(parents=True, exist_ok=True)
@@ -216,6 +208,8 @@ def record_attempt(
             "stdout_excerpt": str(record.get("stdout_excerpt", "")),
             "stderr_excerpt": str(record.get("stderr_excerpt", "")),
         }
+        if external_error is not None:
+            failure["external_error"] = external_error.to_json()
         _write_json_atomic(last_failure_path, failure)
 
     return relative
