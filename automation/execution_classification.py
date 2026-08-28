@@ -7,11 +7,13 @@ from pathlib import Path
 
 
 AUTOMATABLE = "automatable"
+PROBE = "probe"
 MIXED = "mixed"
 MANUAL_EXTERNAL = "manual-external"
-CLASSIFICATIONS = {AUTOMATABLE, MIXED, MANUAL_EXTERNAL}
+DECLARED_CLASSIFICATIONS = {AUTOMATABLE, MIXED, MANUAL_EXTERNAL}
+CLASSIFICATIONS = {AUTOMATABLE, PROBE, MIXED, MANUAL_EXTERNAL}
 
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
 PROTOCOL_STATE_FIELD = "ExecutionClassificationProtocolVersion"
 CLASSIFICATION_FILE = "execution-classification.json"
 MANUAL_ACTION_PLAN_FILE = "manual-action-plan.md"
@@ -42,6 +44,54 @@ _SAFE_EVIDENCE_QUALIFIER = re.compile(
     re.IGNORECASE,
 )
 
+# Execution classification is a control-plane decision in protocol v2. These
+# heuristics intentionally require action + object semantics: merely mentioning
+# providers, certificates, authentication, credentials, deployment, external
+# APIs, signing, or infrastructure is not enough to make work manual.
+_REPOSITORY_WORK = re.compile(
+    r"\b(?:implement|fix|refactor|update|add|modify|create|generate|write|change|"
+    r"repair|migrate|test)\b.{0,180}\b(?:source(?:\s+code)?|code|tests?|"
+    r"migrations?|ci|workflows?|configuration|config|api|frontend|backend|"
+    r"clients?|types?|schemas?|repository|repo|build|lint|auth(?:entication|orization)?|"
+    r"return\s+path|generated\s+types?|docs?|documentation)\b",
+    re.IGNORECASE | re.DOTALL,
+)
+_EXTERNAL_PURCHASE = re.compile(
+    r"\b(?:purchase|buy|procure|order|subscribe\s+to)\b.{0,120}\b(?:certificate|"
+    r"license|subscription|service|account|hardware|device|resource)\b",
+    re.IGNORECASE | re.DOTALL,
+)
+_EXTERNAL_IDENTITY = re.compile(
+    r"\b(?:complete|perform|undergo)\b.{0,100}\b(?:identity|legal|organization|"
+    r"publisher)\b.{0,80}\b(?:verification|validation|kyc|approval)\b",
+    re.IGNORECASE | re.DOTALL,
+)
+_EXTERNAL_PHYSICAL = re.compile(
+    r"\b(?:physically|in\s+person|manual(?:ly)?)\b.{0,80}\b(?:enroll|insert|"
+    r"touch|press|attach|connect|register|provision)\b.{0,100}\b(?:yubikey|hsm|"
+    r"hardware|device|token|key)\b",
+    re.IGNORECASE | re.DOTALL,
+)
+_EXTERNAL_APPROVAL = re.compile(
+    r"\b(?:have|ask|require|get|obtain)\b.{0,100}\b(?:administrator|admin|provider|"
+    r"authority|legal|human|organization)\b.{0,80}\b(?:approve|approval|authorize|"
+    r"authorization|verify|verification)\b",
+    re.IGNORECASE | re.DOTALL,
+)
+_EXTERNAL_SECRET_CUSTODY = re.compile(
+    r"\b(?:operator|human|administrator|admin|custodian)\b.{0,100}\b(?:provide|"
+    r"hold|custody|store|enter|supply)\b.{0,80}\b(?:secret|private\s+key|"
+    r"credential|password|token)\b",
+    re.IGNORECASE | re.DOTALL,
+)
+_EXTERNAL_MANUAL_REQUIREMENTS = (
+    _EXTERNAL_PURCHASE,
+    _EXTERNAL_IDENTITY,
+    _EXTERNAL_PHYSICAL,
+    _EXTERNAL_APPROVAL,
+    _EXTERNAL_SECRET_CUSTODY,
+)
+
 
 class ExecutionClassificationError(ValueError):
     pass
@@ -62,7 +112,7 @@ class ExecutionReport:
 
     @property
     def attention_required(self) -> bool:
-        if self.classification == AUTOMATABLE:
+        if self.classification in {AUTOMATABLE, PROBE}:
             return False
         # The explicit evidence marker is an operator-owned signal that the
         # manual prerequisite is satisfied and a repository continuation exists.
@@ -147,9 +197,9 @@ def _report_from_mapping(
     if not isinstance(raw, dict):
         raise ExecutionClassificationError("execution classification must be a JSON object")
     classification = str(raw.get("classification", "")).strip().casefold()
-    if classification not in CLASSIFICATIONS:
+    if classification not in DECLARED_CLASSIFICATIONS:
         raise ExecutionClassificationError(
-            "execution classification must be automatable, mixed, or manual-external"
+            "declared execution classification must be automatable, mixed, or manual-external"
         )
     reason = str(raw.get("reason", "")).strip()
     if not reason:
@@ -284,6 +334,69 @@ def explicit_classification(issue_text: str) -> ExecutionReport | None:
     )
 
 
+def classify_issue_text(issue_text: str) -> ExecutionReport:
+    """Resolve execution control before Reader is invoked.
+
+    Explicit operator metadata is authoritative. Without it, a deliberately
+    narrow issue-text heuristic distinguishes obvious repository work, obvious
+    unsupported human/external actions, and ambiguity. Ambiguity is runnable
+    PROBE, never a protocol failure.
+    """
+    explicit = explicit_classification(issue_text)
+    if explicit is not None:
+        if explicit.completion_evidence_present:
+            return ExecutionReport(
+                classification=PROBE,
+                reason=(
+                    "Operator supplied manual-completion evidence; remaining work is "
+                    "re-entered as probe until deterministic/runtime evidence settles it."
+                ),
+                source="operator-metadata-completed",
+                completion_evidence_present=True,
+            )
+        return explicit
+
+    text = issue_text or ""
+    if any(pattern.search(text) for pattern in _EXTERNAL_MANUAL_REQUIREMENTS):
+        return ExecutionReport(
+            classification=MANUAL_EXTERNAL,
+            reason=(
+                "Issue wording explicitly requires a human/external action that is "
+                "outside ordinary repository/GitHub/tool execution."
+            ),
+            manual_criteria=(
+                "Complete the unsupported human/external requirement explicitly stated by the issue.",
+            ),
+            human_actions=(
+                "Complete that requirement through the authorized external or physical workflow.",
+            ),
+            resume_evidence=(
+                "Record only non-secret completion state or identifiers before resuming AutoDev.",
+            ),
+            manual_prerequisite_blocks_implementation=True,
+            source="issue-text-heuristic",
+        )
+
+    if _REPOSITORY_WORK.search(text):
+        return ExecutionReport(
+            classification=AUTOMATABLE,
+            reason=(
+                "Issue wording requests repository/GitHub/tool work and contains no "
+                "strong unsupported human/external action."
+            ),
+            source="issue-text-heuristic",
+        )
+
+    return ExecutionReport(
+        classification=PROBE,
+        reason=(
+            "Issue wording is ambiguous about execution boundaries; AutoDev will "
+            "proceed and require concrete deterministic/runtime evidence before attention."
+        ),
+        source="issue-text-heuristic",
+    )
+
+
 def parse_reader_classification(reader_text: str, issue_text: str) -> ExecutionReport:
     raw = _structured_block(reader_text)
     if raw is None:
@@ -305,39 +418,20 @@ def resolve_reader_classification(reader_text: str, issue_text: str) -> Executio
     if explicit.completion_evidence_present:
         return replace(reader, source="reader-after-manual-evidence")
 
-    # Otherwise operator metadata is authoritative, except that Reader may make
-    # execution more conservative when it detects an obvious semantic mismatch.
-    rank = {AUTOMATABLE: 0, MIXED: 1, MANUAL_EXTERNAL: 2}
-    if rank[reader.classification] > rank[explicit.classification]:
-        return replace(reader, source="reader-safety-downgrade")
+    # Protocol v2 keeps explicit operator metadata authoritative. Reader output
+    # is retained only for legacy/advisory parsing and cannot downgrade it.
     return replace(explicit, source="operator-metadata-confirmed")
 
 
 def reader_contract_instructions() -> str:
-    return f"""
+    return """
 
-AutoDev execution-classification contract (mandatory):
-Before proposing repository work, classify whether the issue can actually be completed by supported repository/GitHub/tool actions. Do not treat documentation about a human task as completion of that task. Identity verification, purchasing, certificate issuance, hardware/HSM enrollment, administrator/provider approval, and secret custody are human/external unless the supplied tool evidence proves a supported automated path.
+AutoDev execution-boundary advisory (optional):
+Execution classification is already resolved by deterministic preflight before Reader runs. Reader's required job is the factual repository handoff. Do not block or weaken that handoff in order to serialize classification data.
 
-At the END of reader-brief.md, include exactly this marker-delimited JSON object (the JSON may span lines):
-{CLASSIFICATION_BLOCK_START}
-{{
-  "classification": "automatable|mixed|manual-external",
-  "reason": "concise factual reason",
-  "autonomous_criteria": ["criteria AutoDev can satisfy"],
-  "manual_criteria": ["criteria requiring human/external action"],
-  "human_actions": ["concrete non-secret next actions"],
-  "resume_evidence": ["secret-free state/metadata that proves the prerequisite is complete"],
-  "manual_prerequisite_blocks_implementation": false,
-  "autonomous_subset_independent": false
-}}
-{CLASSIFICATION_BLOCK_END}
+If you notice a possible human/external prerequisite, describe it factually in prose. You MAY retain the legacy AUTODEV_EXECUTION_CLASSIFICATION_JSON block for compatibility, but it is advisory only: missing, malformed, incomplete, or contradictory classification JSON does not make the Reader artifact invalid and cannot override explicit operator metadata.
 
-Rules:
-- automatable: manual_criteria, human_actions, and resume_evidence must be empty; both booleans false.
-- mixed: list both autonomous and manual criteria. If code/config depends on an identity, credential, purchased resource, external identifier, or other unavailable prerequisite, set manual_prerequisite_blocks_implementation=true and autonomous_subset_independent=false. If repository-only work is independently useful before manual completion, set autonomous_subset_independent=true, but do not silently implement that subset on the parent: recommend a child/follow-up issue while the parent remains attention-required.
-- manual-external: list the substantive manual criteria/actions/evidence; do not invent placeholder production identities or a documentation-only patch.
-- Resume evidence must never contain or request secret values, passwords, tokens, credentials, private keys, or certificate key material. State/identifier presence and provider/GitHub metadata are acceptable.
+Do not include secret values, passwords, tokens, credentials, or private-key material in advisory observations.
 """
 
 
@@ -370,9 +464,11 @@ def persist_artifacts(
         encoding="utf-8",
     )
     plan_path: Path | None = None
-    if report.classification != AUTOMATABLE:
+    if report.attention_required:
         plan_path = current / MANUAL_ACTION_PLAN_FILE
         plan_path.write_text(render_manual_action_plan(report), encoding="utf-8")
+    else:
+        (current / MANUAL_ACTION_PLAN_FILE).unlink(missing_ok=True)
     return classification_path, plan_path
 
 
@@ -502,7 +598,7 @@ def scoped_issue_text(
     issue_text: str,
     report: ExecutionReport | None,
 ) -> str:
-    if report is None or report.classification == AUTOMATABLE:
+    if report is None or report.classification in {AUTOMATABLE, PROBE}:
         return issue_text
     autonomous = (
         "\n".join(f"- {item}" for item in report.autonomous_criteria) or "- None"
