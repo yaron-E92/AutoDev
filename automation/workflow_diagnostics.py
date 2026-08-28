@@ -13,7 +13,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
-from automation import operation_attribution
+from automation import external_error_sanitizer, operation_attribution
 from automation.semantic_contract import SemanticVerifierError
 from automation.semantic_invocation import prepare_semantic_repair_prompt
 from automation.semantic_prompts import extract_acceptance_criteria
@@ -65,7 +65,13 @@ def stage_payload(
         "completed_stage": str(state.get("Status", "")),
         "failed_stage": stage if outcome in {"FAILED", "BLOCKED", "REPAIR"} else "",
         "stage": stage,
-        "reason": concise(reason),
+        "reason": concise(
+            external_error_sanitizer.sanitize_external_text(
+                reason,
+                max_chars=1600,
+                max_lines=12,
+            )
+        ),
         "failure_classification": failure_classification,
         "failure_fingerprint": failure_fingerprint,
         "repeated_failure": repeated_failure,
@@ -116,7 +122,13 @@ def record_stage_failure(
 ) -> dict[str, object]:
     repo = repo.expanduser().resolve()
     classification = _exception_classification(error)
-    reason = concise(str(error))
+    reason = concise(
+        external_error_sanitizer.sanitize_external_text(
+            str(error),
+            max_chars=1600,
+            max_lines=12,
+        )
+    )
     preserve_prior = operation_attribution.is_preserved_prior_run(
         repo,
         requested_issue,

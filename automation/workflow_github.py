@@ -13,6 +13,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
+from automation import external_error_sanitizer
 from automation.semantic_contract import SemanticVerifierError
 from automation.semantic_invocation import prepare_semantic_repair_prompt
 from automation.semantic_prompts import extract_acceptance_criteria
@@ -565,6 +566,11 @@ def mark_blocked(
     *,
     runner: Callable[..., object] = subprocess.run,
 ) -> None:
+    reason = external_error_sanitizer.sanitize_external_text(
+        reason,
+        max_chars=1600,
+        max_lines=12,
+    )
     issue_number = int(state.get("IssueNumber", 0) or 0)
     repo_full = str(state.get("RepoFullName", ""))
     repo = current.parents[1]

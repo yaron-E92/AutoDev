@@ -280,6 +280,14 @@ They do not contain API keys, Authorization headers, prompts, repository source,
 
 Privacy commands and model workflows apply policy for the explicit target repository when supplied by the caller. CLI integrations also support the configured target-repository environment/arguments used by AutoDev; otherwise the active working directory is used. Normal users should run `autodev privacy ...` from the target repository whose grants/policy they intend to inspect or change.
 
+## Provider failure diagnostics
+
+AutoDev does not persist raw provider/OpenCode response objects or raw response-header maps by default. External runtime failures are normalized into bounded, provider-neutral diagnostics before they cross terminal, run-artifact, manifest, report, status, or GitHub-comment boundaries.
+
+Sensitive header values, cookies, API keys, opaque turn-state values, bearer credentials, and token/signature-bearing URL query parameters are redacted. Retained error excerpts are bounded by both lines and characters and use an explicit truncation marker.
+
+There is currently no opt-in raw-provider-error archive. If such a diagnostic mode is added later, it must be explicitly enabled, stored with restrictive local permissions, excluded from shipment/source identity, and documented as a privacy-sensitive troubleshooting feature.
+
 ## Important limits
 
 Passing this gate is a technical AutoDev data-handling decision, not a legal-compliance certification. It does not claim GDPR, contractual, export-control, or other legal compliance.

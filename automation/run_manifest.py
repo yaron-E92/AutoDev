@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+
+from automation import external_error_sanitizer
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -642,5 +644,8 @@ def _stage_sort_key(stage: str) -> tuple[int, str]:
 
 
 def _safe_reason(value: str) -> str:
-    text = re.sub(r"(?i)(bearer|token|api[_-]?key|password)\s*[:=]\s*\S+", r"\1=<redacted>", value)
-    return text[:1000]
+    return external_error_sanitizer.sanitize_external_text(
+        value,
+        max_chars=1000,
+        max_lines=8,
+    )

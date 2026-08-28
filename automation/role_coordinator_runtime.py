@@ -11,6 +11,7 @@ import subprocess
 from pathlib import Path
 from typing import Callable, Mapping
 from automation import (
+    external_error_sanitizer,
     opencode_runtime,
     role_resume,
     role_runtime,
@@ -73,6 +74,7 @@ def _record_attempt(
     validation_error: str = "",
     classification: str = "",
     reason: str = "",
+    external_error: external_error_sanitizer.SafeExternalError | None = None,
 ) -> str:
     return role_runtime_diagnostics.record_attempt(
         repo,
@@ -90,6 +92,7 @@ def _record_attempt(
         failure_reason=reason,
         termination=result.termination,
         model=result.model,
+        external_error=external_error,
     )
 
 def _runtime_failure(
@@ -98,21 +101,37 @@ def _runtime_failure(
     result: role_runtime.RoleInvocationResult,
 ) -> None:
     if result.termination == "runtime-timeout":
-        reason = (
+        category = "runtime-timeout"
+        detail_source = ""
+        prefix = (
             f"role runtime {result.runtime} timed out while executing {role} "
             f"after {result.elapsed_ms} ms"
         )
     elif result.termination == "runtime-launch-failed":
-        detail = result.stderr.strip()[-1000:]
-        reason = f"could not launch role runtime {result.runtime} for {role}"
-        if detail:
-            reason += f": {detail}"
+        category = "runtime-launch-failed"
+        detail_source = result.stderr or result.stdout
+        prefix = f"could not launch role runtime {result.runtime} for {role}"
     else:
-        detail = (result.stderr.strip() or result.stdout.strip())[-2000:]
-        reason = (
+        category = "runtime-nonzero"
+        detail_source = result.stderr or result.stdout
+        prefix = (
             f"role runtime {result.runtime} exited with code {result.returncode} for {role}"
-            + (f": {detail}" if detail else "")
         )
+
+    safe_error = external_error_sanitizer.safe_external_error(
+        category=category,
+        message=detail_source,
+        role=role,
+        runtime=result.runtime,
+        phase=result.phase,
+        returncode=result.returncode,
+        retry_classification=workflow_stages.FAILURE_TRANSIENT,
+        termination=result.termination,
+    )
+    reason = prefix
+    if safe_error.message:
+        reason += f": {safe_error.message}"
+
     diagnostic = _record_attempt(
         repo,
         role,
@@ -121,6 +140,7 @@ def _runtime_failure(
         accepted=False,
         classification=workflow_stages.FAILURE_TRANSIENT,
         reason=reason,
+        external_error=safe_error,
     )
     raise RoleCoordinatorError(
         f"{reason}; diagnostic: {diagnostic}",
@@ -164,8 +184,20 @@ def _invoke(
             which=which,
         )
     except role_runtime.RoleRuntimeError as exc:
+        safe_error = external_error_sanitizer.safe_external_error(
+            category="runtime-exception",
+            message=str(exc),
+            role=role,
+            runtime=runtime.name,
+            phase=phase,
+            retry_classification=exc.classification,
+            termination="runtime-exception",
+        )
+        message = f"role runtime {runtime.name} failed while executing {role}"
+        if safe_error.message:
+            message += f": {safe_error.message}"
         raise RoleCoordinatorError(
-            str(exc),
+            message,
             classification=exc.classification,
         ) from exc
     if result.runtime != runtime.name or result.role != role or result.phase != phase:

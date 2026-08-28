@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 
-from automation import run_manifest, workflow_stages
+from automation import external_error_sanitizer, run_manifest, workflow_stages
 
 
 REPORT_NAME = "non-success-report.md"
@@ -13,22 +12,13 @@ OPERATION_REPORT_RELATIVE = f".autodev-run/last-operation/{REPORT_NAME}"
 NON_SUCCESS_STATES = {"FAILED", "BLOCKED", "WAITING", "REPAIR"}
 MAX_EVIDENCE_CHARS = 2400
 
-_SECRET_PATTERNS = (
-    re.compile(r"(?i)\b(Bearer)\s+[A-Za-z0-9._~+/=-]+"),
-    re.compile(
-        r"(?i)\b(authorization|api[_-]?key|token|secret|password|cookie|proxy[_-]?authorization)"
-        r"\b\s*[:=]\s*([^\s,;]+)"
-    ),
-    re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b"),
-)
-
 
 def redact(value: object) -> str:
-    text = str(value or "")
-    text = _SECRET_PATTERNS[0].sub(r"\1 <redacted>", text)
-    text = _SECRET_PATTERNS[1].sub(r"\1=<redacted>", text)
-    text = _SECRET_PATTERNS[2].sub("<redacted>", text)
-    return text
+    return external_error_sanitizer.sanitize_external_text(
+        value,
+        max_chars=MAX_EVIDENCE_CHARS,
+        max_lines=16,
+    )
 
 
 def update_report(repo: Path, payload: dict[str, object]) -> tuple[dict[str, object], str]:
@@ -441,6 +431,30 @@ def _authoritative_excerpt(current: Path, outcome: str, failed_stage: str) -> st
     else:
         candidates = [current / "opencode-last-failure.json", current / "local-check.log"]
     for path in candidates:
+        if path.name == "opencode-last-failure.json":
+            value = workflow_stages.read_json(path)
+            if isinstance(value, dict) and value:
+                # Preserve the decisive safe fields explicitly instead of
+                # relying on arbitrary JSON line position after truncation.
+                safe_keys = (
+                    "role",
+                    "runtime",
+                    "attempt_kind",
+                    "returncode",
+                    "termination",
+                    "failure_classification",
+                    "physical_role_attempt",
+                    "protocol_correction_attempts",
+                    "diagnostic_path",
+                    "artifact_state",
+                    "external_error",
+                )
+                safe = {
+                    key: value.get(key)
+                    for key in safe_keys
+                    if key in value
+                }
+                return redact(json.dumps(safe, sort_keys=False))
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
