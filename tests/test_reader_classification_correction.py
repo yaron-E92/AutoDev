@@ -46,13 +46,10 @@ class ReaderClassificationCorrectionTests(unittest.TestCase):
             "END_AUTODEV_EXECUTION_CLASSIFICATION_JSON\n"
         )
 
-    def test_reader_prepare_and_correction_reuse_canonical_classification_contract(self):
+    def test_reader_classification_advisory_is_optional_and_never_requires_correction(self):
         original_prepare = opencode_adapter_handoff._prepare_reader  # type: ignore[attr-defined]
         original_accept = opencode_adapter_roles._accept_role_once  # type: ignore[attr-defined]
         try:
-            # Install the hook around a deterministic base prompt. This specifically
-            # catches the stale by-value import that previously let prepare_role()
-            # bypass the execution-classification wrapper.
             opencode_adapter_handoff._prepare_reader = (  # type: ignore[attr-defined]
                 lambda _repo, _current, _issue_text: "base reader prompt\n"
             )
@@ -73,11 +70,11 @@ class ReaderClassificationCorrectionTests(unittest.TestCase):
                     prompt_path = opencode_adapter_roles.prepare_role("reader", repo, "6")
 
                 prompt = prompt_path.read_text(encoding="utf-8")
-                canonical = execution.reader_contract_instructions().strip()
+                advisory = execution.reader_contract_instructions().strip()
                 self.assertIn("base reader prompt", prompt)
-                self.assertIn(canonical, prompt)
-                self.assertIn(execution.CLASSIFICATION_BLOCK_START, prompt)
-                self.assertIn(execution.CLASSIFICATION_BLOCK_END, prompt)
+                self.assertIn(advisory, prompt)
+                self.assertIn("advisory", prompt.casefold())
+                self.assertIn("missing, malformed", prompt)
 
                 reader_result = current / "reader-brief.md"
                 reader_result.write_text(
@@ -85,42 +82,39 @@ class ReaderClassificationCorrectionTests(unittest.TestCase):
                     encoding="utf-8",
                 )
 
-                with self.assertRaises(OpenCodeAdapterError) as first_failure:
-                    opencode_adapter_roles.accept_role("reader", repo, reader_result)
-                self.assertIn("one correction is allowed", str(first_failure.exception))
-
-                correction = (current / "contract-correction-reader.md").read_text(
-                    encoding="utf-8"
+                outputs = opencode_adapter_roles.accept_role(
+                    "reader",
+                    repo,
+                    reader_result,
                 )
-                self.assertIn(canonical, correction)
-                self.assertIn(execution.CLASSIFICATION_BLOCK_START, correction)
-                self.assertIn(execution.CLASSIFICATION_BLOCK_END, correction)
-                self.assertIn(
-                    "reader execution-classification contract rejected",
-                    correction,
-                )
-
-                reader_result.write_text(
-                    "Substantive repository analysis.\n\n" + self._classification_block(),
-                    encoding="utf-8",
-                )
-                outputs = opencode_adapter_roles.accept_role("reader", repo, reader_result)
 
                 self.assertEqual(
                     {path.name for path in outputs},
                     {"reader-brief.md", "synthesized-handoff.md"},
                 )
-                self.assertTrue(all(path.is_file() for path in outputs))
-                state = workflow_stages.read_state(current)
-                self.assertEqual(state["ExecutionClassification"], execution.AUTOMATABLE)
-                self.assertEqual(state["ExecutionClassificationSource"], "reader")
-                persisted = json.loads(
-                    (current / execution.CLASSIFICATION_FILE).read_text(encoding="utf-8")
+                self.assertFalse(
+                    (current / "contract-correction-reader.md").exists()
                 )
-                self.assertEqual(persisted["classification"], execution.AUTOMATABLE)
+                state = workflow_stages.read_state(current)
+                self.assertEqual(state["ExecutionClassification"], execution.PROBE)
+                self.assertEqual(
+                    state["ExecutionClassificationSource"],
+                    "issue-text-heuristic",
+                )
+                diagnostics = json.loads(
+                    (current / workflow_stages.DIAGNOSTICS_FILE).read_text(
+                        encoding="utf-8"
+                    )
+                )
+                self.assertFalse(
+                    diagnostics["reader_execution_advisory"][
+                        "classification_block_present"
+                    ]
+                )
         finally:
             opencode_adapter_handoff._prepare_reader = original_prepare  # type: ignore[attr-defined]
             opencode_adapter_roles._accept_role_once = original_accept  # type: ignore[attr-defined]
+
 
     def test_non_reader_correction_does_not_receive_reader_classification_contract(self):
         with tempfile.TemporaryDirectory() as temp_dir:
