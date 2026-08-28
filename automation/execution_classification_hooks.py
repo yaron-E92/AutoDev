@@ -342,6 +342,39 @@ def _install_queue_evidence_reconciliation() -> None:
         queue_classification._update_derived_labels = _update_derived_labels  # type: ignore[attr-defined]
 
 
+def transition_runtime_external_boundary(
+    repo: Path,
+    evidence: execution_boundary.ExternalBoundaryEvidence,
+    *,
+    reason: str,
+    resume_evidence: str,
+    runner=subprocess.run,
+) -> dict[str, object]:
+    """Downgrade only from concrete deterministic runtime/capability evidence."""
+    resolved = Path(repo).expanduser().resolve()
+    current = resolved / workflow_stages.CURRENT_DIR
+    state = workflow_stages.read_state(current)
+    issue_text = workflow_stages.read_text(current / "issue.md") or str(
+        state.get("IssueText", "")
+    )
+    report = execution_boundary.validated_runtime_external_report(
+        evidence,
+        reason=reason,
+        resume_evidence=resume_evidence,
+        issue_text=issue_text,
+    )
+    execution_boundary._persist_external_boundary_evidence(  # type: ignore[attr-defined]
+        current,
+        (evidence,),
+    )
+    return _transition_attention(
+        resolved,
+        current,
+        report,
+        runner=runner,
+    )
+
+
 def _attention_payload(
     repo: Path,
     current: Path,
