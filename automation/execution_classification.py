@@ -53,7 +53,7 @@ _REPOSITORY_WORK = re.compile(
     r"repair|migrate|test)\b.{0,180}\b(?:source(?:\s+code)?|code|tests?|"
     r"migrations?|ci|workflows?|configuration|config|api|frontend|backend|"
     r"clients?|types?|schemas?|repository|repo|build|lint|auth(?:entication|orization)?|"
-    r"return\s+path|generated\s+types?|docs?|documentation)\b",
+    r"return\s+path|generated\s+types?|release|docs?|documentation)\b",
     re.IGNORECASE | re.DOTALL,
 )
 _EXTERNAL_PURCHASE = re.compile(
@@ -357,12 +357,24 @@ def classify_issue_text(issue_text: str) -> ExecutionReport:
         return explicit
 
     text = issue_text or ""
+    if manual_evidence_present(text):
+        return ExecutionReport(
+            classification=PROBE,
+            reason=(
+                "Operator supplied manual-completion evidence; remaining work is "
+                "re-entered as probe until deterministic/runtime evidence settles it."
+            ),
+            source="manual-evidence-completed",
+            completion_evidence_present=True,
+        )
+
     if any(pattern.search(text) for pattern in _EXTERNAL_MANUAL_REQUIREMENTS):
         return ExecutionReport(
             classification=MANUAL_EXTERNAL,
             reason=(
-                "Issue wording explicitly requires a human/external action that is "
-                "outside ordinary repository/GitHub/tool execution."
+                "Issue wording explicitly requires a human/external action, such as "
+                "identity validation, purchasing, physical enrollment, external approval, "
+                "or protected secret custody, outside ordinary repository/GitHub/tool execution."
             ),
             manual_criteria=(
                 "Complete the unsupported human/external requirement explicitly stated by the issue.",
