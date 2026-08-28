@@ -16,7 +16,14 @@ _ANSI_ESCAPE_RE = re.compile(
 _CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 _URL_RE = re.compile(r"https?://[^\s<>'\"]+", re.IGNORECASE)
 _HEADER_MAP_RE = re.compile(
-    r"(?is)\b(?:response\.)?headers\s*[:=]\s*(\{.*?\}|\[.*?\])"
+    r"""(?is)
+    (?:"|')?
+    (?:response\.)?
+    headers
+    (?:"|')?
+    \s*[:=]\s*
+    (\{.*?\}|\[.*?\])
+    """
 )
 _BEARER_RE = re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+")
 _GITHUB_TOKEN_RE = re.compile(
