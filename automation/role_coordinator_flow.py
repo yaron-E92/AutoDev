@@ -4,6 +4,7 @@ import subprocess
 from pathlib import Path
 from typing import Callable, Mapping
 from automation import (
+    external_error_sanitizer,
     opencode_runtime,
     role_resume,
     role_runtime,
@@ -49,8 +50,19 @@ def coordinate(
     try:
         snapshots = runtime.role_snapshots(repo, runner=runner, which=which)
     except role_runtime.RoleRuntimeError as exc:
+        safe_error = external_error_sanitizer.safe_external_error(
+            category="runtime-snapshot-error",
+            message=str(exc),
+            runtime=runtime.name,
+            phase="snapshot-resolution",
+            retry_classification=exc.classification,
+            termination="runtime-exception",
+        )
+        message = f"role runtime {runtime.name} snapshot resolution failed"
+        if safe_error.message:
+            message += f": {safe_error.message}"
         raise RoleCoordinatorError(
-            str(exc),
+            message,
             classification=exc.classification,
         ) from exc
 
