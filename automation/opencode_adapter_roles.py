@@ -234,11 +234,10 @@ def _accept_role_once(role: str, current: Path, input_path: Path | None) -> list
 
 
 def _reader_correction_contract(current: Path, role: str) -> str:
-    if role != "reader":
-        return ""
-    if not execution.protocol_enabled(_read_state(current)):
-        return ""
-    return execution.reader_contract_instructions().strip() + "\n\n"
+    # Execution classification is not a Reader acceptance contract in protocol
+    # v2. Generic factual-handoff corrections (for example an unbounded result)
+    # use only the ordinary role contract.
+    return ""
 
 
 def _raise_contract_rejection(
