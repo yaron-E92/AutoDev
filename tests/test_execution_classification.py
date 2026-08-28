@@ -72,7 +72,11 @@ does not provide the certificate or identity validation.
         self.assertEqual(report.classification, execution.MANUAL_EXTERNAL)
         self.assertTrue(report.attention_required)
         self.assertIn("identity validation", report.reason)
-        self.assertEqual(len(report.manual_criteria), 2)
+        self.assertEqual(len(report.manual_criteria), 1)
+        self.assertEqual(
+            report.manual_criteria[0],
+            "Complete the unsupported human/external requirement explicitly stated by the issue.",
+        )
 
     def test_documentation_about_manual_work_is_not_completion_evidence(self):
         issue = """
