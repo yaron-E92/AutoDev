@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 
@@ -407,20 +407,14 @@ def parse_reader_classification(reader_text: str, issue_text: str) -> ExecutionR
 
 
 def resolve_reader_classification(reader_text: str, issue_text: str) -> ExecutionReport:
-    reader = parse_reader_classification(reader_text, issue_text)
-    explicit = explicit_classification(issue_text)
-    if explicit is None:
-        return reader
+    """Compatibility resolver that preserves deterministic control-plane ownership.
 
-    # Once the operator supplies explicit completion evidence, Reader owns a
-    # fresh bounded classification of what remains. This prevents an old mixed
-    # or manual declaration from permanently freezing an automatable follow-up.
-    if explicit.completion_evidence_present:
-        return replace(reader, source="reader-after-manual-evidence")
-
-    # Protocol v2 keeps explicit operator metadata authoritative. Reader output
-    # is retained only for legacy/advisory parsing and cannot downgrade it.
-    return replace(explicit, source="operator-metadata-confirmed")
+    The Reader payload is intentionally ignored for the execution decision.
+    Callers that want advisory diagnostics may parse it separately, but malformed
+    or speculative model output must never change or block classification.
+    """
+    del reader_text
+    return classify_issue_text(issue_text)
 
 
 def reader_contract_instructions() -> str:
