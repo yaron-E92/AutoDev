@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 
-from automation import run_manifest, workflow_stages
+from automation import external_error_sanitizer, run_manifest, workflow_stages
 
 
 REPORT_NAME = "non-success-report.md"
@@ -13,22 +12,13 @@ OPERATION_REPORT_RELATIVE = f".autodev-run/last-operation/{REPORT_NAME}"
 NON_SUCCESS_STATES = {"FAILED", "BLOCKED", "WAITING", "REPAIR"}
 MAX_EVIDENCE_CHARS = 2400
 
-_SECRET_PATTERNS = (
-    re.compile(r"(?i)\b(Bearer)\s+[A-Za-z0-9._~+/=-]+"),
-    re.compile(
-        r"(?i)\b(authorization|api[_-]?key|token|secret|password|cookie|proxy[_-]?authorization)"
-        r"\b\s*[:=]\s*([^\s,;]+)"
-    ),
-    re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b"),
-)
-
 
 def redact(value: object) -> str:
-    text = str(value or "")
-    text = _SECRET_PATTERNS[0].sub(r"\1 <redacted>", text)
-    text = _SECRET_PATTERNS[1].sub(r"\1=<redacted>", text)
-    text = _SECRET_PATTERNS[2].sub("<redacted>", text)
-    return text
+    return external_error_sanitizer.sanitize_external_text(
+        value,
+        max_chars=MAX_EVIDENCE_CHARS,
+        max_lines=16,
+    )
 
 
 def update_report(repo: Path, payload: dict[str, object]) -> tuple[dict[str, object], str]:
