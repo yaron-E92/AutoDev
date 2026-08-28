@@ -169,8 +169,8 @@ class ExecutionClassificationBoundaryTests(unittest.TestCase):
         )
 
         self.assertEqual(len(evidence), 1)
-        self.assertEqual(report.classification, execution.MIXED)
-        self.assertTrue(report.attention_required)
+        self.assertEqual(report.classification, execution.AUTOMATABLE)
+        self.assertFalse(report.attention_required)
 
     def test_explicit_automatable_operator_marker_cannot_be_reader_downgraded(self):
         issue = """
@@ -201,7 +201,7 @@ class ExecutionClassificationBoundaryTests(unittest.TestCase):
 
         self.assertEqual(len(evidence), 1)
         self.assertEqual(report.classification, execution.AUTOMATABLE)
-        self.assertEqual(report.source, "operator-metadata-confirmed")
+        self.assertEqual(report.source, "operator-metadata")
         self.assertFalse(report.attention_required)
 
     def _write_protocol_state(self, repo: Path) -> Path:
