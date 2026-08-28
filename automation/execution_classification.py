@@ -62,7 +62,7 @@ _EXTERNAL_PURCHASE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 _EXTERNAL_IDENTITY = re.compile(
-    r"\b(?:complete|perform|undergo)\b.{0,100}\b(?:identity|legal|organization|"
+    r"\b(?:complete|completing|perform|performing|undergo|undergoing)\b.{0,100}\b(?:identity|legal|organization|"
     r"publisher)\b.{0,80}\b(?:verification|validation|kyc|approval)\b",
     re.IGNORECASE | re.DOTALL,
 )
