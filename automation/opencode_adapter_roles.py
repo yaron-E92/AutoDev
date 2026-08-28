@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from automation import execution_classification as execution
 from automation import opencode_adapter_handoff
 from automation import opencode_resume_checkpoint
 from automation import opencode_resume_contract
@@ -234,15 +233,10 @@ def _accept_role_once(role: str, current: Path, input_path: Path | None) -> list
 
 
 def _reader_correction_contract(current: Path, role: str) -> str:
-    if role != "reader":
-        return ""
-    if not execution.protocol_enabled(_read_state(current)):
-        return ""
-    return (
-        "Exact execution-classification contract:\n\n"
-        + execution.reader_contract_instructions().strip()
-        + "\n\n"
-    )
+    # Execution classification is not a Reader acceptance contract in protocol
+    # v2. Generic factual-handoff corrections (for example an unbounded result)
+    # use only the ordinary role contract.
+    return ""
 
 
 def _raise_contract_rejection(

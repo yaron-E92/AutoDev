@@ -9,7 +9,6 @@ from automation import execution_classification as execution
 from automation import execution_classification_boundary as boundary
 from automation import execution_classification_hooks
 from automation import opencode_adapter_handoff, opencode_adapter_roles, workflow_stages
-from automation.opencode_adapter_contract import OpenCodeAdapterError
 
 
 class ExecutionClassificationBoundaryTests(unittest.TestCase):
@@ -170,23 +169,14 @@ class ExecutionClassificationBoundaryTests(unittest.TestCase):
         )
 
         self.assertEqual(len(evidence), 1)
-        self.assertEqual(report.classification, execution.MIXED)
-        self.assertTrue(report.attention_required)
+        self.assertEqual(report.classification, execution.AUTOMATABLE)
+        self.assertFalse(report.attention_required)
 
-    def test_explicit_automatable_operator_marker_only_allows_evidence_backed_safety_downgrade(self):
+    def test_explicit_automatable_operator_marker_cannot_be_reader_downgraded(self):
         issue = """
 # Implement repository feature
 <!-- autodev:execution=automatable -->
 """
-        repository_criterion = "Implement missing API endpoints and permission logic."
-        repository_action = "Write API code and tests."
-        false_reader = self._block(
-            self._manual_payload(repository_criterion, repository_action)
-        )
-
-        with self.assertRaises(boundary.ExternalBoundaryEvidenceError):
-            boundary.validate_reader_external_boundary(false_reader)
-
         external_criterion = "Complete publisher identity validation."
         external_action = "Complete identity approval with the certificate provider."
         genuine_reader = self._block(
@@ -205,112 +195,38 @@ class ExecutionClassificationBoundaryTests(unittest.TestCase):
                 ],
             )
         )
-        boundary.validate_reader_external_boundary(genuine_reader)
+
+        evidence = boundary.validate_reader_external_boundary(genuine_reader)
         report = execution.resolve_reader_classification(genuine_reader, issue)
 
-        self.assertEqual(report.classification, execution.MANUAL_EXTERNAL)
-        self.assertEqual(report.source, "reader-safety-downgrade")
-        self.assertTrue(report.attention_required)
+        self.assertEqual(len(evidence), 1)
+        self.assertEqual(report.classification, execution.AUTOMATABLE)
+        self.assertEqual(report.source, "operator-metadata")
+        self.assertFalse(report.attention_required)
 
     def _write_protocol_state(self, repo: Path) -> Path:
         current = repo / workflow_stages.CURRENT_DIR
         current.mkdir(parents=True)
-        issue_text = "# Issue #6\n\nCreate and manage persistent decision spaces.\n"
+        issue_text = (
+            "# Issue #6\n\n"
+            "Implement missing API endpoints, EF Core migrations, and repository tests.\n"
+        )
+        report = execution.classify_issue_text(issue_text)
         state: dict[str, object] = {
             "Status": "Prepared",
             "IssueNumber": 6,
             "IssueText": issue_text,
             "ProviderProfile": "",
         }
-        execution.enable_protocol(state)
+        execution.apply_state_fields(state, report)
         workflow_stages.write_state(current, state)
+        execution.persist_artifacts(current, report)
         (current / "issue.md").write_text(issue_text, encoding="utf-8")
         return current
 
-    def _automatable_block(self) -> str:
-        return self._block(
-            {
-                "classification": "automatable",
-                "reason": "All remaining work is repository code, migrations, integration, and tests.",
-                "autonomous_criteria": ["Implement and verify the requested repository changes."],
-                "manual_criteria": [],
-                "human_actions": [],
-                "resume_evidence": [],
-                "manual_prerequisite_blocks_implementation": False,
-                "autonomous_subset_independent": False,
-                "external_boundaries": [],
-            }
-        )
-
-    def test_false_manual_reader_gets_one_correction_then_normal_flow_remains_runnable(self):
+    def _accept_reader_advisory(self, reader_text: str):
         original_prepare = opencode_adapter_handoff._prepare_reader  # type: ignore[attr-defined]
         original_accept = opencode_adapter_roles._accept_role_once  # type: ignore[attr-defined]
-        original_correction = opencode_adapter_roles._reader_correction_contract  # type: ignore[attr-defined]
-        try:
-            execution_classification_hooks._install_reader_gate()
-            boundary.install()
-            with tempfile.TemporaryDirectory() as temp_dir:
-                repo = Path(temp_dir)
-                current = self._write_protocol_state(repo)
-                bad = current / "reader-brief.md"
-                bad.write_text(
-                    self._block(
-                        {
-                            "classification": "manual-external",
-                            "reason": "Missing core API endpoints, migrations, and repo-level permission logic.",
-                            "autonomous_criteria": [],
-                            "manual_criteria": [
-                                "implement .NET group controllers, migration scripts, frontend API integration"
-                            ],
-                            "human_actions": [
-                                "write group API code",
-                                "run migrations locally",
-                                "update TypeScript types to match schema",
-                            ],
-                            "resume_evidence": ["Record completion in non-secret metadata."],
-                            "manual_prerequisite_blocks_implementation": True,
-                            "autonomous_subset_independent": False,
-                        }
-                    ),
-                    encoding="utf-8",
-                )
-
-                with self.assertRaises(OpenCodeAdapterError) as first_failure:
-                    opencode_adapter_roles.accept_role("reader", repo, bad)
-
-                self.assertIn("one correction is allowed", str(first_failure.exception))
-                correction = (current / "contract-correction-reader.md").read_text(
-                    encoding="utf-8"
-                )
-                self.assertIn("unsupported-external-boundary evidence extension", correction)
-                self.assertIn("Repository implementation is NOT an external boundary", correction)
-                state_after_rejection = workflow_stages.read_state(current)
-                self.assertEqual(state_after_rejection["Status"], "Prepared")
-                self.assertNotEqual(state_after_rejection.get("QueueState"), "attention")
-                self.assertFalse((current / execution.CLASSIFICATION_FILE).exists())
-                self.assertFalse((current / execution.MANUAL_ACTION_PLAN_FILE).exists())
-
-                bad.write_text(self._automatable_block(), encoding="utf-8")
-                outputs = opencode_adapter_roles.accept_role("reader", repo, bad)
-
-                state = workflow_stages.read_state(current)
-                self.assertEqual(state["ExecutionClassification"], execution.AUTOMATABLE)
-                self.assertEqual(state["ExecutionClassificationSource"], "reader")
-                self.assertNotEqual(state.get("QueueState"), "attention")
-                self.assertEqual(
-                    {path.name for path in outputs},
-                    {"reader-brief.md", "synthesized-handoff.md"},
-                )
-                self.assertFalse((current / execution.MANUAL_ACTION_PLAN_FILE).exists())
-        finally:
-            opencode_adapter_handoff._prepare_reader = original_prepare  # type: ignore[attr-defined]
-            opencode_adapter_roles._accept_role_once = original_accept  # type: ignore[attr-defined]
-            opencode_adapter_roles._reader_correction_contract = original_correction  # type: ignore[attr-defined]
-
-    def test_external_boundary_rejection_keeps_existing_one_retry_limit(self):
-        original_prepare = opencode_adapter_handoff._prepare_reader  # type: ignore[attr-defined]
-        original_accept = opencode_adapter_roles._accept_role_once  # type: ignore[attr-defined]
-        original_correction = opencode_adapter_roles._reader_correction_contract  # type: ignore[attr-defined]
         try:
             execution_classification_hooks._install_reader_gate()
             boundary.install()
@@ -318,28 +234,72 @@ class ExecutionClassificationBoundaryTests(unittest.TestCase):
                 repo = Path(temp_dir)
                 current = self._write_protocol_state(repo)
                 result = current / "reader-brief.md"
-                result.write_text(
-                    self._block(
-                        self._manual_payload(
-                            "Implement missing API endpoints.",
-                            "Write API code.",
-                        )
-                    ),
-                    encoding="utf-8",
+                result.write_text(reader_text, encoding="utf-8")
+
+                outputs = opencode_adapter_roles.accept_role("reader", repo, result)
+                state = workflow_stages.read_state(current)
+                diagnostics = json.loads(
+                    (current / workflow_stages.DIAGNOSTICS_FILE).read_text(
+                        encoding="utf-8"
+                    )
                 )
-
-                with self.assertRaises(OpenCodeAdapterError):
-                    opencode_adapter_roles.accept_role("reader", repo, result)
-                with self.assertRaises(OpenCodeAdapterError) as exhausted:
-                    opencode_adapter_roles.accept_role("reader", repo, result)
-
-                self.assertIn("protocol correction limit exhausted after one retry", str(exhausted.exception))
-                self.assertFalse((current / execution.CLASSIFICATION_FILE).exists())
-                self.assertFalse((current / execution.MANUAL_ACTION_PLAN_FILE).exists())
+                correction_exists = (
+                    current / "contract-correction-reader.md"
+                ).exists()
+                return (
+                    {path.name for path in outputs},
+                    state,
+                    diagnostics["reader_execution_advisory"],
+                    correction_exists,
+                )
         finally:
             opencode_adapter_handoff._prepare_reader = original_prepare  # type: ignore[attr-defined]
             opencode_adapter_roles._accept_role_once = original_accept  # type: ignore[attr-defined]
-            opencode_adapter_roles._reader_correction_contract = original_correction  # type: ignore[attr-defined]
+
+    def test_invalid_external_boundary_mapping_is_advisory_not_reader_rejection(self):
+        payload = self._manual_payload(
+            "Implement missing API endpoints.",
+            "Write API code.",
+            boundaries=[
+                self._forged_boundary(
+                    "Implement missing API endpoints.",
+                    "Write API code.",
+                )
+            ],
+        )
+
+        outputs, state, advisory, correction_exists = self._accept_reader_advisory(
+            self._block(payload)
+        )
+
+        self.assertEqual(outputs, {"reader-brief.md", "synthesized-handoff.md"})
+        self.assertEqual(state["ExecutionClassification"], execution.AUTOMATABLE)
+        self.assertEqual(
+            state["ExecutionClassificationSource"],
+            "issue-text-heuristic",
+        )
+        self.assertTrue(advisory["classification_block_present"])
+        self.assertTrue(advisory["accepted"])
+        self.assertEqual(advisory["external_boundary_status"], "rejected")
+        self.assertTrue(advisory["external_boundary_diagnostic"])
+        self.assertFalse(correction_exists)
+
+    def test_wrong_reader_field_type_is_diagnostic_not_protocol_exhaustion(self):
+        payload = self._manual_payload(
+            "Complete provider enrollment.",
+            "Complete provider enrollment.",
+        )
+        payload["manual_criteria"] = "not-an-array"
+
+        outputs, state, advisory, correction_exists = self._accept_reader_advisory(
+            self._block(payload)
+        )
+
+        self.assertEqual(outputs, {"reader-brief.md", "synthesized-handoff.md"})
+        self.assertEqual(state["ExecutionClassification"], execution.AUTOMATABLE)
+        self.assertFalse(advisory["accepted"])
+        self.assertIn("array of strings", advisory["diagnostic"])
+        self.assertFalse(correction_exists)
 
 
 if __name__ == "__main__":

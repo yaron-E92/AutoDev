@@ -6,17 +6,10 @@ from automation import opencode_resume_status
 
 from automation import opencode_resume_execution
 
-from automation import opencode_adapter_roles
-
-from automation import opencode_adapter_handoff
-
-from automation import opencode_adapter_contract
-
-import json
 import subprocess
 from pathlib import Path
 
-from automation import execution_classification as execution, role_coordinator_flow, role_resume, workflow_stages
+from automation import execution_classification as execution, execution_classification_boundary as execution_boundary, execution_classification_reader_advisory, role_coordinator_flow, role_resume, workflow_stages
 
 
 ATTENTION_STATE = "ATTENTION_REQUIRED"
@@ -342,6 +335,39 @@ def _install_queue_evidence_reconciliation() -> None:
         queue_classification._update_derived_labels = _update_derived_labels  # type: ignore[attr-defined]
 
 
+def transition_runtime_external_boundary(
+    repo: Path,
+    evidence: execution_boundary.ExternalBoundaryEvidence,
+    *,
+    reason: str,
+    resume_evidence: str,
+    runner=subprocess.run,
+) -> dict[str, object]:
+    """Downgrade only from concrete deterministic runtime/capability evidence."""
+    resolved = Path(repo).expanduser().resolve()
+    current = resolved / workflow_stages.CURRENT_DIR
+    state = workflow_stages.read_state(current)
+    issue_text = workflow_stages.read_text(current / "issue.md") or str(
+        state.get("IssueText", "")
+    )
+    report = execution_boundary.validated_runtime_external_report(
+        evidence,
+        reason=reason,
+        resume_evidence=resume_evidence,
+        issue_text=issue_text,
+    )
+    execution_boundary._persist_external_boundary_evidence(  # type: ignore[attr-defined]
+        current,
+        (evidence,),
+    )
+    return _transition_attention(
+        resolved,
+        current,
+        report,
+        runner=runner,
+    )
+
+
 def _attention_payload(
     repo: Path,
     current: Path,
@@ -471,16 +497,11 @@ def _install_prepare_gate() -> None:
             state.get("IssueText", "")
         )
         try:
-            report = execution.explicit_classification(issue_text)
+            report = execution.classify_issue_text(issue_text)
         except execution.ExecutionClassificationError as exc:
             raise workflow_stages.WorkflowStageError(
                 f"invalid explicit execution classification: {exc}"
             ) from exc
-        if report is None:
-            state["ExecutionClassification"] = "pending-reader"
-            state["ExecutionClassificationSource"] = "reader-required"
-            workflow_stages.write_state(current_dir, state)
-            return code, payload
 
         execution.apply_state_fields(state, report)
         workflow_stages.write_state(current_dir, state)
@@ -499,57 +520,7 @@ def _install_prepare_gate() -> None:
 
 
 def _install_reader_gate() -> None:
-    current_prepare = opencode_adapter_handoff._prepare_reader  # type: ignore[attr-defined]
-    if not getattr(current_prepare, "_autodev_execution_classification", False):
-        original_prepare = current_prepare
-
-        def _prepare_reader(repo: Path, current: Path, issue_text: str) -> str:
-            prompt = original_prepare(repo, current, issue_text)
-            try:
-                state = workflow_stages.read_state(current)
-            except workflow_stages.WorkflowStageError:
-                state = {}
-            if execution.protocol_enabled(state):
-                prompt += execution.reader_contract_instructions()
-            return prompt
-
-        _prepare_reader._autodev_execution_classification = True  # type: ignore[attr-defined]
-        opencode_adapter_handoff._prepare_reader = _prepare_reader  # type: ignore[attr-defined]
-
-    current_accept = opencode_adapter_roles._accept_role_once  # type: ignore[attr-defined]
-    if not getattr(current_accept, "_autodev_execution_classification", False):
-        original_accept = current_accept
-
-        def _accept_role_once(role: str, current: Path, input_path: Path | None):
-            outputs = original_accept(role, current, input_path)
-            if role != "reader":
-                return outputs
-            try:
-                state = workflow_stages.read_state(current)
-            except workflow_stages.WorkflowStageError:
-                return outputs
-            if not execution.protocol_enabled(state):
-                return outputs
-            issue_text = workflow_stages.read_text(current / "issue.md") or str(
-                state.get("IssueText", "")
-            )
-            reader_text = workflow_stages.read_text(current / "reader-brief.md")
-            try:
-                report = execution.resolve_reader_classification(
-                    reader_text,
-                    issue_text,
-                )
-            except execution.ExecutionClassificationError as exc:
-                raise opencode_adapter_contract.OpenCodeAdapterError(
-                    f"reader execution-classification contract rejected: {exc}"
-                ) from exc
-            execution.apply_state_fields(state, report)
-            workflow_stages.write_state(current, state)
-            execution.persist_artifacts(current, report)
-            return outputs
-
-        _accept_role_once._autodev_execution_classification = True  # type: ignore[attr-defined]
-        opencode_adapter_roles._accept_role_once = _accept_role_once  # type: ignore[attr-defined]
+    execution_classification_reader_advisory.install()
 
 
 def _attention_resume_payload(
