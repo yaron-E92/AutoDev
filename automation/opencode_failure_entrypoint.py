@@ -5,6 +5,7 @@ import subprocess
 from pathlib import Path
 
 from automation import (
+    external_error_sanitizer,
     failure_diagnostics,
     workflow_stages,
 )
@@ -15,9 +16,13 @@ class ProviderCapabilityError(ValueError):
 
 
 def _bounded_detail(completed: object) -> str:
-    stderr = str(getattr(completed, "stderr", "") or "").strip()
-    stdout = str(getattr(completed, "stdout", "") or "").strip()
-    return (stderr or stdout)[-2000:]
+    stderr = getattr(completed, "stderr", "") or ""
+    stdout = getattr(completed, "stdout", "") or ""
+    return external_error_sanitizer.sanitize_external_text(
+        stderr or stdout,
+        max_chars=1600,
+        max_lines=12,
+    )
 
 
 def classified_runner(command, *args, **kwargs):
