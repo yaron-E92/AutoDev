@@ -280,6 +280,8 @@ class ExecutionClassificationBoundaryTests(unittest.TestCase):
         )
         self.assertTrue(advisory["classification_block_present"])
         self.assertTrue(advisory["accepted"])
+        self.assertEqual(advisory["external_boundary_status"], "rejected")
+        self.assertTrue(advisory["external_boundary_diagnostic"])
         self.assertFalse(correction_exists)
 
     def test_wrong_reader_field_type_is_diagnostic_not_protocol_exhaustion(self):
