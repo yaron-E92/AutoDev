@@ -79,6 +79,63 @@ class ExternalBoundaryEvidence:
     why_unsupported: str
 
 
+def validated_runtime_external_report(
+    evidence: ExternalBoundaryEvidence,
+    *,
+    reason: str,
+    resume_evidence: str,
+    issue_text: str = "",
+) -> execution.ExecutionReport:
+    """Convert concrete runtime/capability evidence into a safe downgrade.
+
+    This is deliberately not model-facing. Callers must provide a typed,
+    concrete external boundary observed by deterministic capability/runtime
+    code. Repository/source/tool work is rejected by the same semantic guard
+    used for legacy Reader observations.
+    """
+    if evidence.boundary_kind not in BOUNDARY_KINDS:
+        raise ExternalBoundaryEvidenceError(
+            "runtime external boundary kind must be one of: "
+            + ", ".join(sorted(BOUNDARY_KINDS))
+        )
+    for field, value in (
+        ("criterion", evidence.criterion),
+        ("human_action", evidence.human_action),
+        ("external_system", evidence.external_system),
+        ("unavailable_state", evidence.unavailable_state),
+        ("why_unsupported", evidence.why_unsupported),
+    ):
+        _nonempty_string(value, field)
+
+    if (
+        _repository_only_claim(evidence.criterion)
+        or _repository_only_claim(evidence.human_action)
+        or _repository_only_claim(evidence.unavailable_state)
+    ):
+        raise ExternalBoundaryEvidenceError(
+            "runtime evidence cannot relabel ordinary repository/source/build/test/"
+            "migration work as an unsupported external prerequisite"
+        )
+
+    try:
+        return execution._report_from_mapping(  # type: ignore[attr-defined]
+            {
+                "classification": execution.MANUAL_EXTERNAL,
+                "reason": reason,
+                "autonomous_criteria": [],
+                "manual_criteria": [evidence.criterion],
+                "human_actions": [evidence.human_action],
+                "resume_evidence": [resume_evidence],
+                "manual_prerequisite_blocks_implementation": True,
+                "autonomous_subset_independent": False,
+            },
+            source="runtime-validated-external-boundary",
+            issue_text=issue_text,
+        )
+    except execution.ExecutionClassificationError as exc:
+        raise ExternalBoundaryEvidenceError(str(exc)) from exc
+
+
 def _structured_block(text: str) -> dict[str, object] | None:
     match = _BLOCK.search(text or "")
     if not match:
