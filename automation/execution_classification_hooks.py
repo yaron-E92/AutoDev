@@ -16,7 +16,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from automation import execution_classification as execution, role_coordinator_flow, role_resume, workflow_stages
+from automation import execution_classification as execution, execution_classification_boundary as execution_boundary, role_coordinator_flow, role_resume, workflow_stages
 
 
 ATTENTION_STATE = "ATTENTION_REQUIRED"
@@ -584,6 +584,22 @@ def _install_reader_gate() -> None:
                 else:
                     advisory["accepted"] = True
                     advisory["reader_classification"] = parsed.classification
+                    if parsed.classification in {
+                        execution.MIXED,
+                        execution.MANUAL_EXTERNAL,
+                    }:
+                        try:
+                            evidence = execution_boundary.validate_reader_external_boundary(
+                                reader_text
+                            )
+                        except execution_boundary.ExternalBoundaryEvidenceError as exc:
+                            advisory["external_boundary_status"] = "rejected"
+                            advisory["external_boundary_diagnostic"] = str(exc)[:1000]
+                        else:
+                            advisory["external_boundary_status"] = (
+                                "validated" if evidence else "unproven"
+                            )
+                            advisory["external_boundary_evidence_count"] = len(evidence)
             diagnostics_path = current / workflow_stages.DIAGNOSTICS_FILE
             try:
                 raw = json.loads(diagnostics_path.read_text(encoding="utf-8"))
