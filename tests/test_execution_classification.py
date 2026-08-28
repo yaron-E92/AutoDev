@@ -167,8 +167,8 @@ credential later. The provider has not been provisioned.
 
         report = execution.resolve_reader_classification(reader, issue)
 
-        self.assertEqual(report.classification, execution.AUTOMATABLE)
-        self.assertEqual(report.source, "reader-after-manual-evidence")
+        self.assertEqual(report.classification, execution.PROBE)
+        self.assertEqual(report.source, "operator-metadata-completed")
         self.assertTrue(report.completion_evidence_present)
         self.assertFalse(report.attention_required)
 
@@ -308,7 +308,7 @@ Implement the repository support needed around the external certificate provider
         )
         resolved = execution.resolve_reader_classification(reader, issue)
         self.assertEqual(resolved.classification, execution.AUTOMATABLE)
-        self.assertEqual(resolved.source, "operator-metadata-confirmed")
+        self.assertEqual(resolved.source, "operator-metadata")
 
     def test_probe_artifact_does_not_create_manual_action_plan(self):
         report = execution.ExecutionReport(
