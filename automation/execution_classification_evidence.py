@@ -5,7 +5,6 @@ from automation import queue_contract, queue_github
 from automation import opencode_adapter_protocol
 
 import subprocess
-from dataclasses import replace
 from pathlib import Path
 
 from automation import execution_classification as execution, execution_classification_hooks as hooks, role_coordinator_flow, role_resume, role_runtime, workflow_stages
@@ -27,8 +26,9 @@ def refresh_manual_completion_evidence(
 
     AutoDev intentionally does not scrape prose/comments looking for implied
     completion. The operator must add the documented marker to the issue body.
-    The refreshed body is then handed back to Reader for a bounded semantic
-    reclassification of whatever work remains.
+    The refreshed body is then deterministically reclassified. Completed manual
+    work re-enters the runnable control plane as PROBE; Reader receives the
+    refreshed issue only to rebuild the factual repository handoff.
     """
 
     repo = repo.expanduser().resolve()
@@ -68,11 +68,7 @@ def refresh_manual_completion_evidence(
     workflow_stages.write_text(current / "issue.md", issue_text)
     state["IssueText"] = issue_text
     state["Labels"] = labels
-    refreshed = replace(
-        report,
-        completion_evidence_present=True,
-        source=f"{report.source}-manual-evidence",
-    )
+    refreshed = execution.classify_issue_text(issue_text)
     execution.apply_state_fields(state, refreshed)
     state["Status"] = "ManualEvidenceAccepted"
     state["QueueState"] = "running"
@@ -209,9 +205,9 @@ def install() -> None:
         report = refresh_manual_completion_evidence(resolved, runner=runner)
         if report is not None and report.completion_evidence_present:
             payload = dict(base or {})
-            # Reader must see the refreshed issue and decide whether the remaining
-            # work is now automatable. Do not continue from a stale manual Reader
-            # brief merely because the external prerequisite was completed.
+            # Reader must see the refreshed issue to rebuild its factual handoff.
+            # Execution classification remains a deterministic control-plane
+            # decision; do not resurrect a stale manual Reader classification.
             payload.update(
                 {
                     "state": "RESUME",
