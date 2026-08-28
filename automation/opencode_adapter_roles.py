@@ -238,11 +238,7 @@ def _reader_correction_contract(current: Path, role: str) -> str:
         return ""
     if not execution.protocol_enabled(_read_state(current)):
         return ""
-    return (
-        "Exact execution-classification contract:\n\n"
-        + execution.reader_contract_instructions().strip()
-        + "\n\n"
-    )
+    return execution.reader_contract_instructions().strip() + "\n\n"
 
 
 def _raise_contract_rejection(
