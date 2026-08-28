@@ -8,6 +8,7 @@ from unittest.mock import Mock, patch
 
 from automation import (
     execution_classification as execution,
+    execution_classification_boundary,
     execution_classification_evidence,
     execution_classification_hooks,
     opencode_github_entrypoint,
@@ -122,6 +123,8 @@ class ExecutionClassificationHookTests(unittest.TestCase):
             assert refreshed is not None
             self.assertTrue(refreshed.completion_evidence_present)
             self.assertFalse(refreshed.attention_required)
+            self.assertEqual(refreshed.classification, execution.PROBE)
+            self.assertEqual(refreshed.source, "operator-metadata-completed")
             updated = workflow_stages.read_state(current)
             self.assertEqual(updated["Status"], "ManualEvidenceAccepted")
             self.assertEqual(updated["QueueState"], "running")
@@ -256,6 +259,101 @@ class ExecutionClassificationHookTests(unittest.TestCase):
             self.assertEqual(persist_selection.call_args.kwargs["name"], "opencode")
             self.assertEqual(persist_selection.call_args.kwargs["source"], "selected")
             self.assertTrue(persist_selection.call_args.kwargs["force_manifest"])
+
+    def test_validated_runtime_external_evidence_can_downgrade_automatable_to_attention(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            current = repo / workflow_stages.CURRENT_DIR
+            current.mkdir(parents=True)
+            issue_text = "# Repository signing support\n<!-- autodev:execution=automatable -->\n"
+            state = self._prepared_state()
+            state["IssueText"] = issue_text
+            execution.apply_state_fields(
+                state,
+                execution.classify_issue_text(issue_text),
+            )
+            workflow_stages.write_state(current, state)
+            (current / "issue.md").write_text(issue_text, encoding="utf-8")
+            evidence = execution_classification_boundary.ExternalBoundaryEvidence(
+                criterion="Complete provider identity approval before production signing can proceed.",
+                boundary_kind="human-legal-provider-approval",
+                human_action="Complete legal identity approval with the signing provider.",
+                external_system="public code-signing certificate authority",
+                unavailable_state="publisher identity approval is not complete",
+                why_unsupported="the provider requires an authorized human identity workflow",
+            )
+            gh_calls: list[list[str]] = []
+
+            def fake_gh(_repo, args, **kwargs):
+                gh_calls.append(list(args))
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+            with patch.object(
+                execution_classification_hooks.queue_github,
+                "ensure_queue_labels",
+                return_value=(),
+            ), patch.object(workflow_stages, "gh", side_effect=fake_gh):
+                payload = execution_classification_hooks.transition_runtime_external_boundary(
+                    repo,
+                    evidence,
+                    reason="Provider API reported that human publisher approval is required.",
+                    resume_evidence="Record the non-secret approved publisher/profile identifier.",
+                    runner=Mock(),
+                )
+
+            updated = workflow_stages.read_state(current)
+            self.assertEqual(payload["state"], "ATTENTION_REQUIRED")
+            self.assertEqual(
+                updated["ExecutionClassification"],
+                execution.MANUAL_EXTERNAL,
+            )
+            self.assertEqual(
+                updated["ExecutionClassificationSource"],
+                "runtime-validated-external-boundary",
+            )
+            self.assertEqual(updated["QueueState"], "attention")
+            self.assertTrue(
+                (current / execution_classification_boundary.EXTERNAL_BOUNDARY_FILE).is_file()
+            )
+            self.assertTrue(any(call[:2] == ["issue", "edit"] for call in gh_calls))
+
+    def test_repository_failure_cannot_be_runtime_downgraded_to_manual(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            current = repo / workflow_stages.CURRENT_DIR
+            current.mkdir(parents=True)
+            issue_text = "Fix the API and update repository tests."
+            state = self._prepared_state()
+            state["IssueText"] = issue_text
+            execution.apply_state_fields(
+                state,
+                execution.classify_issue_text(issue_text),
+            )
+            workflow_stages.write_state(current, state)
+            (current / "issue.md").write_text(issue_text, encoding="utf-8")
+            evidence = execution_classification_boundary.ExternalBoundaryEvidence(
+                criterion="Implement missing API endpoints.",
+                boundary_kind="unsupported-external-capability",
+                human_action="Write API code and tests.",
+                external_system="developer workstation",
+                unavailable_state="repository implementation is incomplete",
+                why_unsupported="the implementation has not been written yet",
+            )
+
+            with self.assertRaises(
+                execution_classification_boundary.ExternalBoundaryEvidenceError
+            ):
+                execution_classification_hooks.transition_runtime_external_boundary(
+                    repo,
+                    evidence,
+                    reason="Repository tests failed.",
+                    resume_evidence="Record the passing repository test result.",
+                    runner=Mock(),
+                )
+
+            updated = workflow_stages.read_state(current)
+            self.assertEqual(updated["ExecutionClassification"], execution.AUTOMATABLE)
+            self.assertNotEqual(updated.get("QueueState"), "attention")
 
     def test_attention_required_is_a_successful_terminal_cli_state(self):
         self.assertIn(
