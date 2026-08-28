@@ -471,16 +471,11 @@ def _install_prepare_gate() -> None:
             state.get("IssueText", "")
         )
         try:
-            report = execution.explicit_classification(issue_text)
+            report = execution.classify_issue_text(issue_text)
         except execution.ExecutionClassificationError as exc:
             raise workflow_stages.WorkflowStageError(
                 f"invalid explicit execution classification: {exc}"
             ) from exc
-        if report is None:
-            state["ExecutionClassification"] = "pending-reader"
-            state["ExecutionClassificationSource"] = "reader-required"
-            workflow_stages.write_state(current_dir, state)
-            return code, payload
 
         execution.apply_state_fields(state, report)
         workflow_stages.write_state(current_dir, state)
@@ -528,24 +523,80 @@ def _install_reader_gate() -> None:
                 state = workflow_stages.read_state(current)
             except workflow_stages.WorkflowStageError:
                 return outputs
-            if not execution.protocol_enabled(state):
-                return outputs
+
             issue_text = workflow_stages.read_text(current / "issue.md") or str(
                 state.get("IssueText", "")
             )
             reader_text = workflow_stages.read_text(current / "reader-brief.md")
+
+            # Durable v1 runs can arrive here without having crossed the v2
+            # prepare gate. Migrate the control-plane decision deterministically
+            # without touching source changes or requiring another model turn.
+            version = int(state.get(execution.PROTOCOL_STATE_FIELD, 0) or 0)
+            if (
+                version < execution.PROTOCOL_VERSION
+                or str(state.get("ExecutionClassification", "")) in {"", "pending-reader"}
+            ):
+                try:
+                    report = execution.classify_issue_text(issue_text)
+                except execution.ExecutionClassificationError:
+                    # Invalid explicit operator metadata remains a prepare-time
+                    # problem on fresh runs. A durable Reader checkpoint should
+                    # still be accepted rather than deleted or protocol-exhausted.
+                    report = execution.ExecutionReport(
+                        classification=execution.PROBE,
+                        reason=(
+                            "Durable run migrated to protocol v2 with unresolved explicit "
+                            "classification metadata; continue in probe until deterministic "
+                            "preflight is rerun."
+                        ),
+                        source="durable-v1-migration",
+                    )
+                execution.apply_state_fields(state, report)
+                workflow_stages.write_state(current, state)
+                execution.persist_artifacts(current, report)
+
+            # Reader classification is advisory in protocol v2. Preserve a
+            # bounded diagnostic when a legacy block is present, but never reject
+            # the factual Reader handoff because that advisory JSON is absent,
+            # malformed, contradictory, or incomplete.
+            advisory: dict[str, object] = {
+                "classification_block_present": (
+                    execution.CLASSIFICATION_BLOCK_START.casefold()
+                    in reader_text.casefold()
+                ),
+                "control_classification": str(
+                    workflow_stages.read_state(current).get(
+                        "ExecutionClassification",
+                        "",
+                    )
+                ),
+            }
+            if advisory["classification_block_present"]:
+                try:
+                    parsed = execution.parse_reader_classification(
+                        reader_text,
+                        issue_text,
+                    )
+                except execution.ExecutionClassificationError as exc:
+                    advisory["accepted"] = False
+                    advisory["diagnostic"] = str(exc)[:1000]
+                else:
+                    advisory["accepted"] = True
+                    advisory["reader_classification"] = parsed.classification
+            diagnostics_path = current / workflow_stages.DIAGNOSTICS_FILE
             try:
-                report = execution.resolve_reader_classification(
-                    reader_text,
-                    issue_text,
-                )
-            except execution.ExecutionClassificationError as exc:
-                raise opencode_adapter_contract.OpenCodeAdapterError(
-                    f"reader execution-classification contract rejected: {exc}"
-                ) from exc
-            execution.apply_state_fields(state, report)
-            workflow_stages.write_state(current, state)
-            execution.persist_artifacts(current, report)
+                raw = json.loads(diagnostics_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                raw = {}
+            diagnostics = raw if isinstance(raw, dict) else {}
+            diagnostics["reader_execution_advisory"] = advisory
+            temporary = diagnostics_path.with_suffix(".json.tmp")
+            temporary.write_text(
+                json.dumps(diagnostics, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            temporary.replace(diagnostics_path)
             return outputs
 
         _accept_role_once._autodev_execution_classification = True  # type: ignore[attr-defined]
