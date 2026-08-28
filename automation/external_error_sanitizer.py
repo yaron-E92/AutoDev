@@ -16,7 +16,7 @@ _ANSI_ESCAPE_RE = re.compile(
 _CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 _URL_RE = re.compile(r"https?://[^\s<>'\"]+", re.IGNORECASE)
 _HEADER_MAP_RE = re.compile(
-    r"""(?is)
+    r"""(?isx)
     (?:"|')?
     (?:response\.)?
     headers
@@ -84,7 +84,7 @@ _GENERIC_SECRET_ASSIGNMENT_RE = re.compile(
     \s*[:=]\s*
     (?P<value>
         ["'][^"'\r\n]*["']
-        |[^\s,;\r\n}\]]+
+        |[^\s,;&\r\n}\]]+
     )
     """
 )
@@ -131,11 +131,14 @@ def sanitize_external_text(
     )
     text = _BEARER_RE.sub(f"Bearer {REDACTED}", text)
     text = _GITHUB_TOKEN_RE.sub(REDACTED, text)
+
+    # Sanitize URLs before generic key=value handling so a token query field
+    # cannot consume neighboring safe query parameters.
+    text = _URL_RE.sub(_sanitize_url_match, text)
     text = _GENERIC_SECRET_ASSIGNMENT_RE.sub(
         lambda match: f"{match.group('name')}={REDACTED}",
         text,
     )
-    text = _URL_RE.sub(_sanitize_url_match, text)
 
     lines = [line.rstrip() for line in text.split("\n")]
     while lines and not lines[0].strip():
