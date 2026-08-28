@@ -204,6 +204,7 @@ class ProviderFailureBoundaryTests(unittest.TestCase):
             role_snapshots={},
         )
         for stage in (
+            "issue-selected",
             "repository-read",
             "handoff-synthesized",
             "plan-created",
