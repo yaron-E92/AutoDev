@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from automation import execution_classification as execution
 from automation import opencode_adapter_handoff
 from automation import opencode_resume_checkpoint
 from automation import opencode_resume_contract
