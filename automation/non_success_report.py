@@ -431,6 +431,30 @@ def _authoritative_excerpt(current: Path, outcome: str, failed_stage: str) -> st
     else:
         candidates = [current / "opencode-last-failure.json", current / "local-check.log"]
     for path in candidates:
+        if path.name == "opencode-last-failure.json":
+            value = workflow_stages.read_json(path)
+            if isinstance(value, dict) and value:
+                # Preserve the decisive safe fields explicitly instead of
+                # relying on arbitrary JSON line position after truncation.
+                safe_keys = (
+                    "role",
+                    "runtime",
+                    "attempt_kind",
+                    "returncode",
+                    "termination",
+                    "failure_classification",
+                    "physical_role_attempt",
+                    "protocol_correction_attempts",
+                    "diagnostic_path",
+                    "artifact_state",
+                    "external_error",
+                )
+                safe = {
+                    key: value.get(key)
+                    for key in safe_keys
+                    if key in value
+                }
+                return redact(json.dumps(safe, sort_keys=False))
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
