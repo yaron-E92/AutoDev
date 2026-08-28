@@ -4,11 +4,12 @@ AutoDev distinguishes repository work from acceptance criteria that require a hu
 
 ## Execution classifications
 
-AutoDev records one of three execution classifications:
+AutoDev protocol v2 records one of four execution-control states before Reader runs:
 
-- `automatable` — the remaining acceptance criteria can be satisfied through supported repository/GitHub/tool work.
-- `mixed` — the issue contains both autonomous and manual/external criteria.
-- `manual-external` — the substantive outcome cannot be completed by repository work alone.
+- `automatable` — the issue wording clearly requests supported repository/GitHub/tool work.
+- `probe` — the wording is ambiguous; work may proceed while AutoDev waits for concrete deterministic/runtime evidence of any unsupported boundary.
+- `mixed` — explicit structured operator metadata declares both autonomous and manual/external criteria.
+- `manual-external` — explicit metadata or strong action+object wording requires a real human/external action that repository tooling cannot perform.
 
 Unresolved `mixed` and `manual-external` work transitions to `autodev:attention`. It is a successful **non-runnable** state, not an implementation failure. `autodev:managed` remains the operator's authorization, while stale `autodev:running`, `autodev:ready`, and dependency-derived `autodev:blocked` labels are cleared for that attention state.
 
@@ -45,7 +46,11 @@ AUTODEV_EXECUTION_CLASSIFICATION_JSON
 END_AUTODEV_EXECUTION_CLASSIFICATION_JSON
 ```
 
-When no explicit declaration exists, Reader receives the same bounded schema and must classify the issue before downstream planning/implementation continues.
+When no explicit declaration exists, AutoDev classifies the issue text deterministically during prepare. Strong repository-work wording becomes `automatable`; strong real-world/manual action wording becomes `manual-external`; ambiguity becomes `probe`. Mere mentions of certificates, providers, authentication, deployment, external APIs, credentials, signing, or infrastructure do not by themselves create a manual boundary.
+
+Reader is not part of this control plane. Its required output is the factual repository handoff. A legacy execution-classification JSON block may still be emitted as advisory data, but missing, malformed, incomplete, or contradictory advisory JSON is recorded diagnostically and never causes Reader protocol exhaustion. Explicit operator metadata cannot be silently overruled by Reader output.
+
+A later safety downgrade requires concrete deterministic capability/runtime evidence, such as a provider reporting mandatory human approval, unavailable physical hardware enrollment, protected secret custody, or another typed unsupported external prerequisite. Ordinary repository failures, missing code, migrations, tests, or supported GitHub/tool work cannot be relabeled as manual.
 
 ## Mixed work and decomposition
 
@@ -82,7 +87,7 @@ When the declared manual prerequisite is complete **and repository work remains*
 <!-- autodev:manual-evidence=complete -->
 ```
 
-Then reconcile the queue or resume the existing run. AutoDev refreshes the issue body, clears attention for the resumed run, reacquires `autodev:running`, and sends the refreshed issue back through Reader so the remaining work is classified again.
+Then reconcile the queue or resume the existing run. AutoDev refreshes the issue body, clears attention for the resumed run, reacquires `autodev:running`, and deterministically re-enters the control plane as `probe`. Reader then rebuilds the factual repository handoff from the refreshed issue; it does not own the classification decision.
 
 If the issue was fully manual and no autonomous follow-up remains, close the issue instead of adding the marker.
 
