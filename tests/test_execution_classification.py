@@ -237,5 +237,103 @@ credential later. The provider has not been provisioned.
             self.assertFalse(payload["partial_autonomous_execution"])
 
 
+    def test_issue_text_classifier_marks_repository_work_automatable(self):
+        cases = (
+            "Implement persistent workspace CRUD and add EF migrations/tests.",
+            "Fix Next.js auth return path validation.",
+            "Refactor the API client and update generated types.",
+            "Add CI tests for the release workflow.",
+        )
+        for issue in cases:
+            with self.subTest(issue=issue):
+                report = execution.classify_issue_text(issue)
+                self.assertEqual(report.classification, execution.AUTOMATABLE)
+                self.assertEqual(report.source, "issue-text-heuristic")
+                self.assertFalse(report.attention_required)
+
+    def test_issue_text_classifier_marks_explicit_external_actions_manual(self):
+        cases = (
+            "Purchase a production code-signing certificate and complete provider identity verification.",
+            "Physically enroll the YubiKey into the HSM-backed signing service.",
+            "Have the organization administrator approve the external tenant.",
+        )
+        for issue in cases:
+            with self.subTest(issue=issue):
+                report = execution.classify_issue_text(issue)
+                self.assertEqual(report.classification, execution.MANUAL_EXTERNAL)
+                self.assertEqual(report.source, "issue-text-heuristic")
+                self.assertTrue(report.attention_required)
+
+    def test_external_terms_alone_do_not_force_manual_classification(self):
+        cases = (
+            "Document how authentication, external APIs, signing, and certificates are configured.",
+            "Update deployment configuration for provider credentials and infrastructure.",
+        )
+        for issue in cases:
+            with self.subTest(issue=issue):
+                report = execution.classify_issue_text(issue)
+                self.assertNotEqual(report.classification, execution.MANUAL_EXTERNAL)
+
+    def test_ambiguous_issue_text_becomes_probe_instead_of_failure(self):
+        report = execution.classify_issue_text(
+            "Investigate the release situation and determine what should happen next."
+        )
+
+        self.assertEqual(report.classification, execution.PROBE)
+        self.assertEqual(report.source, "issue-text-heuristic")
+        self.assertFalse(report.attention_required)
+
+    def test_explicit_automatable_metadata_outranks_issue_wording_and_reader(self):
+        issue = """
+# Repository release support
+<!-- autodev:execution=automatable -->
+
+Implement the repository support needed around the external certificate provider.
+"""
+        report = execution.classify_issue_text(issue)
+        self.assertEqual(report.classification, execution.AUTOMATABLE)
+        self.assertEqual(report.source, "operator-metadata")
+
+        reader = self._reader_block(
+            {
+                "classification": "manual-external",
+                "reason": "Reader speculates that provider approval may be needed.",
+                "autonomous_criteria": [],
+                "manual_criteria": ["Obtain provider approval."],
+                "human_actions": ["Ask the provider to approve the account."],
+                "resume_evidence": ["Record the non-secret approval state."],
+                "manual_prerequisite_blocks_implementation": True,
+                "autonomous_subset_independent": False,
+            }
+        )
+        resolved = execution.resolve_reader_classification(reader, issue)
+        self.assertEqual(resolved.classification, execution.AUTOMATABLE)
+        self.assertEqual(resolved.source, "operator-metadata-confirmed")
+
+    def test_probe_artifact_does_not_create_manual_action_plan(self):
+        report = execution.ExecutionReport(
+            classification=execution.PROBE,
+            reason="The execution boundary is not yet deterministically established.",
+            source="issue-text-heuristic",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            current = Path(temp_dir)
+            classification_path, plan_path = execution.persist_artifacts(current, report)
+
+            self.assertTrue(classification_path.is_file())
+            self.assertIsNone(plan_path)
+            self.assertFalse((current / execution.MANUAL_ACTION_PLAN_FILE).exists())
+
+    def test_execution_classification_protocol_is_v2(self):
+        state: dict[str, object] = {}
+        execution.enable_protocol(state)
+
+        self.assertEqual(execution.PROTOCOL_VERSION, 2)
+        self.assertEqual(
+            state[execution.PROTOCOL_STATE_FIELD],
+            execution.PROTOCOL_VERSION,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
