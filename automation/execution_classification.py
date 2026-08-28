@@ -49,7 +49,7 @@ _SAFE_EVIDENCE_QUALIFIER = re.compile(
 # providers, certificates, authentication, credentials, deployment, external
 # APIs, signing, or infrastructure is not enough to make work manual.
 _REPOSITORY_WORK = re.compile(
-    r"\b(?:implement|fix|refactor|update|add|modify|create|generate|write|change|"
+    r"\b(?:implement|fix|refactor|update|add|modify|create|configure|generate|write|change|"
     r"repair|migrate|test)\b.{0,180}\b(?:source(?:\s+code)?|code|tests?|"
     r"migrations?|ci|workflows?|configuration|config|api|frontend|backend|"
     r"clients?|types?|schemas?|repository|repo|build|lint|auth(?:entication|orization)?|"
