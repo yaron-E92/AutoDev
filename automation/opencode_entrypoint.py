@@ -6,7 +6,7 @@ from automation import windows_verification_hooks
 
 import sys
 
-from automation import ci_outcomes, context_optimization, execution_classification_boundary, execution_classification_evidence, execution_classification_hooks, opencode_github_entrypoint, opencode_role_entrypoint, opencode_runtime, pr_head_sync, privacy_consent, role_workflow_hooks, windows_semantic_order
+from automation import ci_outcomes, context_optimization, execution_classification_evidence, execution_classification_hooks, opencode_github_entrypoint, opencode_role_entrypoint, opencode_runtime, pr_head_sync, privacy_consent, role_workflow_hooks, windows_semantic_order
 
 
 COORDINATE_COMMAND = "coordinate"
@@ -27,14 +27,10 @@ def run(argv: list[str] | None = None) -> int:
     # Install runtime-neutral workflow policy on the canonical coordinator
     # after the underlying workflow patches are active.
     role_workflow_hooks.install()
-    # Manual/external execution classification must wrap the final shared role
-    # and resume boundaries so both slash-command and Python coordination stop
-    # before implementation when attention is required.
+    # Execution classification is resolved deterministically before Reader.
+    # Reader may add advisory observations, but no Reader serialization hook is
+    # installed into the control plane.
     execution_classification_hooks.install()
-    # A Reader downgrade is not authoritative until it proves a genuine
-    # unsupported external boundary. Install this after the classification hook
-    # so validation runs before that hook can persist ATTENTION_REQUIRED state.
-    execution_classification_boundary.install()
     # Re-check only the explicit secret-free completion signal on resume, then
     # return to Reader so the remaining work is classified from fresh evidence.
     execution_classification_evidence.install()
