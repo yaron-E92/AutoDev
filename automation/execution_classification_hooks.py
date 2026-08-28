@@ -10,8 +10,6 @@ from automation import opencode_adapter_roles
 
 from automation import opencode_adapter_handoff
 
-from automation import opencode_adapter_contract
-
 import json
 import subprocess
 from pathlib import Path
