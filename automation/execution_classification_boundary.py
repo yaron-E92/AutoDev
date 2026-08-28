@@ -602,6 +602,10 @@ def _install_reader_correction_extension() -> None:
 
 
 def install() -> None:
-    _install_reader_prompt_extension()
-    _install_reader_acceptance_guard()
-    _install_reader_correction_extension()
+    """Compatibility no-op for protocol v2.
+
+    External-boundary validators remain available to deterministic/runtime
+    evidence producers, but Reader output is no longer installed as a
+    control-plane acceptance guard or correction contract.
+    """
+    return None
