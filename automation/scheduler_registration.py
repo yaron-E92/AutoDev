@@ -66,8 +66,8 @@ def _validate_source_policy(repo: Path) -> None:
         raise SchedulerError(
             "repository is not ready for autonomous scheduling; missing " + ", ".join(missing)
         )
-    queue_policy = queue_policy.load_policy(repo)
-    if not queue_policy.autonomous_execution:
+    policy = queue_policy.load_policy(repo)
+    if not policy.autonomous_execution:
         raise SchedulerError(
             "repository queue policy disables autonomous_execution; enable it before installing a scheduler"
         )
