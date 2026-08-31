@@ -9,7 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from automation import queue_selection, scheduler
+from automation import queue_selection, scheduler, scheduler_registration
 
 
 class CronRunner:
@@ -59,6 +59,58 @@ def make_registration(root: Path, *, backend: str = scheduler.BACKEND_CRON) -> t
     )
     scheduler._write_registration(registration_file, registration)
     return registration_file, registration
+
+
+class SchedulerRegistrationPolicyTests(unittest.TestCase):
+    def _make_policy_repo(self, root: Path) -> Path:
+        repo = root / "repo"
+        repo.mkdir()
+        (repo / ".git").mkdir()
+        for relative in scheduler_registration._REQUIRED_POLICY:
+            path = repo / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("{}\n", encoding="utf-8")
+        return repo
+
+    def test_source_policy_validation_loads_queue_policy_without_name_shadowing(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = self._make_policy_repo(Path(temp_dir))
+
+            with patch.object(
+                scheduler_registration.queue_policy,
+                "load_policy",
+                return_value=SimpleNamespace(autonomous_execution=True),
+            ) as load_queue_policy, patch.object(
+                scheduler_registration.claim_identity,
+                "load_claim_policy",
+            ) as load_claim_policy, patch.object(
+                scheduler_registration.queue_selection,
+                "load_roadmap",
+            ) as load_roadmap, patch.object(
+                scheduler_registration.privacy,
+                "load_policy",
+            ) as load_privacy_policy:
+                scheduler_registration._validate_source_policy(repo)
+
+            load_queue_policy.assert_called_once_with(repo)
+            load_claim_policy.assert_called_once_with(repo)
+            load_roadmap.assert_called_once_with(repo)
+            load_privacy_policy.assert_called_once_with(repo)
+
+    def test_source_policy_validation_preserves_autonomy_disabled_error(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = self._make_policy_repo(Path(temp_dir))
+
+            with patch.object(
+                scheduler_registration.queue_policy,
+                "load_policy",
+                return_value=SimpleNamespace(autonomous_execution=False),
+            ):
+                with self.assertRaisesRegex(
+                    scheduler_registration.SchedulerError,
+                    "disables autonomous_execution",
+                ):
+                    scheduler_registration._validate_source_policy(repo)
 
 
 class SchedulerBackendTests(unittest.TestCase):
