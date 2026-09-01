@@ -4,6 +4,7 @@ import subprocess
 from pathlib import Path
 from typing import Callable, TextIO
 
+from automation import headless_environment
 from automation.claim_contract import (
     ClaimError,
 )
@@ -22,9 +23,12 @@ def _run(
         "errors": "replace",
         "capture_output": True,
         "check": False,
+        "env": headless_environment.environment(),
     }
     if input_text is not None:
         kwargs["input"] = input_text
+    else:
+        kwargs["stdin"] = subprocess.DEVNULL
     try:
         return runner(argv, **kwargs)
     except OSError as exc:
