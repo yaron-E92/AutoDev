@@ -81,6 +81,23 @@ class DispatchResult:
         return asdict(self)
 
 
+def _dispatch_state(
+    coordinator_state: str,
+    *,
+    coordinator_exit_code: int = 0,
+) -> str:
+    normalized = coordinator_state.casefold().replace("_", "").replace("-", "")
+    if normalized in {"readyforreview", "prready"}:
+        return "PR_READY"
+    if normalized in {"attentionrequired", "attention"}:
+        return "ATTENTION_REQUIRED"
+    if normalized in {"blocked", "failed", "terminalfailed"}:
+        return "RUN_HEALTH_BLOCKED"
+    if coordinator_exit_code != 0:
+        return "RUN_HEALTH_BLOCKED"
+    return "DISPATCHED"
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
