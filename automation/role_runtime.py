@@ -95,6 +95,29 @@ class RoleRuntime(Protocol):
 RuntimeFactory = Callable[[], RoleRuntime]
 
 
+def prepare_scheduler_worker(
+    runtime: RoleRuntime,
+    repo: Path,
+    *,
+    runner: Callable[..., object],
+    which=None,
+) -> None:
+    """Run optional runtime-owned scheduler provisioning and model-free validation.
+
+    #244 can formalize these hooks for multiple runtimes. Until then, runtimes
+    without scheduler-specific assets remain compatible no-ops.
+    """
+
+    for method_name in ("provision_scheduler_worker", "validate_scheduler_worker"):
+        method = getattr(runtime, method_name, None)
+        if callable(method):
+            method(
+                repo.expanduser().resolve(),
+                runner=runner,
+                which=which,
+            )
+
+
 def default_registry() -> dict[str, RuntimeFactory]:
     from automation.opencode_role_runtime import OpenCodeRoleRuntime
 
