@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 from typing import Callable, TextIO
 
-from automation import opencode_entrypoint, privacy, queue_selection, role_runtime, workflow_stages
+from automation import opencode_entrypoint, privacy, queue_selection, scheduler_runtime_worker, workflow_stages
 from automation.scheduler_backends import (
     _backend_state,
     _cron_command,
@@ -138,38 +138,6 @@ class SchedulerLock:
             self.acquired = False
 
 
-def _provision_worker_runtime(
-    worker: Path,
-    *,
-    runner: Callable[..., object],
-) -> None:
-    try:
-        runtime, _ = role_runtime.select_runtime(worker)
-        role_runtime.provision_scheduler_worker(
-            runtime,
-            worker,
-            runner=runner,
-        )
-    except role_runtime.RoleRuntimeError as exc:
-        raise SchedulerError(str(exc)) from exc
-
-
-def _validate_worker_runtime(
-    worker: Path,
-    *,
-    runner: Callable[..., object],
-) -> None:
-    try:
-        runtime, _ = role_runtime.select_runtime(worker)
-        role_runtime.validate_scheduler_worker(
-            runtime,
-            worker,
-            runner=runner,
-        )
-    except role_runtime.RoleRuntimeError as exc:
-        raise SchedulerError(str(exc)) from exc
-
-
 def _prepare_worker(
     registration: SchedulerRegistration,
     *,
@@ -181,7 +149,7 @@ def _prepare_worker(
     fetch = ["fetch", "--prune", "origin"]
     _git(worker, fetch, runner=runner)
     existing = queue_selection.inspect_existing_run(worker)
-    _provision_worker_runtime(worker, runner=runner)
+    scheduler_runtime_worker.provision_worker(worker, runner=runner)
     if existing.state != "NONE":
         return existing
     dirty = _git_status(worker, runner=runner)
@@ -369,7 +337,7 @@ def run_once(
                 excluded_issue_numbers=excluded,
             )
             if selection.state == "SELECTED" and not runtime_validated:
-                _validate_worker_runtime(worker, runner=runner)
+                scheduler_runtime_worker.validate_worker(worker, runner=runner)
                 runtime_validated = True
             if selection.state != "SELECTED" or not claiming_enabled:
                 break
@@ -432,7 +400,7 @@ def run_once(
             return 2
 
         if selection.state == "RESUME_EXISTING" and not runtime_validated:
-            _validate_worker_runtime(worker, runner=runner)
+            scheduler_runtime_worker.validate_worker(worker, runner=runner)
             runtime_validated = True
 
         if claiming_enabled and selection.state == "RESUME_EXISTING":
