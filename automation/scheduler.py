@@ -138,14 +138,30 @@ class SchedulerLock:
             self.acquired = False
 
 
-def _prepare_worker_runtime(
+def _provision_worker_runtime(
     worker: Path,
     *,
     runner: Callable[..., object],
 ) -> None:
     try:
         runtime, _ = role_runtime.select_runtime(worker)
-        role_runtime.prepare_scheduler_worker(
+        role_runtime.provision_scheduler_worker(
+            runtime,
+            worker,
+            runner=runner,
+        )
+    except role_runtime.RoleRuntimeError as exc:
+        raise SchedulerError(str(exc)) from exc
+
+
+def _validate_worker_runtime(
+    worker: Path,
+    *,
+    runner: Callable[..., object],
+) -> None:
+    try:
+        runtime, _ = role_runtime.select_runtime(worker)
+        role_runtime.validate_scheduler_worker(
             runtime,
             worker,
             runner=runner,
@@ -165,7 +181,7 @@ def _prepare_worker(
     fetch = ["fetch", "--prune", "origin"]
     _git(worker, fetch, runner=runner)
     existing = queue_selection.inspect_existing_run(worker)
-    _prepare_worker_runtime(worker, runner=runner)
+    _provision_worker_runtime(worker, runner=runner)
     if existing.state != "NONE":
         return existing
     dirty = _git_status(worker, runner=runner)
@@ -320,6 +336,7 @@ def run_once(
         claim_policy = claim_contract.ClaimPolicy()
         worker_id = ""
         excluded: set[int] = set()
+        runtime_validated = False
         if claiming_enabled:
             claim_policy = claim_identity.load_claim_policy(worker)
             worker_id = claim_identity.worker_identity(home=home).worker_id
@@ -351,6 +368,9 @@ def run_once(
                 runner=runner,
                 excluded_issue_numbers=excluded,
             )
+            if selection.state == "SELECTED" and not runtime_validated:
+                _validate_worker_runtime(worker, runner=runner)
+                runtime_validated = True
             if selection.state != "SELECTED" or not claiming_enabled:
                 break
             attempt = claim_lease.acquire_claim(
@@ -410,6 +430,10 @@ def run_once(
             _record_last_run(path, registration, result, started_at=started_at)
             print(json.dumps(result.to_json(), sort_keys=True), file=stderr)
             return 2
+
+        if selection.state == "RESUME_EXISTING" and not runtime_validated:
+            _validate_worker_runtime(worker, runner=runner)
+            runtime_validated = True
 
         if claiming_enabled and selection.state == "RESUME_EXISTING":
             attempt = claim_lease.acquire_claim(
