@@ -67,10 +67,12 @@ def install_assets(
         raise opencode_adapter_contract.OpenCodeAdapterError(str(exc)) from exc
     workflow_target = target_repo / WINDOWS_CALLER_TARGET
     workflow_target.parent.mkdir(parents=True, exist_ok=True)
-    workflow_target.write_text(
-        workflow_text.replace(WINDOWS_SETUP_PLACEHOLDER, _render_windows_setup(windows_config)),
-        encoding="utf-8",
-    )
+    rendered_setup = _render_windows_setup(windows_config)
+    if rendered_setup:
+        rendered_workflow = workflow_text.replace(WINDOWS_SETUP_PLACEHOLDER, rendered_setup)
+    else:
+        rendered_workflow = workflow_text.replace(f"{WINDOWS_SETUP_PLACEHOLDER}\n\n", "")
+    workflow_target.write_text(rendered_workflow, encoding="utf-8")
     if workflow_target not in installed:
         installed.append(workflow_target)
     return installed
