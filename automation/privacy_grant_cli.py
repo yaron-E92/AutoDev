@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-from automation import opencode_adapter_models
-
 import argparse
 import json
 import subprocess
 import sys
 from pathlib import Path
-from automation import privacy
+from automation import privacy, role_runtime
 
 from automation.privacy_grant_commands import (
     create_grant,
@@ -21,9 +19,6 @@ from automation.privacy_grant_contract import (
 from automation.privacy_grant_hooks import (
     _persistent_duration_from_choice,
 )
-from automation.privacy_grant_matching import (
-    bypass_grants,
-)
 from automation.privacy_grant_store import (
     _store_path,
     repository_identity,
@@ -35,20 +30,29 @@ def _resolve_requirements(
     runner=subprocess.run,
     which=None,
 ):
-    from automation import opencode_cli, privacy_consent
-
-    executable = opencode_cli.resolve_opencode_cli(which=which)
-    mappings = opencode_adapter_models.resolve_opencode_model_mappings(
-        repo, runner=runner, which=which
+    runtime, _ = role_runtime.select_runtime(repo)
+    evidence = runtime.privacy_evidence(
+        repo,
+        runner=runner,
+        which=which,
     )
-    with bypass_grants():
-        required = privacy_consent._known_consent_requirements(
-            repo,
-            mappings,
-            executable=executable,
-            runner=runner,
+    blocked = [
+        item
+        for item in evidence.values()
+        if isinstance(item, privacy.PrivacyDecision) and item.outcome == "BLOCK"
+    ]
+    if blocked:
+        first = blocked[0]
+        raise privacy.PrivacyError(
+            f"repository privacy policy forbids {first.role} route {first.route}: "
+            f"{first.reason}"
         )
-    return required
+    return [
+        item
+        for item in evidence.values()
+        if isinstance(item, privacy.PrivacyDecision)
+        and item.outcome == "CONSENT_REQUIRED"
+    ]
 
 def _select_scope_decisions(
     required: list[privacy.PrivacyDecision],
