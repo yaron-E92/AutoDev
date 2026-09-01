@@ -64,6 +64,31 @@ autodev privacy --help
 
 `status` reports grants associated with the current repository identity. Persistent grant data is user-local, not committed repository configuration.
 
+## Runtime-neutral authorization boundary
+
+Privacy grants are AutoDev state, not OpenCode state. The public `autodev privacy ...` commands route directly to the privacy CLI and do not bootstrap the OpenCode entrypoint.
+
+Every role runtime exposes bounded privacy evidence for its effective role routes. AutoDev's common privacy authorization layer then owns:
+
+- repository-policy evaluation outcome;
+- persistent grant matching, expiry, revocation, and route/policy invalidation;
+- headless-vs-interactive consent behavior;
+- grant-use auditing;
+- scheduler/install preflight semantics.
+
+A runtime adapter may inspect provider/runtime-specific configuration or apply transport-specific controls while producing that evidence. For example, the OpenCode adapter can inspect `opencode debug config` and build an `OPENCODE_CONFIG_CONTENT` overlay. It does **not** own persistent grants or decide whether an active AutoDev grant authorizes the route.
+
+Conceptually:
+
+```text
+selected role runtime
+  -> runtime/provider privacy evidence
+  -> AutoDev privacy authorization
+       -> compliant route: ALLOW
+       -> matching active persistent grant: ALLOW
+       -> missing consent: CONSENT_REQUIRED / BLOCK
+  -> safe audit
+```
 ## Automatic enforcement
 
 ### OpenRouter direct/provider-backed AutoDev
@@ -244,9 +269,9 @@ Prefer making a route compliant through provider controls or fresh permitted att
 
 ## Scheduler behavior
 
-Scheduler ticks use the same privacy gate as interactive issue-to-PR runs. A scheduler may continue only when every model route it needs is already compliant or covered by a valid grant. Installing a scheduler does not grant consent, and `scheduler run-once` does not bypass privacy policy.
+Scheduler installation and ticks use the same runtime-neutral grant matching and policy authorization as interactive model execution. A scheduler may continue only when every effective role route is already compliant or covered by a valid active grant. Installing a scheduler does not grant consent, and `scheduler run-once` does not bypass privacy policy.
 
-This means unattended operation can remain genuinely unattended during an approved grant window without allowing a headless process to manufacture new authorization after that grant expires.
+This means unattended operation can remain genuinely unattended during an approved grant window without allowing a headless process to manufacture new authorization after that grant expires. If install-time preflight finds uncovered routes, it lists the affected roles/routes and directs the user to run `autodev privacy consent` in the source repository before retrying installation.
 
 ## Audit trail
 
