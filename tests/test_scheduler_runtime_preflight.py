@@ -23,6 +23,7 @@ class OpenCodeRunner:
     def __init__(self, *, missing: set[str] | None = None) -> None:
         self.missing = set(missing or set())
         self.calls: list[list[str]] = []
+        self.agent_list_env: dict[str, str] = {}
 
     def __call__(self, command, **kwargs):
         argv = [str(item) for item in command]
@@ -30,6 +31,7 @@ class OpenCodeRunner:
         if argv and argv[0] == "git":
             return subprocess.run(command, **kwargs)
         if argv[:3] == ["opencode", "agent", "list"]:
+            self.agent_list_env = dict(kwargs.get("env", {}) or {})
             agents = [
                 opencode_adapter_contract.AUTODEV_AGENT_BY_ROLE[role]
                 for role in opencode_adapter_contract.ROLE_NAMES
@@ -78,6 +80,7 @@ class SchedulerRuntimePreflightTests(unittest.TestCase):
                     (worker / ".opencode" / "agents" / f"{agent}.md").is_file()
                 )
             self.assertIn(["opencode", "agent", "list"], runner.calls)
+            self.assertEqual(runner.agent_list_env.get("NO_COLOR"), "1")
             self.assertIn(["opencode", "debug", "config"], runner.calls)
             self.assertFalse(
                 any(call[:2] == ["opencode", "run"] for call in runner.calls)
