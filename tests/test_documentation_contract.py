@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import unittest
 from pathlib import Path
@@ -8,6 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_DOCS = (
     "README.md",
+    "docs/configuration.md",
     "docs/headroom.md",
     "docs/installation.md",
     "docs/model-roles.md",
@@ -18,6 +20,7 @@ PUBLIC_DOCS = (
     "docs/scheduler.md",
     "docs/windows-verification.md",
     "docs/workspace-scope.md",
+    "examples/autodev/README.md",
     "examples/opencode/README.md",
 )
 LOCAL_LINK = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
@@ -62,6 +65,32 @@ class DocumentationContractTests(unittest.TestCase):
         self.assertIn("sudo apt install ./autodev_X.Y.Z_amd64.deb", installation)
         self.assertIn("sudo dnf install ./autodev-X.Y.Z-1.x86_64.rpm", installation)
         self.assertNotIn("python -m automation.autodev_cli install --user --add-to-path", installation)
+
+    def test_user_configuration_guide_and_examples_cover_profiles_and_defaults(self) -> None:
+        configuration = self._read("docs/configuration.md")
+        for expected in (
+            "AUTODEV_USER_CONFIG",
+            "~/.config/autodev/config.json",
+            "active_model_profile",
+            "model_profiles",
+            "repositories",
+            "scheduler.cadence_minutes",
+            "autodev config profile use mixed --repo .",
+            "opencode.json / opencode.jsonc",
+        ):
+            self.assertIn(expected, configuration)
+
+        default = json.loads(self._read("examples/autodev/config.default.json"))
+        self.assertEqual(default["version"], 1)
+        self.assertEqual(default["role_runtime"], "opencode")
+        self.assertEqual(default["scheduler"]["cadence_minutes"], 15)
+        self.assertNotIn("active_model_profile", default)
+
+        profiles = json.loads(self._read("examples/autodev/config.profiles.example.json"))
+        self.assertIn("mixed", profiles["model_profiles"])
+        self.assertIn("local", profiles["model_profiles"])
+        self.assertIn("local-openrouter", profiles["model_profiles"])
+        self.assertEqual(profiles["repositories"]["OWNER/REPO"]["model_profile"], "mixed")
 
     def test_opencode_guide_uses_first_class_issue_to_pr_spelling(self) -> None:
         opencode = self._read("docs/opencode.md")
