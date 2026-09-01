@@ -124,7 +124,9 @@ See [`docs/privacy.md`](docs/privacy.md).
 
 ## OpenCode and role runtimes
 
-`opencode` is the default role runtime. When OpenCode is enabled, `opencode.json` / `opencode.jsonc` remains authoritative for role/model mapping; AutoDev does not maintain a second copy.
+`opencode` is the default role runtime. AutoDev can select reusable machine/user-local model profiles, while an explicit repository `opencode.json` / `opencode.jsonc` agent model remains higher precedence for that role. This lets local and scheduler routing work without committing machine-specific OpenCode configuration.
+
+Configure or inspect user-local defaults with `autodev config ...`; see [`docs/configuration.md`](docs/configuration.md) for paths, schema, profiles, per-repository overrides, precedence, examples, and scheduler defaults.
 
 The optional OpenCode frontend exposes commands such as:
 
@@ -173,6 +175,7 @@ See [`docs/python-architecture.md`](docs/python-architecture.md).
 ## Documentation map
 
 - Installation and repository setup: [`docs/installation.md`](docs/installation.md)
+- User configuration and model profiles: [`docs/configuration.md`](docs/configuration.md)
 - Releases and provenance: [`docs/releases.md`](docs/releases.md)
 - Queue policy: [`docs/queue.md`](docs/queue.md)
 - Scheduler: [`docs/scheduler.md`](docs/scheduler.md)

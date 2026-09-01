@@ -15,7 +15,7 @@ OpenCode additionally has an `autodev-coordinator` frontend agent. Its model is 
 
 ## OpenCode model routing
 
-For OpenCode runs, OpenCode configuration is authoritative. Configure agent models through `opencode.json` or `opencode.jsonc`, for example:
+For OpenCode runs, model routing is resolved jointly from explicit OpenCode agent mappings, selected AutoDev user model profiles, and OpenCode inheritance. Explicit `opencode.json` / `opencode.jsonc` AutoDev agent models have highest precedence. For example:
 
 ```json
 {
@@ -32,6 +32,8 @@ For OpenCode runs, OpenCode configuration is authoritative. Configure agent mode
 ```
 
 All OpenCode agent mappings may still be configured independently. AutoDev additionally supports named user-local model profiles in its existing user configuration file. Explicit OpenCode agent models remain highest precedence; a selected AutoDev profile fills workflow roles that would otherwise inherit from the OpenCode coordinator/global/default model. AutoDev passes the resolved profile route through OpenCode's documented `--model provider/model` flag, so scheduled runs do not depend on an interactive `/models` selection.
+
+See [`configuration.md`](configuration.md) for the canonical user-config schema, paths, copyable examples, per-repository selection, and precedence.
 
 Profile selection is machine/user-local. A user-wide active profile may be overridden for one canonical GitHub `OWNER/REPO` in the same user config, so no `.autodev` or `opencode.jsonc` noise file is required in each repository. Root `opencode.json` / `opencode.jsonc` remains supported and can override individual AutoDev roles explicitly.
 

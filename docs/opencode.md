@@ -8,7 +8,7 @@ OpenCode is AutoDev's default model-role runtime and an optional command fronten
 autodev repo install
 ```
 
-This installs the maintained `.opencode/commands/` and `.opencode/agents/` assets. Root `opencode.json` / `opencode.jsonc` remain user-owned and are the authority for OpenCode model mapping.
+This installs the maintained `.opencode/commands/` and `.opencode/agents/` assets. Root `opencode.json` / `opencode.jsonc` remain user-owned. Explicit AutoDev agent models in those files have precedence, while machine/user-local AutoDev model profiles can fill roles that would otherwise inherit.
 
 ## Run an issue
 
@@ -60,9 +60,9 @@ OpenCode exposes seven AutoDev agent mappings: the coordinator frontend plus the
 }
 ```
 
-Mappings may be configured independently. Unmapped agents inherit according to the OpenCode/AutoDev resolution contract. The coordinator's model does not make it the owner of workflow state: Python still decides deterministic transitions and validates durable role acceptance before advancing.
+Mappings may be configured independently. For the six workflow roles, a selected AutoDev user model profile can fill unmapped/inherited roles without creating a repository file. The OpenCode-only coordinator remains configurable through OpenCode configuration. Unmapped roles otherwise inherit according to the OpenCode/AutoDev resolution contract. The coordinator's model does not make it the owner of workflow state: Python still decides deterministic transitions and validates durable role acceptance before advancing.
 
-AutoDev rejects unsupported ad-hoc per-run model overrides instead of creating a competing model-routing layer. Use `/autodev-models` when installed or `autodev models` from the shell to inspect the effective safe mapping and inheritance source.
+AutoDev rejects unsupported ad-hoc per-run model overrides. Use `autodev config ...` for reusable machine/user-local profiles, and `/autodev-models` when installed or `autodev models` from the shell to inspect the effective safe mapping and source. See [`configuration.md`](configuration.md) for profile precedence and examples.
 
 ## Role boundaries
 

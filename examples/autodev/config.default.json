@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "role_runtime": "opencode",
+  "scheduler": {
+    "cadence_minutes": 15
+  }
+}

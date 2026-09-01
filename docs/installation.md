@@ -83,7 +83,7 @@ If an RPM-family package transaction cannot complete the upgrade, reinstall or d
 Native package installation, upgrade, and removal do not silently:
 
 - enable an AutoDev scheduler or recurring task;
-- delete `~/.autodev/` user configuration, privacy grants, or privacy audit state;
+- delete user AutoDev configuration, `~/.autodev/` privacy grants, or privacy audit state;
 - delete target-repository `.autodev/` policy/configuration;
 - delete target-repository `.autodev-run/` checkpoints/evidence;
 - rewrite unrelated `opencode.json` / `opencode.jsonc` settings.
@@ -169,7 +169,9 @@ Inspect the effective OpenCode role/model mapping with:
 autodev models
 ```
 
-`opencode.json` / `opencode.jsonc` remains authoritative for OpenCode role/model settings. AutoDev does not copy those values into `.autodev`, because two copies would drift.
+AutoDev also supports machine/user-local named model profiles. Explicit repository `opencode.json` / `opencode.jsonc` agent mappings remain authoritative over AutoDev profile values for those roles; a repository-selected or user-wide AutoDev profile fills roles that would otherwise inherit from OpenCode defaults. AutoDev does not copy machine-local profile choices into repository `.autodev/` policy.
+
+Use `autodev config path`, `autodev config show`, and `autodev config profile ...` to manage that layer. See [`configuration.md`](configuration.md) for the complete schema, platform paths, copyable defaults/examples, per-repository overrides, and model-routing precedence.
 
 ## Repository ownership contract
 
