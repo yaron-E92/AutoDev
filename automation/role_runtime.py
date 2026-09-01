@@ -75,6 +75,14 @@ class RoleRuntime(Protocol):
         which=None,
     ) -> dict[str, object]: ...
 
+    def privacy_evidence(
+        self,
+        repo: Path,
+        *,
+        runner: Callable[..., object],
+        which=None,
+    ) -> dict[str, object]: ...
+
     def invoke(
         self,
         context: RoleInvocationContext,
