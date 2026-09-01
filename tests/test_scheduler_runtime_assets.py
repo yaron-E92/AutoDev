@@ -130,6 +130,40 @@ class SchedulerRuntimeAssetTests(unittest.TestCase):
 
             self.assertFalse((repo / ".opencode").exists())
 
+    def test_interrupted_refresh_accepts_already_updated_canonical_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            repo = self._repo(root)
+            fake_root = root / "autodev"
+            source = REPO_ROOT / "integrations" / "opencode"
+            shutil.copytree(source, fake_root / "integrations" / "opencode")
+
+            opencode_adapter_assets.provision_scheduler_worker_assets(repo, fake_root)
+            reader = repo / ".opencode" / "agents" / "autodev-reader.md"
+            canonical = (
+                fake_root
+                / "integrations"
+                / "opencode"
+                / "agents"
+                / "autodev-reader.md"
+            )
+            updated = canonical.read_text(encoding="utf-8") + "\nnew-release-contract\n"
+            canonical.write_text(updated, encoding="utf-8")
+
+            # Simulate a crash after the file replacement but before the ownership
+            # manifest was advanced to the new canonical hash.
+            reader.write_text(updated, encoding="utf-8")
+
+            opencode_adapter_assets.provision_scheduler_worker_assets(repo, fake_root)
+
+            self.assertEqual(reader.read_text(encoding="utf-8"), updated)
+            self.assertEqual(
+                opencode_adapter_assets.scheduler_managed_assets(repo)[
+                    ".opencode/agents/autodev-reader.md"
+                ],
+                opencode_adapter_assets._sha256(updated.encode("utf-8")),
+            )
+
     def test_matching_untracked_canonical_asset_can_be_adopted(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = self._repo(Path(temp_dir))
