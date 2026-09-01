@@ -19,14 +19,16 @@ class InstallationDocumentationTests(unittest.TestCase):
         self.assertIn("autodev queue next", installation)
         self.assertIn("autodev queue reconcile", queue)
 
-    def test_installation_docs_define_ownership_and_opencode_config_authority(self):
+    def test_installation_docs_define_ownership_and_model_config_precedence(self):
         installation = (REPO_ROOT / "docs" / "installation.md").read_text(encoding="utf-8")
 
         self.assertIn(".autodev/", installation)
         self.assertIn(".autodev-run/", installation)
         self.assertIn(".opencode/", installation)
         self.assertIn("opencode.jsonc", installation)
-        self.assertIn("remains authoritative", installation)
+        self.assertIn("remain authoritative over AutoDev profile values", installation)
+        self.assertIn("configuration.md", installation)
+        self.assertIn("autodev config profile", installation)
         self.assertNotIn("temporary compatibility shim", installation)
         self.assertNotIn(".opencode/autodev.json", installation)
 
