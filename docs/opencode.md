@@ -10,6 +10,8 @@ autodev repo install
 
 This installs the maintained `.opencode/commands/` and `.opencode/agents/` assets. Root `opencode.json` / `opencode.jsonc` remain user-owned. Explicit AutoDev agent models in those files have precedence, while machine/user-local AutoDev model profiles can fill roles that would otherwise inherit.
 
+Dedicated scheduler workers do not require those maintained runtime assets to be committed merely for scheduler execution. `autodev scheduler install` provisions worker-owned copies when the clone lacks repository-tracked versions, preserves tracked repository-owned assets, and verifies discoverability with `opencode agent list` before registering the scheduler. See [`scheduler.md`](scheduler.md).
+
 ## Run an issue
 
 Inside OpenCode:
