@@ -73,7 +73,9 @@ Before starting new work, the worker fetches the remote, verifies that no unexpe
 
 The dedicated worker uses a canonical GitHub HTTPS origin with the GitHub CLI credential helper rather than copying an interactive checkout's SSH transport. Scheduler Git/GitHub subprocesses disable terminal prompting and SSH uses batch mode, so an encrypted developer SSH key can never turn a cron/systemd/Task Scheduler tick into a passphrase prompt. Installation validates non-interactive fetch and dry-run push access before registering the native scheduler.
 
-Installation also performs a headless model/privacy preflight inside the dedicated worker. Every runnable AutoDev role must resolve to a concrete `provider/model` from an explicit OpenCode agent mapping or selected AutoDev model profile, and the route must already satisfy repository privacy policy or an existing valid grant. The installer does not create or widen consent.
+Installation also performs a headless model/privacy preflight inside the dedicated worker. The selected role runtime supplies effective route/privacy evidence; the runtime-neutral AutoDev privacy layer then applies repository policy and persistent-grant matching. Every runnable role must resolve to a concrete route, and each route must already satisfy repository privacy policy or an existing valid grant. The installer does not create, widen, renew, or replace consent.
+
+If consent is missing, installation fails before native scheduler registration with the uncovered role/routes and an actionable instruction to run `autodev privacy consent` in the source repository, then retry `autodev scheduler install`. SSH and HTTPS remotes for the same canonical GitHub `OWNER/REPO` share the same persistent-grant repository identity.
 
 AutoDev does **not** run `git reset --hard` or `git clean` to make a scheduler tick succeed. Unexpected worker modifications stop the tick and require inspection.
 
