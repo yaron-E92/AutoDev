@@ -428,93 +428,6 @@ def authorize_direct_call(
     return _consent_or_block(repo, policy, decision, consent_reader)
 
 
-def authorize_opencode_role(
-    repo: Path,
-    *,
-    role: str,
-    model: str,
-    opencode_cli: str,
-    runner=subprocess.run,
-    base_env: dict[str, str] | None = None,
-    consent_reader: Callable[[str], str] | None = None,
-) -> tuple[PrivacyDecision, dict[str, str]]:
-    """Compatibility wrapper for OpenCode callers.
-
-    Runtime-specific evidence is produced by the OpenCode adapter; final policy/grant
-    authorization is owned by the runtime-neutral privacy authorization layer.
-    """
-    from automation import opencode_privacy_adapter, privacy_authorization
-
-    decision, env = opencode_privacy_adapter.evaluate_role(
-        repo,
-        role=role,
-        model=model,
-        opencode_cli=opencode_cli,
-        runner=runner,
-        base_env=base_env,
-    )
-    return (
-        privacy_authorization.authorize_evaluated(
-            repo, decision, consent_reader=consent_reader
-        ),
-        env,
-    )
-
-def _debug_config(repo: Path, executable: str, runner, env: dict[str, str]) -> dict[str, object]:
-    completed = runner(
-        [executable, "debug", "config"],
-        cwd=repo,
-        env=env,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        capture_output=True,
-        check=False,
-    )
-    if int(getattr(completed, "returncode", 1)) != 0:
-        raise PrivacyError("opencode debug config failed while verifying privacy controls")
-    try:
-        value = json.loads(str(getattr(completed, "stdout", "") or "{}"))
-    except json.JSONDecodeError as exc:
-        raise PrivacyError("opencode debug config returned invalid JSON while verifying privacy controls") from exc
-    if not isinstance(value, dict):
-        raise PrivacyError("opencode debug config returned an unexpected value while verifying privacy controls")
-    return value
-
-
-def _openrouter_overlay(
-    config: dict[str, object], model_id: str, controls: dict[str, object]
-) -> dict[str, object]:
-    # OpenCode v2 uses providers/body. OpenCode v1 uses provider/models/options.
-    if "providers" in config:
-        return {"providers": {"openrouter": {"body": {"provider": controls}}}}
-    return {
-        "provider": {
-            "openrouter": {
-                "models": {model_id: {"options": {"provider": controls}}}
-            }
-        }
-    }
-
-
-def _merge_inline_config(env: dict[str, str], overlay: dict[str, object]) -> dict[str, str]:
-    existing: dict[str, object] = {}
-    raw = env.get("OPENCODE_CONFIG_CONTENT", "").strip()
-    if raw:
-        try:
-            parsed = json.loads(raw)
-        except json.JSONDecodeError as exc:
-            raise PrivacyError("existing OPENCODE_CONFIG_CONTENT is invalid JSON") from exc
-        if not isinstance(parsed, dict):
-            raise PrivacyError("existing OPENCODE_CONFIG_CONTENT must be a JSON object")
-        existing = parsed
-    result = dict(env)
-    result["OPENCODE_CONFIG_CONTENT"] = json.dumps(
-        _deep_merge(existing, overlay), separators=(",", ":")
-    )
-    return result
-
-
 def _deep_merge(base: dict[str, object], overlay: dict[str, object]) -> dict[str, object]:
     result = dict(base)
     for key, value in overlay.items():
@@ -523,37 +436,6 @@ def _deep_merge(base: dict[str, object], overlay: dict[str, object]) -> dict[str
         else:
             result[key] = value
     return result
-
-
-def _resolved_openrouter_verified(
-    config: dict[str, object], model_id: str, policy: PrivacyPolicy
-) -> bool:
-    effective: dict[str, object] = {}
-    providers = config.get("providers")
-    if isinstance(providers, dict):
-        openrouter = providers.get("openrouter", {})
-        if isinstance(openrouter, dict):
-            body = openrouter.get("body", {})
-            if isinstance(body, dict) and isinstance(body.get("provider"), dict):
-                effective = dict(body["provider"])
-            models = openrouter.get("models", {})
-            model = models.get(model_id, {}) if isinstance(models, dict) else {}
-            if isinstance(model, dict):
-                model_body = model.get("body", {})
-                if isinstance(model_body, dict) and isinstance(model_body.get("provider"), dict):
-                    effective.update(model_body["provider"])
-    else:
-        providers_v1 = config.get("provider", {})
-        openrouter = providers_v1.get("openrouter", {}) if isinstance(providers_v1, dict) else {}
-        models = openrouter.get("models", {}) if isinstance(openrouter, dict) else {}
-        model = models.get(model_id, {}) if isinstance(models, dict) else {}
-        options = model.get("options", {}) if isinstance(model, dict) else {}
-        if isinstance(options, dict) and isinstance(options.get("provider"), dict):
-            effective = dict(options["provider"])
-    return (
-        (not policy.no_training or effective.get("data_collection") == "deny")
-        and (not policy.zero_retention or effective.get("zdr") is True)
-    )
 
 
 def _consent_env(role: str, route: str) -> bool:
