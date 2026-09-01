@@ -7,8 +7,10 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from automation import (
+    opencode_privacy_adapter,
     opencode_role_runtime,
     privacy,
+    privacy_authorization,
     privacy_consent,
     role_runtime,
 )
@@ -36,9 +38,13 @@ class OpenCodeRoleRuntimePrivacyTests(unittest.TestCase):
         def consent(*args, **kwargs):
             order.append("consent")
 
+        def evaluate(*args, **kwargs):
+            order.append("evidence")
+            return decision, kwargs["base_env"]
+
         def authorize(*args, **kwargs):
             order.append("authorize")
-            return decision, kwargs["base_env"]
+            return decision
 
         def runner(*args, **kwargs):
             order.append("launch")
@@ -57,8 +63,12 @@ class OpenCodeRoleRuntimePrivacyTests(unittest.TestCase):
             "ensure_run_consent",
             side_effect=consent,
         ), patch.object(
-            privacy,
-            "authorize_opencode_role",
+            opencode_privacy_adapter,
+            "evaluate_role",
+            side_effect=evaluate,
+        ), patch.object(
+            privacy_authorization,
+            "authorize_evaluated",
             side_effect=authorize,
         ):
             result = runtime.invoke(
@@ -70,7 +80,7 @@ class OpenCodeRoleRuntimePrivacyTests(unittest.TestCase):
                 runner=runner,
             )
 
-        self.assertEqual(order, ["consent", "authorize", "launch"])
+        self.assertEqual(order, ["consent", "evidence", "authorize", "launch"])
         self.assertEqual(result.returncode, 0)
 
     def test_denied_run_consent_prevents_process_launch(self):
