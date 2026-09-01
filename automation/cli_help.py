@@ -95,6 +95,41 @@ HELP: dict[tuple[str, ...], HelpEntry] = {
             "autodev install --user --uninstall",
         ),
     ),
+    ("config",): _entry(
+        "autodev config <command> [options]",
+        "Configure user-local AutoDev defaults and model profiles.",
+        description=(
+            "The user configuration is machine-local and can select reusable model profiles globally "
+            "or per GitHub repository without creating files in the target repository. Explicit "
+            "OpenCode agent model mappings remain higher precedence."
+        ),
+        subcommands=(
+            ("show", "Show the current user configuration."),
+            ("path", "Show the platform-specific user configuration path."),
+            ("profile", "Create, list, select, or clear named model profiles."),
+            ("scheduler-cadence", "Show or set the default scheduler cadence."),
+        ),
+        examples=(
+            "autodev config profile set mixed reader=ollama/gpt-oss:20b-autodev planner=openai/gpt-5.6-terra",
+            "autodev config profile use mixed",
+            "autodev config profile use mixed --repo .",
+            "autodev config scheduler-cadence 15",
+        ),
+    ),
+    ("config", "profile"): _entry(
+        "autodev config profile <list|set|use|clear> [options]",
+        "Manage named AutoDev model profiles.",
+        subcommands=(
+            ("list", "List configured profiles and mark the active user default."),
+            ("set", "Create or replace a profile from ROLE=PROVIDER/MODEL assignments."),
+            ("use", "Select a profile globally or for --repo PATH."),
+            ("clear", "Clear the global or --repo PATH profile selection."),
+        ),
+    ),
+    ("config", "scheduler-cadence"): _entry(
+        "autodev config scheduler-cadence [MINUTES]",
+        "Show or set the user default scheduler cadence.",
+    ),
     ("repo",): _entry(
         "autodev repo <command> [options]",
         "Configure and maintain AutoDev assets in a target repository.",
@@ -198,8 +233,8 @@ HELP: dict[tuple[str, ...], HelpEntry] = {
         "autodev models [--repo PATH]",
         "Show effective OpenCode model mappings for AutoDev roles.",
         description=(
-            "This is a read-only configuration/introspection command. Repository OpenCode configuration "
-            "remains authoritative for OpenCode model mappings."
+            "This is a read-only configuration/introspection command. Explicit OpenCode agent model "
+            "mappings override AutoDev profiles; profiles fill roles that would otherwise inherit."
         ),
         options=(("--repo PATH", "Repository root. Default: current directory (.)."),),
         examples=("autodev models",),
@@ -477,6 +512,7 @@ TOP_LEVEL_GROUPS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
         "Automation and operations",
         (
             ("scheduler", "Install, inspect, and run autonomous scheduling."),
+            ("config", "Configure user-local defaults and reusable model profiles."),
             ("notifications", "Configure native ready/blocked/failed outcome notifications."),
             ("queue", "Inspect/reconcile/select managed issues without model calls."),
             ("privacy", "Inspect, grant, or revoke explicit privacy consent."),
@@ -495,6 +531,7 @@ TOP_LEVEL_GROUPS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
 
 KNOWN_TOP_LEVEL = {
     "install",
+    "config",
     "repo",
     "doctor",
     "issue-to-pr",
