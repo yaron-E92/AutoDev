@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "role_runtime": "opencode",
+  "active_model_profile": "mixed",
+  "model_profiles": {
+    "mixed": {
+      "reader": "ollama/gpt-oss:20b-autodev",
+      "synthesizer": "ollama/gpt-oss:20b-autodev",
+      "planner": "openai/gpt-5.6-terra",
+      "implementer": "openai/gpt-5.6-sol",
+      "fixer": "openai/gpt-5.6-sol",
+      "verifier": "openai/gpt-5.6-terra"
+    },
+    "local": {
+      "reader": "ollama/gpt-oss:20b-autodev",
+      "synthesizer": "ollama/gpt-oss:20b-autodev",
+      "planner": "ollama/gpt-oss:20b-autodev",
+      "implementer": "ollama/gpt-oss:20b-autodev",
+      "fixer": "ollama/gpt-oss:20b-autodev",
+      "verifier": "ollama/gpt-oss:20b-autodev"
+    },
+    "local-openrouter": {
+      "reader": "ollama/gpt-oss:20b-autodev",
+      "synthesizer": "ollama/gpt-oss:20b-autodev",
+      "planner": "openrouter/provider/planner-model",
+      "implementer": "openrouter/provider/implementer-model",
+      "fixer": "openrouter/provider/implementer-model",
+      "verifier": "openrouter/provider/verifier-model"
+    }
+  },
+  "repositories": {
+    "OWNER/REPO": {
+      "model_profile": "mixed"
+    }
+  },
+  "scheduler": {
+    "cadence_minutes": 15
+  }
+}
