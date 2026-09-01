@@ -179,7 +179,17 @@ def _is_tracked(
         capture_output=True,
         check=False,
     )
-    return int(getattr(completed, "returncode", 1)) == 0
+    returncode = int(getattr(completed, "returncode", 1))
+    if returncode == 0:
+        return True
+    if returncode == 1:
+        return False
+    detail = str(getattr(completed, "stderr", "") or "").strip()
+    raise OpenCodeAdapterError(
+        f"cannot determine repository ownership for scheduler OpenCode asset {relative}: "
+        f"git ls-files exited with code {returncode}"
+        + (f": {detail}" if detail else "")
+    )
 
 
 def _load_scheduler_manifest(repo: Path) -> dict[str, object]:
