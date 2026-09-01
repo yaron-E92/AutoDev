@@ -48,6 +48,6 @@ The selected runtime contributes to safe execution fingerprints. Changing the ru
 
 ## Runtime contract
 
-A runtime supplies safe execution identity plus a bounded invocation result. Python remains responsible for preparation, output validation, protocol correction, repair budgets, source identity, commits, PR/CI, and durable failure diagnostics.
+A runtime supplies safe execution identity, bounded privacy evidence for its effective role routes, and a bounded invocation result. Runtime/provider adapters may inspect or shape their own transport configuration, but AutoDev's common privacy layer owns persistent grant matching and final policy authorization. Python remains responsible for preparation, output validation, protocol correction, repair budgets, source identity, commits, PR/CI, and durable failure diagnostics.
 
 Adding another production runtime requires an explicit registry/installation/configuration contract. Naming an unregistered runtime does not enable it.

@@ -72,12 +72,16 @@ Resume-budget semantics live in the repair-budget policy layer; workflow orchest
 - `provider_contract.py`, `provider_requests.py` — provider/model contracts and request shaping.
 - `provider_command.py`, `provider_http.py`, `provider_headroom.py`, `provider_mock.py` — concrete transports.
 - `provider_factory.py` — provider configuration and construction.
+- `privacy.py` — provider-neutral privacy policy/evidence primitives and direct-provider policy evaluation.
+- `privacy_authorization.py` — runtime-neutral final policy/grant authorization and persistent-grant audit.
 - `privacy_grant_contract.py`, `privacy_grant_store.py`, `privacy_grant_matching.py` — durable grant representation and matching.
-- `privacy_grant_commands.py`, `privacy_grant_hooks.py`, `privacy_grant_cli.py` — consent commands and runtime integration.
+- `privacy_grant_commands.py`, `privacy_grant_cli.py` — user-facing persistent consent commands.
+- `privacy_grant_hooks.py`, `privacy_consent.py` — interactive run-scoped consent integration; persistent grant enforcement does not depend on these hooks.
 
 ### OpenCode integration and resume
 
 - `opencode_adapter_contract.py`, `opencode_adapter_assets.py`, `opencode_adapter_models.py` — adapter contract, installed assets and role/model mapping.
+- `opencode_privacy_adapter.py` — OpenCode-specific route/privacy evidence and runtime configuration overlays; it does not own grants.
 - `opencode_adapter_storage.py`, `opencode_adapter_handoff.py`, `opencode_adapter_protocol.py` — durable state, handoffs and protocol checks.
 - `opencode_adapter_roles.py`, `opencode_adapter_workflow.py`, `opencode_adapter_cli.py` — role preparation/acceptance, workflow integration and CLI.
 - `opencode_resume_contract.py`, `opencode_resume_manifest.py`, `opencode_resume_checkpoint.py`, `opencode_resume_status.py`, `opencode_resume_execution.py` — durable resume ownership.

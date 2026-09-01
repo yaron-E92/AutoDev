@@ -138,6 +138,9 @@ class DocumentationContractTests(unittest.TestCase):
         for duration in ("24h", "7d", "30d", "until-revoked"):
             self.assertIn(duration, privacy)
         self.assertIn("headless or scheduled run can consume a matching active grant", privacy)
+        self.assertIn("Privacy grants are AutoDev state, not OpenCode state", privacy)
+        self.assertIn("do not bootstrap the OpenCode entrypoint", privacy)
+        self.assertIn("runtime/provider privacy evidence", privacy)
         self.assertNotIn("AUTODEV_PRIVACY_CONSENT", privacy)
 
     def test_release_guide_matches_native_and_source_artifact_set(self) -> None:
@@ -170,6 +173,8 @@ class DocumentationContractTests(unittest.TestCase):
         self.assertIn("autodev repo install", prerequisites)
         self.assertIn("autodev doctor", prerequisites)
         self.assertNotIn("autodev install --user", prerequisites)
+        self.assertIn("runtime-neutral AutoDev privacy layer", scheduler)
+        self.assertIn("autodev privacy consent", scheduler)
 
     def test_windows_verification_uses_public_repository_setup(self) -> None:
         windows = self._read("docs/windows-verification.md")

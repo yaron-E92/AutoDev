@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-from automation import opencode_adapter_models
-
 import argparse
 import json
 import subprocess
 import sys
 from pathlib import Path
-from automation import privacy
+from automation import privacy, role_runtime
 
 from automation.privacy_grant_commands import (
     create_grant,
@@ -17,12 +15,6 @@ from automation.privacy_grant_commands import (
 from automation.privacy_grant_contract import (
     DURATIONS,
     SCOPES,
-)
-from automation.privacy_grant_hooks import (
-    _persistent_duration_from_choice,
-)
-from automation.privacy_grant_matching import (
-    bypass_grants,
 )
 from automation.privacy_grant_store import (
     _store_path,
@@ -35,20 +27,29 @@ def _resolve_requirements(
     runner=subprocess.run,
     which=None,
 ):
-    from automation import opencode_cli, privacy_consent
-
-    executable = opencode_cli.resolve_opencode_cli(which=which)
-    mappings = opencode_adapter_models.resolve_opencode_model_mappings(
-        repo, runner=runner, which=which
+    runtime, _ = role_runtime.select_runtime(repo)
+    evidence = runtime.privacy_evidence(
+        repo,
+        runner=runner,
+        which=which,
     )
-    with bypass_grants():
-        required = privacy_consent._known_consent_requirements(
-            repo,
-            mappings,
-            executable=executable,
-            runner=runner,
+    blocked = [
+        item
+        for item in evidence.values()
+        if isinstance(item, privacy.PrivacyDecision) and item.outcome == "BLOCK"
+    ]
+    if blocked:
+        first = blocked[0]
+        raise privacy.PrivacyError(
+            f"repository privacy policy forbids {first.role} route {first.route}: "
+            f"{first.reason}"
         )
-    return required
+    return [
+        item
+        for item in evidence.values()
+        if isinstance(item, privacy.PrivacyDecision)
+        and item.outcome == "CONSENT_REQUIRED"
+    ]
 
 def _select_scope_decisions(
     required: list[privacy.PrivacyDecision],
@@ -71,6 +72,54 @@ def _select_scope_decisions(
         )
     return selected
 
+def _persistent_duration_from_choice(choice: str) -> str:
+    normalized = choice.strip().casefold()
+    if normalized in {"1", "24", "24h", "day"}:
+        return "24h"
+    if normalized in {"7", "7d", "week"}:
+        return "7d"
+    if normalized in {"3", "30", "30d", "month"}:
+        return "30d"
+    if normalized in {"u", "until", "until-revoked", "until revoked"}:
+        return "until-revoked"
+    return ""
+
+
+def _display_row(decision: privacy.PrivacyDecision) -> str:
+    retention = decision.retention
+    if decision.retention_duration:
+        retention += f" ({decision.retention_duration})"
+    return (
+        f"{decision.role:<13} {decision.provider:<18} {decision.route:<34} "
+        f"{decision.training:<10} {retention}"
+    )
+
+
+def _write_consent_table(
+    output,
+    required: list[privacy.PrivacyDecision],
+) -> None:
+    print(
+        f"{len(required)} role route{'s' if len(required) != 1 else ''} require explicit privacy consent for this run:\n",
+        file=output,
+        flush=True,
+    )
+    print(
+        f"{'Role':<13} {'Provider':<18} {'Route/model':<34} {'Training':<10} Retention",
+        file=output,
+        flush=True,
+    )
+    for decision in required:
+        print(_display_row(decision), file=output, flush=True)
+        print(
+            "  "
+            + f"scope={decision.route_scope}; policy={decision.policy_source or 'unknown'}; "
+            + f"checked={privacy.POLICY_REVIEWED_AT}; reason={decision.reason}",
+            file=output,
+            flush=True,
+        )
+
+
 def _prompt_duration() -> str:
     answer = str(
         input(
@@ -92,8 +141,6 @@ def _run_consent_cli(
     runner=subprocess.run,
     which=None,
 ) -> int:
-    from automation import privacy_consent
-
     if sys.stdin is None or not sys.stdin.isatty():
         print(
             "privacy consent creation requires an interactive terminal; "
@@ -138,12 +185,14 @@ def _run_consent_cli(
         print(str(exc), file=sys.stderr)
         return 2
 
-    privacy_consent._write_run_consent_table(sys.stdout, selected)
+    _write_consent_table(sys.stdout, selected)
     duration = args.duration or _prompt_duration()
     if not duration:
         print("Privacy consent was not granted.", file=sys.stderr)
         return 1
     if duration == "run":
+        from automation import privacy_consent
+
         if not privacy_consent._run_id(repo):
             print(
                 "Run-scoped consent requires an active AutoDev run.",

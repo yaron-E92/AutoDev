@@ -411,7 +411,7 @@ def authorize_direct_call(
             return decision
         decision.outcome = "CONSENT_REQUIRED"
         decision.reason = _gap(policy, decision)
-        return _consent_or_block(repo, policy, decision, consent_reader)
+        return _authorize_evaluated_decision(repo, decision, consent_reader)
 
     training, retention, duration, source = _classify(provider_id)
     decision = PrivacyDecision(
@@ -425,148 +425,21 @@ def authorize_direct_call(
         return decision
     decision.outcome = "CONSENT_REQUIRED"
     decision.reason = _gap(policy, decision)
-    return _consent_or_block(repo, policy, decision, consent_reader)
+    return _authorize_evaluated_decision(repo, decision, consent_reader)
 
 
-def authorize_opencode_role(
+def _authorize_evaluated_decision(
     repo: Path,
-    *,
-    role: str,
-    model: str,
-    opencode_cli: str,
-    runner=subprocess.run,
-    base_env: dict[str, str] | None = None,
-    consent_reader: Callable[[str], str] | None = None,
-) -> tuple[PrivacyDecision, dict[str, str]]:
-    repo = repo.expanduser().resolve()
-    policy = load_policy(repo)
-    provider_id, model_id = _split_model(model)
-    if provider_id == "ollama":
-        provider_id = "ollama-cloud" if _ollama_cloud(model_id) else "local"
-    # OpenCode's `openai` ID can be API-key or OAuth/product-specific; do not apply API policy blindly.
-    if provider_id == "openai":
-        provider_id = "openai-opencode"
-    route = model or f"{provider_id}/{model_id}"
-    env = dict(base_env or os.environ)
+    decision: PrivacyDecision,
+    consent_reader: Callable[[str], str] | None,
+) -> PrivacyDecision:
+    from automation import privacy_authorization
 
-    if not policy.enabled:
-        decision = PrivacyDecision(
-            "ALLOW", role, route, provider_id or "unknown", model_id,
-            _scope(provider_id or "unknown"), enforcement_state="not-required",
-            reason="privacy policy disabled",
-        )
-        _audit(repo, decision)
-        return decision, env
-
-    if policy.local_only and provider_id != "local":
-        _block(
-            repo,
-            PrivacyDecision(
-                "BLOCK", role, route, provider_id or "unknown", model_id,
-                _scope(provider_id or "unknown"),
-                reason="repository privacy profile is local-only; cloud exceptions are forbidden",
-            ),
-        )
-
-    if provider_id == "openrouter":
-        controls = _openrouter_controls(policy)
-        initial = _debug_config(repo, opencode_cli, runner, env)
-        overlay = _openrouter_overlay(initial, model_id, controls)
-        env = _merge_inline_config(env, overlay)
-        resolved = _debug_config(repo, opencode_cli, runner, env)
-        request_verified = _resolved_openrouter_verified(resolved, model_id, policy)
-        decision = PrivacyDecision(
-            "ALLOW", role, route, provider_id, model_id, "routed-cloud",
-            training="unknown",
-            retention="unknown",
-            policy_source=(
-                "https://openrouter.ai/docs/guides/routing/provider-selection; "
-                "https://openrouter.ai/docs/guides/privacy/data-collection"
-            ),
-            enforcement_state="request-verified" if request_verified else "unverified",
-            controls=[f"provider.{key}={json.dumps(value)}" for key, value in controls.items()],
-            reason=(
-                "OpenCode effective config verifies downstream OpenRouter request controls, but "
-                "OpenRouter account-level content logging/data-sharing settings must also be verified or attested"
-            ),
-        )
-        _apply_attestation(policy, decision)
-        if request_verified and _satisfies(policy, decision):
-            _audit(repo, decision)
-            return decision, env
-        decision.outcome = "CONSENT_REQUIRED"
-        decision.reason = _gap(policy, decision)
-        return _consent_or_block(repo, policy, decision, consent_reader), env
-
-    training, retention, duration, source = _classify(provider_id or "unknown")
-    decision = PrivacyDecision(
-        "ALLOW", role, route, provider_id or "unknown", model_id,
-        _scope(provider_id or "unknown"), training, retention, duration,
-        policy_source=source,
-        enforcement_state="verified-effective" if provider_id == "local" else "enforced-by-provider-contract",
+    return privacy_authorization.authorize_evaluated(
+        repo,
+        decision,
+        consent_reader=consent_reader,
     )
-    _apply_attestation(policy, decision)
-    if _satisfies(policy, decision):
-        _audit(repo, decision)
-        return decision, env
-    decision.outcome = "CONSENT_REQUIRED"
-    decision.reason = _gap(policy, decision)
-    return _consent_or_block(repo, policy, decision, consent_reader), env
-
-
-def _debug_config(repo: Path, executable: str, runner, env: dict[str, str]) -> dict[str, object]:
-    completed = runner(
-        [executable, "debug", "config"],
-        cwd=repo,
-        env=env,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        capture_output=True,
-        check=False,
-    )
-    if int(getattr(completed, "returncode", 1)) != 0:
-        raise PrivacyError("opencode debug config failed while verifying privacy controls")
-    try:
-        value = json.loads(str(getattr(completed, "stdout", "") or "{}"))
-    except json.JSONDecodeError as exc:
-        raise PrivacyError("opencode debug config returned invalid JSON while verifying privacy controls") from exc
-    if not isinstance(value, dict):
-        raise PrivacyError("opencode debug config returned an unexpected value while verifying privacy controls")
-    return value
-
-
-def _openrouter_overlay(
-    config: dict[str, object], model_id: str, controls: dict[str, object]
-) -> dict[str, object]:
-    # OpenCode v2 uses providers/body. OpenCode v1 uses provider/models/options.
-    if "providers" in config:
-        return {"providers": {"openrouter": {"body": {"provider": controls}}}}
-    return {
-        "provider": {
-            "openrouter": {
-                "models": {model_id: {"options": {"provider": controls}}}
-            }
-        }
-    }
-
-
-def _merge_inline_config(env: dict[str, str], overlay: dict[str, object]) -> dict[str, str]:
-    existing: dict[str, object] = {}
-    raw = env.get("OPENCODE_CONFIG_CONTENT", "").strip()
-    if raw:
-        try:
-            parsed = json.loads(raw)
-        except json.JSONDecodeError as exc:
-            raise PrivacyError("existing OPENCODE_CONFIG_CONTENT is invalid JSON") from exc
-        if not isinstance(parsed, dict):
-            raise PrivacyError("existing OPENCODE_CONFIG_CONTENT must be a JSON object")
-        existing = parsed
-    result = dict(env)
-    result["OPENCODE_CONFIG_CONTENT"] = json.dumps(
-        _deep_merge(existing, overlay), separators=(",", ":")
-    )
-    return result
 
 
 def _deep_merge(base: dict[str, object], overlay: dict[str, object]) -> dict[str, object]:
@@ -577,37 +450,6 @@ def _deep_merge(base: dict[str, object], overlay: dict[str, object]) -> dict[str
         else:
             result[key] = value
     return result
-
-
-def _resolved_openrouter_verified(
-    config: dict[str, object], model_id: str, policy: PrivacyPolicy
-) -> bool:
-    effective: dict[str, object] = {}
-    providers = config.get("providers")
-    if isinstance(providers, dict):
-        openrouter = providers.get("openrouter", {})
-        if isinstance(openrouter, dict):
-            body = openrouter.get("body", {})
-            if isinstance(body, dict) and isinstance(body.get("provider"), dict):
-                effective = dict(body["provider"])
-            models = openrouter.get("models", {})
-            model = models.get(model_id, {}) if isinstance(models, dict) else {}
-            if isinstance(model, dict):
-                model_body = model.get("body", {})
-                if isinstance(model_body, dict) and isinstance(model_body.get("provider"), dict):
-                    effective.update(model_body["provider"])
-    else:
-        providers_v1 = config.get("provider", {})
-        openrouter = providers_v1.get("openrouter", {}) if isinstance(providers_v1, dict) else {}
-        models = openrouter.get("models", {}) if isinstance(openrouter, dict) else {}
-        model = models.get(model_id, {}) if isinstance(models, dict) else {}
-        options = model.get("options", {}) if isinstance(model, dict) else {}
-        if isinstance(options, dict) and isinstance(options.get("provider"), dict):
-            effective = dict(options["provider"])
-    return (
-        (not policy.no_training or effective.get("data_collection") == "deny")
-        and (not policy.zero_retention or effective.get("zdr") is True)
-    )
 
 
 def _consent_env(role: str, route: str) -> bool:

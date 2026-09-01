@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from automation import privacy, run_manifest, workflow_stages
+from automation import opencode_privacy_adapter, privacy, run_manifest, workflow_stages
 
 
 LEDGER_NAME = "privacy-consent.json"
@@ -334,14 +334,13 @@ def _preview_decision(
     global _PREVIEW_DEPTH
     _PREVIEW_DEPTH += 1
     try:
-        decision, _ = privacy.authorize_opencode_role(
+        decision, _ = opencode_privacy_adapter.evaluate_role(
             repo,
             role=role,
             model=model,
             opencode_cli=executable,
             runner=runner,
             base_env=dict(os.environ),
-            consent_reader=lambda _: "no",
         )
         return decision
     finally:

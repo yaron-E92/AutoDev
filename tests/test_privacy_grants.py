@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from automation import privacy_grant_cli, privacy_grant_commands, privacy_grant_contract, privacy_grant_hooks, privacy_grant_matching
+from automation import privacy_authorization, privacy_grant_cli, privacy_grant_commands, privacy_grant_contract, privacy_grant_hooks, privacy_grant_matching
 
 import json
 import os
@@ -278,7 +278,7 @@ class PrivacyGrantTests(unittest.TestCase):
                             duration="24h",
                         )
 
-    def test_valid_grant_short_circuits_gate_and_audits_reference(self):
+    def test_valid_grant_is_consumed_by_runtime_neutral_authorizer_and_audited(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = self._repo(temp_dir)
             policy = privacy.load_policy(repo)
@@ -289,19 +289,11 @@ class PrivacyGrantTests(unittest.TestCase):
                     [self._decision()],
                     duration="7d",
                 )
-                original = privacy._consent_or_block
-
-                def unexpected_gate(*args, **kwargs):
-                    raise AssertionError("underlying consent gate was invoked")
-
-                try:
-                    privacy._consent_or_block = unexpected_gate
-                    privacy_grant_hooks._install_privacy_gate()
-                    result = privacy._consent_or_block(
-                        repo, policy, self._decision(), None
-                    )
-                finally:
-                    privacy._consent_or_block = original
+                result = privacy_authorization.authorize_evaluated(
+                    repo,
+                    self._decision(),
+                    headless=True,
+                )
 
                 self.assertEqual(result.outcome, "ALLOW")
                 self.assertEqual(result.enforcement_state, "user-consented")

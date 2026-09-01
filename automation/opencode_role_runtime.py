@@ -13,7 +13,9 @@ from typing import Callable
 
 from automation import (
     opencode_cli,
+    opencode_privacy_adapter,
     privacy,
+    privacy_authorization,
     role_runtime,
     run_manifest,
 )
@@ -78,6 +80,37 @@ class OpenCodeRoleRuntime:
             snapshots[role] = run_manifest.build_role_snapshot(configured, safe)
         return snapshots
 
+    def privacy_evidence(
+        self,
+        repo: Path,
+        *,
+        runner: Callable[..., object] = subprocess.run,
+        which=None,
+    ) -> dict[str, privacy.PrivacyDecision]:
+        repo = repo.expanduser().resolve()
+        try:
+            executable = opencode_cli.resolve_opencode_cli(which=which)
+        except opencode_cli.OpenCodeCliError as exc:
+            raise role_runtime.RoleRuntimeError(str(exc)) from exc
+        mappings = self._resolve_mappings(repo, runner=runner, which=which)
+        evidence: dict[str, privacy.PrivacyDecision] = {}
+        for role in opencode_adapter_contract.ROLE_NAMES:
+            model = str(mappings.get(role, {}).get("model", "")).strip()
+            if not model:
+                raise role_runtime.RoleRuntimeError(
+                    f"cannot resolve the effective {self.name} model for AutoDev role {role}; "
+                    "privacy cannot be verified"
+                )
+            decision, _ = opencode_privacy_adapter.evaluate_role(
+                repo,
+                role=role,
+                model=model,
+                opencode_cli=executable,
+                runner=runner,
+            )
+            evidence[role] = decision
+        return evidence
+
     def invoke(
         self,
         context: role_runtime.RoleInvocationContext,
@@ -114,13 +147,17 @@ class OpenCodeRoleRuntime:
                     raise privacy.PrivacyError(
                         f"cannot resolve the effective OpenCode model for AutoDev role {context.role}; privacy cannot be verified"
                     )
-                decision, environment = privacy.authorize_opencode_role(
+                evidence, environment = opencode_privacy_adapter.evaluate_role(
                     repo,
                     role=context.role,
                     model=model,
                     opencode_cli=executable,
                     runner=runner,
                     base_env=environment,
+                )
+                decision = privacy_authorization.authorize_evaluated(
+                    repo,
+                    evidence,
                 )
                 print(
                     json.dumps(

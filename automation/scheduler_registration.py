@@ -2,12 +2,11 @@ from __future__ import annotations
 
 from automation import (
     claim_identity,
-    opencode_adapter_contract,
-    opencode_adapter_models,
-    opencode_cli,
+    privacy_authorization,
     queue_contract,
     queue_github,
     queue_policy,
+    role_runtime,
     user_config,
 )
 
@@ -206,50 +205,38 @@ def _validate_headless_model_policy(
     which: Callable[[str], str | None],
 ) -> None:
     try:
-        mappings = opencode_adapter_models.resolve_opencode_model_mappings(
-            worker, runner=runner, which=which
+        runtime, _ = role_runtime.select_runtime(worker)
+        evidence = runtime.privacy_evidence(
+            worker,
+            runner=runner,
+            which=which,
         )
-    except (
-        opencode_adapter_contract.OpenCodeAdapterError,
-        opencode_cli.OpenCodeCliError,
-        user_config.UserConfigError,
-    ) as exc:
-        raise SchedulerError(f"scheduler headless model preflight failed: {exc}") from exc
-    missing = [
-        role
-        for role in opencode_adapter_contract.ROLE_NAMES
-        if not str(mappings.get(role, {}).get("model", "")).strip()
-    ]
-    if missing:
+    except role_runtime.RoleRuntimeError as exc:
         raise SchedulerError(
-            "scheduler headless model preflight cannot resolve concrete provider/model routes for: "
-            + ", ".join(missing)
-            + "; configure an AutoDev model profile or explicit OpenCode agent models before installing the scheduler"
-        )
-    policy = privacy.load_policy(worker)
-    if not policy.enabled:
-        return
-    try:
-        executable = opencode_cli.resolve_opencode_cli(which=which)
-    except opencode_cli.OpenCodeCliError as exc:
-        raise SchedulerError(f"scheduler headless model preflight failed: {exc}") from exc
-    for role in opencode_adapter_contract.ROLE_NAMES:
-        model = str(mappings[role]["model"])
-        try:
-            privacy.authorize_opencode_role(
-                worker,
-                role=role,
-                model=model,
-                opencode_cli=executable,
-                runner=runner,
-                consent_reader=lambda _prompt: "",
-            )
-        except privacy.PrivacyError as exc:
-            raise SchedulerError(
-                f"scheduler headless privacy preflight failed for {role} ({model}): {exc}; "
-                "create a valid time-bounded privacy grant interactively or choose a compliant model profile"
-            ) from exc
+            f"scheduler headless model/privacy preflight failed: {exc}; "
+            "configure concrete role routes before installing the scheduler"
+        ) from exc
 
+    try:
+        privacy_authorization.authorize_headless(
+            worker,
+            evidence.values(),
+        )
+    except privacy_authorization.PrivacyConsentRequired as exc:
+        routes = "\n".join(
+            f"  {item.role:<13} {item.route}" for item in exc.decisions
+        )
+        raise SchedulerError(
+            "scheduler privacy preflight requires consent for:\n"
+            + routes
+            + "\nRun `autodev privacy consent` in the source repository "
+            "(or choose a compliant model profile), then retry "
+            "`autodev scheduler install`."
+        ) from exc
+    except privacy.PrivacyError as exc:
+        raise SchedulerError(
+            f"scheduler privacy preflight rejected the configured route: {exc}"
+        ) from exc
 
 def _load_registration(path: Path) -> SchedulerRegistration | None:
     path = path.expanduser().resolve()

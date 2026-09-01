@@ -5,7 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from automation import privacy
+from automation import opencode_privacy_adapter, privacy, privacy_authorization
 from automation.provider_contract import ModelConfig, ModelProvider, ProviderResponse
 
 
@@ -278,13 +278,14 @@ class PrivacyTests(unittest.TestCase):
                 )
                 return SimpleNamespace(returncode=0, stdout=json.dumps(resolved), stderr="")
 
-            decision, env = privacy.authorize_opencode_role(
+            evidence, env = opencode_privacy_adapter.evaluate_role(
                 repo,
                 role="implementer",
                 model="openrouter/vendor/model",
                 opencode_cli="opencode",
                 runner=runner,
             )
+            decision = privacy_authorization.authorize_evaluated(repo, evidence)
 
         self.assertEqual(decision.outcome, "ALLOW")
         inline = json.loads(env["OPENCODE_CONFIG_CONTENT"])
@@ -304,13 +305,14 @@ class PrivacyTests(unittest.TestCase):
                 resolved = json.loads(raw) if raw else {"providers": {"openrouter": {"models": {}}}}
                 return SimpleNamespace(returncode=0, stdout=json.dumps(resolved), stderr="")
 
-            decision, env = privacy.authorize_opencode_role(
+            evidence, env = opencode_privacy_adapter.evaluate_role(
                 repo,
                 role="planner",
                 model="openrouter/vendor/model",
                 opencode_cli="opencode",
                 runner=runner,
             )
+            decision = privacy_authorization.authorize_evaluated(repo, evidence)
 
         self.assertEqual(decision.outcome, "ALLOW")
         self.assertEqual(
@@ -342,13 +344,17 @@ class PrivacyTests(unittest.TestCase):
                 }
                 return SimpleNamespace(returncode=0, stdout=json.dumps(resolved), stderr="")
 
+            evidence, _ = opencode_privacy_adapter.evaluate_role(
+                repo,
+                role="planner",
+                model="openrouter/vendor/model",
+                opencode_cli="opencode",
+                runner=runner,
+            )
             with self.assertRaises(privacy.PrivacyError):
-                privacy.authorize_opencode_role(
+                privacy_authorization.authorize_evaluated(
                     repo,
-                    role="planner",
-                    model="openrouter/vendor/model",
-                    opencode_cli="opencode",
-                    runner=runner,
+                    evidence,
                     consent_reader=lambda _: "no",
                 )
 
@@ -357,14 +363,15 @@ class PrivacyTests(unittest.TestCase):
     def test_opencode_openai_is_not_assumed_to_have_api_business_policy(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = self._repo(temp_dir, profile="no-training", consent_mode="deny")
+            evidence, _ = opencode_privacy_adapter.evaluate_role(
+                repo,
+                role="planner",
+                model="openai/gpt-example",
+                opencode_cli="opencode",
+                runner=lambda *args, **kwargs: None,
+            )
             with self.assertRaises(privacy.PrivacyError):
-                privacy.authorize_opencode_role(
-                    repo,
-                    role="planner",
-                    model="openai/gpt-example",
-                    opencode_cli="opencode",
-                    runner=lambda *args, **kwargs: None,
-                )
+                privacy_authorization.authorize_evaluated(repo, evidence)
 
     def test_exact_headless_consent_is_narrowly_scoped(self):
         config = ModelConfig(
