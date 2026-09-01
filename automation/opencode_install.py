@@ -13,6 +13,27 @@ WINDOWS_CALLER_TARGET = Path(".github") / "workflows" / "autodev-windows-verific
 WINDOWS_SETUP_PLACEHOLDER = "      # __AUTODEV_REPOSITORY_SETUP__"
 
 
+def _top_level_block(text: str, key: str) -> str:
+    lines = text.splitlines(keepends=True)
+    start = next((index for index, line in enumerate(lines) if line == f"{key}:\n"), None)
+    if start is None:
+        return ""
+    end = start + 1
+    while end < len(lines):
+        line = lines[end]
+        if line.strip() and not line.startswith((" ", "\t")):
+            break
+        end += 1
+    return "".join(lines[start:end]).rstrip("\n")
+
+
+def _preserve_target_workflow_metadata(rendered_workflow: str, existing_workflow: str) -> str:
+    concurrency = _top_level_block(existing_workflow, "concurrency")
+    if not concurrency or _top_level_block(rendered_workflow, "concurrency"):
+        return rendered_workflow
+    return rendered_workflow.replace("\njobs:\n", f"\n{concurrency}\n\njobs:\n", 1)
+
+
 def _render_windows_setup(config: dict[str, object] | None) -> str:
     setup = config.get("setup") if config else None
     if not isinstance(setup, dict):
@@ -72,6 +93,11 @@ def install_assets(
         rendered_workflow = workflow_text.replace(WINDOWS_SETUP_PLACEHOLDER, rendered_setup)
     else:
         rendered_workflow = workflow_text.replace(f"{WINDOWS_SETUP_PLACEHOLDER}\n\n", "")
+    if workflow_target.is_file():
+        rendered_workflow = _preserve_target_workflow_metadata(
+            rendered_workflow,
+            workflow_target.read_text(encoding="utf-8"),
+        )
     workflow_target.write_text(rendered_workflow, encoding="utf-8")
     if workflow_target not in installed:
         installed.append(workflow_target)
