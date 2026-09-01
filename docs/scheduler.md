@@ -23,7 +23,7 @@ The queue policy must allow autonomous execution. Issues still require the human
 autodev scheduler install
 ```
 
-The built-in cadence is 15 minutes. A user-local default can be set once with `autodev config scheduler-cadence MINUTES`; an explicit install option always wins. Override it for one installation with:
+The built-in cadence is 15 minutes. A user-local default can be set once with `autodev config scheduler-cadence MINUTES`; an explicit install option always wins. The user-config location and schema are documented in [`configuration.md`](configuration.md). Override it for one installation with:
 
 ```text
 autodev scheduler install --cadence-minutes 30
