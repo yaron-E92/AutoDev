@@ -117,9 +117,12 @@ class OpenCodeRoleRuntime:
                 f"scheduler runtime preflight failed for {self.name}: {exc}"
             ) from exc
         try:
+            discovery_env = dict(os.environ)
+            discovery_env["NO_COLOR"] = "1"
             completed = runner(
                 [executable, "agent", "list"],
                 cwd=repo,
+                env=discovery_env,
                 text=True,
                 encoding="utf-8",
                 errors="replace",
