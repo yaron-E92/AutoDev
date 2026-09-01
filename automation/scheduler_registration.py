@@ -169,12 +169,6 @@ def _ensure_worker(
         ["config", "credential.https://github.com.helper", credential_helper],
         runner=runner,
     )
-    if not created and _git_status(worker, runner=runner):
-        existing = queue_selection.inspect_existing_run(worker)
-        if existing.state == "NONE":
-            raise SchedulerError(
-                f"dedicated worker contains unexpected local changes: {worker}; AutoDev will not reset or delete them"
-            )
     _validate_worker_policy(source, worker)
     return worker, _default_branch(worker, runner=runner)
 
@@ -371,6 +365,13 @@ def install_scheduler(
         )
     except role_runtime.RoleRuntimeError as exc:
         raise SchedulerError(str(exc)) from exc
+    if _git_status(worker, runner=runner):
+        existing_run = queue_selection.inspect_existing_run(worker)
+        if existing_run.state == "NONE":
+            raise SchedulerError(
+                f"dedicated worker contains unexpected local changes after runtime provisioning: "
+                f"{worker}; AutoDev will not reset or delete them"
+            )
     _validate_headless_model_policy(
         worker,
         runner=runner,
