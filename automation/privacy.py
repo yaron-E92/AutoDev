@@ -411,7 +411,7 @@ def authorize_direct_call(
             return decision
         decision.outcome = "CONSENT_REQUIRED"
         decision.reason = _gap(policy, decision)
-        return _consent_or_block(repo, policy, decision, consent_reader)
+        return _authorize_evaluated_decision(repo, decision, consent_reader)
 
     training, retention, duration, source = _classify(provider_id)
     decision = PrivacyDecision(
@@ -425,7 +425,21 @@ def authorize_direct_call(
         return decision
     decision.outcome = "CONSENT_REQUIRED"
     decision.reason = _gap(policy, decision)
-    return _consent_or_block(repo, policy, decision, consent_reader)
+    return _authorize_evaluated_decision(repo, decision, consent_reader)
+
+
+def _authorize_evaluated_decision(
+    repo: Path,
+    decision: PrivacyDecision,
+    consent_reader: Callable[[str], str] | None,
+) -> PrivacyDecision:
+    from automation import privacy_authorization
+
+    return privacy_authorization.authorize_evaluated(
+        repo,
+        decision,
+        consent_reader=consent_reader,
+    )
 
 
 def _deep_merge(base: dict[str, object], overlay: dict[str, object]) -> dict[str, object]:
