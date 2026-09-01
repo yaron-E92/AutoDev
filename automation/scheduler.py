@@ -257,13 +257,15 @@ def _claim_terminal_state(coordinator_state: str) -> bool:
     }
 
 
-def _dispatch_state(coordinator_state: str) -> str:
+def _dispatch_state(coordinator_state: str, *, coordinator_exit_code: int = 0) -> str:
     normalized = coordinator_state.casefold().replace("_", "").replace("-", "")
     if normalized in {"readyforreview", "prready"}:
         return "PR_READY"
     if normalized in {"attentionrequired", "attention"}:
         return "ATTENTION_REQUIRED"
     if normalized in {"blocked", "failed", "terminalfailed"}:
+        return "RUN_HEALTH_BLOCKED"
+    if coordinator_exit_code != 0:
         return "RUN_HEALTH_BLOCKED"
     return "DISPATCHED"
 
@@ -476,7 +478,10 @@ def run_once(
             print(json.dumps(result.to_json(), sort_keys=True), file=stderr)
             return 2
 
-        dispatch_state = _dispatch_state(coordinator_state)
+        dispatch_state = _dispatch_state(
+            coordinator_state,
+            coordinator_exit_code=code,
+        )
         release_error = False
         if latest_claim is not None and _claim_terminal_state(coordinator_state):
             release_error = not claim_lease.release_claim(
