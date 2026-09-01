@@ -72,6 +72,7 @@ from automation.scheduler_types import (
     SchedulerError,
     SchedulerRegistration,
     SchedulerStatus,
+    _dispatch_state,
     _now,
     _platform_name,
     _repo_parts,
@@ -239,19 +240,6 @@ def _claim_terminal_state(coordinator_state: str) -> bool:
         "failed",
         "terminalfailed",
     }
-
-
-def _dispatch_state(coordinator_state: str, *, coordinator_exit_code: int = 0) -> str:
-    normalized = coordinator_state.casefold().replace("_", "").replace("-", "")
-    if normalized in {"readyforreview", "prready"}:
-        return "PR_READY"
-    if normalized in {"attentionrequired", "attention"}:
-        return "ATTENTION_REQUIRED"
-    if normalized in {"blocked", "failed", "terminalfailed"}:
-        return "RUN_HEALTH_BLOCKED"
-    if coordinator_exit_code != 0:
-        return "RUN_HEALTH_BLOCKED"
-    return "DISPATCHED"
 
 
 def _capacity_result(
