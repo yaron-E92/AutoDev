@@ -94,7 +94,7 @@ def provision_scheduler_worker_assets(
         if target.is_file():
             current_hash = _sha256(target.read_bytes())
             if previous_hash:
-                if current_hash != previous_hash:
+                if current_hash not in {previous_hash, canonical_hash}:
                     raise OpenCodeAdapterError(
                         f"scheduler-managed OpenCode asset was modified unexpectedly: {relative_text}; "
                         "AutoDev will not overwrite it"
