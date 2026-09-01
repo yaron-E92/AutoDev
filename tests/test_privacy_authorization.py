@@ -220,6 +220,10 @@ class PrivacyAuthorizationTests(unittest.TestCase):
                         "automation.scheduler_registration._validate_headless_worker_transport"
                     ),
                     mock.patch(
+                        "automation.scheduler_registration._git_status",
+                        return_value="",
+                    ),
+                    mock.patch(
                         "automation.scheduler_registration.role_runtime.select_runtime",
                         return_value=(runtime, "test"),
                     ),
@@ -279,6 +283,10 @@ class PrivacyAuthorizationTests(unittest.TestCase):
                     ),
                     mock.patch(
                         "automation.scheduler_registration._validate_headless_worker_transport"
+                    ),
+                    mock.patch(
+                        "automation.scheduler_registration._git_status",
+                        return_value="",
                     ),
                     mock.patch(
                         "automation.scheduler_registration.role_runtime.select_runtime",
