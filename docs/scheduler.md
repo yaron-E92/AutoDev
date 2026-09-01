@@ -23,7 +23,7 @@ The queue policy must allow autonomous execution. Issues still require the human
 autodev scheduler install
 ```
 
-The default cadence is 15 minutes. Override it with:
+The built-in cadence is 15 minutes. A user-local default can be set once with `autodev config scheduler-cadence MINUTES`; an explicit install option always wins. Override it for one installation with:
 
 ```text
 autodev scheduler install --cadence-minutes 30
@@ -70,6 +70,10 @@ The scheduler registration is stored separately under:
 ```
 
 Before starting new work, the worker fetches the remote, verifies that no unexpected local changes are present, checks out the recorded default branch, and fast-forwards it to the corresponding remote branch.
+
+The dedicated worker uses a canonical GitHub HTTPS origin with the GitHub CLI credential helper rather than copying an interactive checkout's SSH transport. Scheduler Git/GitHub subprocesses disable terminal prompting and SSH uses batch mode, so an encrypted developer SSH key can never turn a cron/systemd/Task Scheduler tick into a passphrase prompt. Installation validates non-interactive fetch and dry-run push access before registering the native scheduler.
+
+Installation also performs a headless model/privacy preflight inside the dedicated worker. Every runnable AutoDev role must resolve to a concrete `provider/model` from an explicit OpenCode agent mapping or selected AutoDev model profile, and the route must already satisfy repository privacy policy or an existing valid grant. The installer does not create or widen consent.
 
 AutoDev does **not** run `git reset --hard` or `git clean` to make a scheduler tick succeed. Unexpected worker modifications stop the tick and require inspection.
 
