@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import subprocess
 import sys
 from pathlib import Path
@@ -13,62 +12,6 @@ from automation.privacy_grant_matching import (
     bypass_grants,
     matching_grant,
 )
-
-def _audit_grant_use(
-    repo: Path,
-    decision: privacy.PrivacyDecision,
-    record: dict[str, object],
-) -> None:
-    current = repo / ".autodev-run" / "current"
-    path = (
-        current if current.exists() else repo / ".autodev-run"
-    ) / privacy.PRIVACY_AUDIT
-    payload = decision.safe_metadata()
-    payload.update(
-        {
-            "event": "persistent-consent-use",
-            "consent_reference": str(record.get("id", "")),
-            "consent_grant_scope": str(record.get("scope", "")),
-            "consent_duration": str(record.get("duration", "")),
-            "consent_expires_at": str(record.get("expires_at", ""))
-            or "until-revoked",
-        }
-    )
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(payload, sort_keys=True) + "\n")
-    except OSError:
-        return
-
-def _install_privacy_gate() -> None:
-    current = privacy._consent_or_block
-    if getattr(current, "_autodev_persistent_grants", False):
-        return
-    original = current
-
-    def consent_or_block(
-        repo: Path,
-        policy: privacy.PrivacyPolicy,
-        decision: privacy.PrivacyDecision,
-        consent_reader,
-    ) -> privacy.PrivacyDecision:
-        record = matching_grant(repo, policy, decision)
-        if record is not None:
-            decision.outcome = "ALLOW"
-            decision.enforcement_state = "user-consented"
-            expiry = str(record.get("expires_at", "")) or "until revoked"
-            decision.consent_scope = (
-                f"pre-authorized {record.get('scope', 'persistent')} grant "
-                f"{record.get('id', '')} until {expiry}"
-            )
-            privacy._audit(repo, decision)
-            _audit_grant_use(repo, decision, record)
-            return decision
-        return original(repo, policy, decision, consent_reader)
-
-    consent_or_block._autodev_persistent_grants = True  # type: ignore[attr-defined]
-    privacy._consent_or_block = consent_or_block
 
 def _persistent_duration_from_choice(choice: str) -> str:
     normalized = choice.strip().casefold()
@@ -230,6 +173,7 @@ def _install_run_consent_hook() -> None:
     privacy_consent.ensure_run_consent = ensure_run_consent
 
 def install(*, run_consent: bool = False) -> None:
-    _install_privacy_gate()
+    # Persistent grants are enforced by privacy_authorization for every runtime.
+    # This module now only extends the interactive run-consent UX.
     if run_consent:
         _install_run_consent_hook()
