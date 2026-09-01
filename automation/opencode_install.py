@@ -15,7 +15,10 @@ WINDOWS_SETUP_PLACEHOLDER = "      # __AUTODEV_REPOSITORY_SETUP__"
 
 def _top_level_block(text: str, key: str) -> str:
     lines = text.splitlines(keepends=True)
-    start = next((index for index, line in enumerate(lines) if line == f"{key}:\n"), None)
+    start = next(
+        (index for index, line in enumerate(lines) if line.rstrip("\r\n") == f"{key}:"),
+        None,
+    )
     if start is None:
         return ""
     end = start + 1
