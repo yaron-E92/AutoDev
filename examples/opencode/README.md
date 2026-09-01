@@ -9,7 +9,7 @@ These ready-to-copy examples demonstrate several supported ways to map AutoDev's
 | All-local Ollama | `all-local-ollama/opencode.jsonc` |
 | Lightweight coordinator + stronger implementer/fixer | `cheap-coordinator-strong-implementer/opencode.jsonc` |
 
-Copy the desired file to the target repository as `opencode.jsonc` only when that repository intentionally owns the mapping, then replace every `<...>` placeholder with a real OpenCode `provider/model-id`. If model routing is user-local instead, keep the equivalent mapping in normal user-owned OpenCode configuration rather than committing a repository copy.
+Copy the desired file to the target repository as `opencode.jsonc` only when that repository intentionally owns the mapping, then replace every `<...>` placeholder with a real OpenCode `provider/model-id`. If workflow-role routing is machine/user-local instead, prefer an AutoDev user model profile so the same choice is available to dedicated scheduler workers without committing a repository copy. See [`../../docs/configuration.md`](../../docs/configuration.md) and [`../autodev/README.md`](../autodev/README.md).
 
 Do not put provider API keys in these files. Credentials remain in normal OpenCode/provider/user environment or secret-store configuration.
 
