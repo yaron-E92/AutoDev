@@ -438,81 +438,27 @@ def authorize_opencode_role(
     base_env: dict[str, str] | None = None,
     consent_reader: Callable[[str], str] | None = None,
 ) -> tuple[PrivacyDecision, dict[str, str]]:
-    repo = repo.expanduser().resolve()
-    policy = load_policy(repo)
-    provider_id, model_id = _split_model(model)
-    if provider_id == "ollama":
-        provider_id = "ollama-cloud" if _ollama_cloud(model_id) else "local"
-    # OpenCode's `openai` ID can be API-key or OAuth/product-specific; do not apply API policy blindly.
-    if provider_id == "openai":
-        provider_id = "openai-opencode"
-    route = model or f"{provider_id}/{model_id}"
-    env = dict(base_env or os.environ)
+    """Compatibility wrapper for OpenCode callers.
 
-    if not policy.enabled:
-        decision = PrivacyDecision(
-            "ALLOW", role, route, provider_id or "unknown", model_id,
-            _scope(provider_id or "unknown"), enforcement_state="not-required",
-            reason="privacy policy disabled",
-        )
-        _audit(repo, decision)
-        return decision, env
+    Runtime-specific evidence is produced by the OpenCode adapter; final policy/grant
+    authorization is owned by the runtime-neutral privacy authorization layer.
+    """
+    from automation import opencode_privacy_adapter, privacy_authorization
 
-    if policy.local_only and provider_id != "local":
-        _block(
-            repo,
-            PrivacyDecision(
-                "BLOCK", role, route, provider_id or "unknown", model_id,
-                _scope(provider_id or "unknown"),
-                reason="repository privacy profile is local-only; cloud exceptions are forbidden",
-            ),
-        )
-
-    if provider_id == "openrouter":
-        controls = _openrouter_controls(policy)
-        initial = _debug_config(repo, opencode_cli, runner, env)
-        overlay = _openrouter_overlay(initial, model_id, controls)
-        env = _merge_inline_config(env, overlay)
-        resolved = _debug_config(repo, opencode_cli, runner, env)
-        request_verified = _resolved_openrouter_verified(resolved, model_id, policy)
-        decision = PrivacyDecision(
-            "ALLOW", role, route, provider_id, model_id, "routed-cloud",
-            training="unknown",
-            retention="unknown",
-            policy_source=(
-                "https://openrouter.ai/docs/guides/routing/provider-selection; "
-                "https://openrouter.ai/docs/guides/privacy/data-collection"
-            ),
-            enforcement_state="request-verified" if request_verified else "unverified",
-            controls=[f"provider.{key}={json.dumps(value)}" for key, value in controls.items()],
-            reason=(
-                "OpenCode effective config verifies downstream OpenRouter request controls, but "
-                "OpenRouter account-level content logging/data-sharing settings must also be verified or attested"
-            ),
-        )
-        _apply_attestation(policy, decision)
-        if request_verified and _satisfies(policy, decision):
-            _audit(repo, decision)
-            return decision, env
-        decision.outcome = "CONSENT_REQUIRED"
-        decision.reason = _gap(policy, decision)
-        return _consent_or_block(repo, policy, decision, consent_reader), env
-
-    training, retention, duration, source = _classify(provider_id or "unknown")
-    decision = PrivacyDecision(
-        "ALLOW", role, route, provider_id or "unknown", model_id,
-        _scope(provider_id or "unknown"), training, retention, duration,
-        policy_source=source,
-        enforcement_state="verified-effective" if provider_id == "local" else "enforced-by-provider-contract",
+    decision, env = opencode_privacy_adapter.evaluate_role(
+        repo,
+        role=role,
+        model=model,
+        opencode_cli=opencode_cli,
+        runner=runner,
+        base_env=base_env,
     )
-    _apply_attestation(policy, decision)
-    if _satisfies(policy, decision):
-        _audit(repo, decision)
-        return decision, env
-    decision.outcome = "CONSENT_REQUIRED"
-    decision.reason = _gap(policy, decision)
-    return _consent_or_block(repo, policy, decision, consent_reader), env
-
+    return (
+        privacy_authorization.authorize_evaluated(
+            repo, decision, consent_reader=consent_reader
+        ),
+        env,
+    )
 
 def _debug_config(repo: Path, executable: str, runner, env: dict[str, str]) -> dict[str, object]:
     completed = runner(
