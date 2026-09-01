@@ -82,6 +82,88 @@ class SchedulerRuntimeDispatchTests(unittest.TestCase):
             "DISPATCHED",
         )
 
+    def test_no_ready_work_does_not_require_runtime_discovery(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            registration_file, _ = self._registration(root)
+            stdout = io.StringIO()
+            selection = queue_selection.SelectionResult(
+                state="NO_READY_WORK",
+                repository="owner/repo",
+                explanation="nothing eligible",
+            )
+
+            with (
+                mock.patch(
+                    "automation.scheduler._prepare_worker",
+                    return_value=queue_selection.ExistingRun("NONE"),
+                ),
+                mock.patch(
+                    "automation.scheduler.queue_selection.select_next",
+                    return_value=selection,
+                ),
+                mock.patch(
+                    "automation.scheduler._validate_worker_runtime",
+                    side_effect=AssertionError(
+                        "runtime discovery must not run for an empty queue"
+                    ),
+                ),
+            ):
+                code = scheduler.run_once(
+                    registration_file,
+                    stdout=stdout,
+                    claiming_enabled=False,
+                )
+
+            self.assertEqual(code, 0)
+            self.assertEqual(json.loads(stdout.getvalue())["state"], "NO_READY_WORK")
+
+    def test_selected_work_validates_runtime_before_coordinator(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            registration_file, _ = self._registration(root)
+            selection = queue_selection.SelectionResult(
+                state="SELECTED",
+                repository="owner/repo",
+                issue_number=71,
+                explanation="selected",
+            )
+            order: list[str] = []
+
+            def validate(*args, **kwargs):
+                order.append("validate")
+
+            def coordinator(argv):
+                order.append("coordinator")
+                return 0
+
+            with (
+                mock.patch(
+                    "automation.scheduler._prepare_worker",
+                    return_value=queue_selection.ExistingRun("NONE"),
+                ),
+                mock.patch(
+                    "automation.scheduler.queue_selection.select_next",
+                    return_value=selection,
+                ),
+                mock.patch(
+                    "automation.scheduler._validate_worker_runtime",
+                    side_effect=validate,
+                ),
+                mock.patch(
+                    "automation.scheduler._coordinator_state",
+                    return_value="Prepared",
+                ),
+            ):
+                scheduler.run_once(
+                    registration_file,
+                    coordinator=coordinator,
+                    stdout=io.StringIO(),
+                    claiming_enabled=False,
+                )
+
+            self.assertEqual(order, ["validate", "coordinator"])
+
     def test_existing_durable_run_still_refreshes_runtime_before_resume(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -101,7 +183,7 @@ class SchedulerRuntimeDispatchTests(unittest.TestCase):
                     return_value=(runtime, "test"),
                 ),
                 mock.patch(
-                    "automation.scheduler.role_runtime.prepare_scheduler_worker"
+                    "automation.scheduler.role_runtime.provision_scheduler_worker"
                 ) as prepare_runtime,
             ):
                 existing = scheduler._prepare_worker(
