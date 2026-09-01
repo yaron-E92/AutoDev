@@ -215,6 +215,14 @@ class SchedulerBackendTests(unittest.TestCase):
 
 
 class SchedulerDispatchTests(unittest.TestCase):
+    def setUp(self):
+        self.runtime_validation = patch.object(
+            scheduler.scheduler_runtime_worker,
+            "validate_worker",
+        )
+        self.runtime_validation.start()
+        self.addCleanup(self.runtime_validation.stop)
+
     def test_no_ready_work_exits_without_coordinator_or_model_dispatch(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
