@@ -165,8 +165,8 @@ def _prepare_worker(
     fetch = ["fetch", "--prune", "origin"]
     _git(worker, fetch, runner=runner)
     existing = queue_selection.inspect_existing_run(worker)
+    _prepare_worker_runtime(worker, runner=runner)
     if existing.state != "NONE":
-        _prepare_worker_runtime(worker, runner=runner)
         return existing
     dirty = _git_status(worker, runner=runner)
     if dirty:
