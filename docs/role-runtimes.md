@@ -12,7 +12,9 @@ The runtime cannot decide which workflow stage runs next and cannot make artifac
 
 ## Default runtime
 
-`opencode` is the default runtime. It launches the installed AutoDev role agents and reads their effective model mapping from `opencode.json` / `opencode.jsonc`.
+`opencode` is the default runtime. It launches the installed AutoDev role agents and resolves effective workflow-role models from explicit OpenCode agent mappings, selected AutoDev user model profiles, and existing OpenCode inheritance in that precedence order.
+
+See [`configuration.md`](configuration.md) for the user-config schema and model-profile precedence.
 
 Inspect the effective OpenCode role/model mapping with:
 
