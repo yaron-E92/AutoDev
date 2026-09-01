@@ -180,6 +180,66 @@ class PrivacyAuthorizationTests(unittest.TestCase):
                         repo, runner=lambda *args, **kwargs: None, which=lambda command: command
                     )
 
+    def test_scheduler_install_with_valid_grant_reaches_backend_registration(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = self._repo(temp_dir)
+            home = Path(temp_dir) / "home"
+            policy = privacy.load_policy(repo)
+            decision = self._decision()
+            runtime = _FakeRuntime({"planner": decision})
+
+            with self._environment(temp_dir):
+                privacy_grant_commands.create_grant(
+                    repo, policy, [decision], duration="7d"
+                )
+                with (
+                    mock.patch(
+                        "automation.scheduler_registration._repo_root",
+                        return_value=repo,
+                    ),
+                    mock.patch(
+                        "automation.scheduler_registration._validate_source_policy"
+                    ),
+                    mock.patch(
+                        "automation.scheduler_registration.queue_github.resolve_github_repo",
+                        return_value="yaron-E92/PHOODAB",
+                    ),
+                    mock.patch(
+                        "automation.scheduler_registration._select_backend",
+                        return_value="cron",
+                    ),
+                    mock.patch(
+                        "automation.scheduler_registration._resolve_launcher",
+                        return_value="/usr/bin/autodev",
+                    ),
+                    mock.patch(
+                        "automation.scheduler_registration._ensure_worker",
+                        return_value=(repo, "main"),
+                    ),
+                    mock.patch(
+                        "automation.scheduler_registration._validate_headless_worker_transport"
+                    ),
+                    mock.patch(
+                        "automation.scheduler_registration.role_runtime.select_runtime",
+                        return_value=(runtime, "test"),
+                    ),
+                    mock.patch(
+                        "automation.scheduler_registration.claim_identity.worker_identity",
+                        return_value="worker-test",
+                    ),
+                    mock.patch(
+                        "automation.scheduler_registration._install_backend"
+                    ) as install_backend,
+                ):
+                    registration = scheduler_registration.install_scheduler(
+                        repo,
+                        home=home,
+                    )
+
+            self.assertEqual(registration.github_repository, "yaron-E92/PHOODAB")
+            self.assertEqual(registration.backend, "cron")
+            install_backend.assert_called_once()
+
     def test_scheduler_preflight_missing_grant_is_actionable(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = self._repo(temp_dir)
