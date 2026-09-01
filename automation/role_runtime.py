@@ -7,12 +7,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Mapping, Protocol
 
-from automation import run_manifest, workflow_stages
+from automation import run_manifest, user_config, workflow_stages
 
 
 DEFAULT_RUNTIME = "opencode"
 RUNTIME_ENV = "AUTODEV_ROLE_RUNTIME"
-USER_CONFIG_ENV = "AUTODEV_USER_CONFIG"
+USER_CONFIG_ENV = user_config.USER_CONFIG_ENV
 CONFIG_RELATIVE = Path(".autodev") / "config.json"
 _RUNTIME_NAME = re.compile(r"^[a-z][a-z0-9_-]*$")
 
@@ -117,23 +117,7 @@ def resolve_runtime_name(repo: Path, requested: str = "") -> tuple[str, str]:
 
 
 def user_config_path() -> Path | None:
-    explicit = os.environ.get(USER_CONFIG_ENV, "").strip()
-    if explicit:
-        return Path(explicit).expanduser()
-    xdg = os.environ.get("XDG_CONFIG_HOME", "").strip()
-    if xdg:
-        return Path(xdg).expanduser() / "autodev" / "config.json"
-    appdata = os.environ.get("APPDATA", "").strip()
-    if os.name == "nt" and appdata:
-        return Path(appdata).expanduser() / "AutoDev" / "config.json"
-    try:
-        home = Path.home()
-    except RuntimeError:
-        # Headless Windows/service accounts can legitimately have no resolvable
-        # home directory. That means there is no implicit user config; it must
-        # not prevent repository/default runtime selection.
-        return None
-    return home / ".config" / "autodev" / "config.json"
+    return user_config.config_path()
 
 
 def select_runtime(
