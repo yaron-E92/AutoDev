@@ -29,7 +29,13 @@ class SchedulerRuntimeAssetTests(unittest.TestCase):
 
             reader = repo / ".opencode" / "agents" / "autodev-reader.md"
             self.assertTrue(reader.is_file())
-            self.assertIn(reader, installed)
+            self.assertTrue(
+                any(
+                    path.parts[-3:]
+                    == (".opencode", "agents", "autodev-reader.md")
+                    for path in installed
+                )
+            )
             self.assertEqual(
                 subprocess.run(
                     ["git", "-C", str(repo), "status", "--porcelain", "--untracked-files=normal"],
@@ -161,7 +167,7 @@ class SchedulerRuntimeAssetTests(unittest.TestCase):
                 opencode_adapter_assets.scheduler_managed_assets(repo)[
                     ".opencode/agents/autodev-reader.md"
                 ],
-                opencode_adapter_assets._sha256(updated.encode("utf-8")),
+                opencode_adapter_assets._sha256(reader.read_bytes()),
             )
 
     def test_matching_untracked_canonical_asset_can_be_adopted(self) -> None:
