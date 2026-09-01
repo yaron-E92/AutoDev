@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 from typing import Callable, TextIO
 
-from automation import opencode_entrypoint, privacy, queue_selection, workflow_stages
+from automation import opencode_entrypoint, privacy, queue_selection, scheduler_runtime_worker, workflow_stages
 from automation.scheduler_backends import (
     _backend_state,
     _cron_command,
@@ -72,6 +72,7 @@ from automation.scheduler_types import (
     SchedulerError,
     SchedulerRegistration,
     SchedulerStatus,
+    _dispatch_state,
     _now,
     _platform_name,
     _repo_parts,
@@ -149,6 +150,7 @@ def _prepare_worker(
     fetch = ["fetch", "--prune", "origin"]
     _git(worker, fetch, runner=runner)
     existing = queue_selection.inspect_existing_run(worker)
+    scheduler_runtime_worker.provision_worker(worker, runner=runner)
     if existing.state != "NONE":
         return existing
     dirty = _git_status(worker, runner=runner)
@@ -162,6 +164,7 @@ def _prepare_worker(
         ["merge", "--ff-only", f"origin/{registration.default_branch}"],
         runner=runner,
     )
+    _prepare_worker_runtime(worker, runner=runner)
     dirty = _git_status(worker, runner=runner)
     if dirty:
         raise SchedulerError(
@@ -239,17 +242,6 @@ def _claim_terminal_state(coordinator_state: str) -> bool:
     }
 
 
-def _dispatch_state(coordinator_state: str) -> str:
-    normalized = coordinator_state.casefold().replace("_", "").replace("-", "")
-    if normalized in {"readyforreview", "prready"}:
-        return "PR_READY"
-    if normalized in {"attentionrequired", "attention"}:
-        return "ATTENTION_REQUIRED"
-    if normalized in {"blocked", "failed", "terminalfailed"}:
-        return "RUN_HEALTH_BLOCKED"
-    return "DISPATCHED"
-
-
 def _capacity_result(
     registration: SchedulerRegistration,
     *,
@@ -300,6 +292,7 @@ def run_once(
         claim_policy = claim_contract.ClaimPolicy()
         worker_id = ""
         excluded: set[int] = set()
+        runtime_validated = False
         if claiming_enabled:
             claim_policy = claim_identity.load_claim_policy(worker)
             worker_id = claim_identity.worker_identity(home=home).worker_id
@@ -331,6 +324,9 @@ def run_once(
                 runner=runner,
                 excluded_issue_numbers=excluded,
             )
+            if selection.state == "SELECTED" and not runtime_validated:
+                scheduler_runtime_worker.validate_worker(worker, runner=runner)
+                runtime_validated = True
             if selection.state != "SELECTED" or not claiming_enabled:
                 break
             attempt = claim_lease.acquire_claim(
@@ -390,6 +386,10 @@ def run_once(
             _record_last_run(path, registration, result, started_at=started_at)
             print(json.dumps(result.to_json(), sort_keys=True), file=stderr)
             return 2
+
+        if selection.state == "RESUME_EXISTING" and not runtime_validated:
+            scheduler_runtime_worker.validate_worker(worker, runner=runner)
+            runtime_validated = True
 
         if claiming_enabled and selection.state == "RESUME_EXISTING":
             attempt = claim_lease.acquire_claim(
@@ -458,7 +458,10 @@ def run_once(
             print(json.dumps(result.to_json(), sort_keys=True), file=stderr)
             return 2
 
-        dispatch_state = _dispatch_state(coordinator_state)
+        dispatch_state = _dispatch_state(
+            coordinator_state,
+            coordinator_exit_code=code,
+        )
         release_error = False
         if latest_claim is not None and _claim_terminal_state(coordinator_state):
             release_error = not claim_lease.release_claim(

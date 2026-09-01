@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from automation import opencode_adapter_models
+from automation import opencode_adapter_assets, opencode_adapter_models
 
 from automation import opencode_adapter_contract
 
 import json
 import os
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -79,6 +80,108 @@ class OpenCodeRoleRuntime:
             }
             snapshots[role] = run_manifest.build_role_snapshot(configured, safe)
         return snapshots
+
+    def provision_scheduler_worker(
+        self,
+        repo: Path,
+        *,
+        runner: Callable[..., object] = subprocess.run,
+        which=None,
+    ) -> None:
+        repo = repo.expanduser().resolve()
+        try:
+            opencode_adapter_assets.provision_scheduler_worker_assets(
+                repo,
+                runner=runner,
+            )
+        except opencode_adapter_contract.OpenCodeAdapterError as exc:
+            raise role_runtime.RoleRuntimeError(
+                f"scheduler runtime provisioning failed for {self.name}: {exc}"
+            ) from exc
+        # Provisioning may add/refresh agent definitions that affect resolved
+        # OpenCode configuration, so stale mappings must never survive it.
+        self._mappings = {}
+
+    def validate_scheduler_worker(
+        self,
+        repo: Path,
+        *,
+        runner: Callable[..., object] = subprocess.run,
+        which=None,
+    ) -> None:
+        repo = repo.expanduser().resolve()
+        try:
+            executable = opencode_cli.resolve_opencode_cli(which=which)
+        except opencode_cli.OpenCodeCliError as exc:
+            raise role_runtime.RoleRuntimeError(
+                f"scheduler runtime preflight failed for {self.name}: {exc}"
+            ) from exc
+        try:
+            discovery_env = dict(os.environ)
+            discovery_env["NO_COLOR"] = "1"
+            completed = runner(
+                [executable, "agent", "list"],
+                cwd=repo,
+                env=discovery_env,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                check=False,
+            )
+        except OSError as exc:
+            raise role_runtime.RoleRuntimeError(
+                f"scheduler runtime preflight failed for {self.name}: "
+                f"OpenCode agent discovery could not be launched: {exc}"
+            ) from exc
+        returncode = int(getattr(completed, "returncode", 1))
+        if returncode != 0:
+            stderr = str(getattr(completed, "stderr", "") or "").strip()
+            detail = f": {stderr}" if stderr else ""
+            raise role_runtime.RoleRuntimeError(
+                f"scheduler runtime preflight failed for {self.name}: "
+                f"`opencode agent list` exited with code {returncode}{detail}"
+            )
+        output = str(getattr(completed, "stdout", "") or "")
+        required = [
+            opencode_adapter_contract.AUTODEV_AGENT_BY_ROLE[role]
+            for role in opencode_adapter_contract.ROLE_NAMES
+        ]
+        missing = [
+            agent
+            for agent in required
+            if re.search(
+                rf"(?m)^\s*{re.escape(agent)}\s+\(",
+                output,
+            )
+            is None
+        ]
+        if missing:
+            raise role_runtime.RoleRuntimeError(
+                f"scheduler runtime preflight failed for {self.name}: required "
+                "AutoDev agent(s) are not discoverable in the dedicated worker: "
+                + ", ".join(missing)
+                + ". AutoDev provisioned the maintained runtime assets, but "
+                "OpenCode still cannot resolve them; inspect the worker/runtime "
+                "installation and retry `autodev scheduler install`."
+            )
+
+        # Reuse the same resolved configuration for model/privacy preflight.
+        try:
+            config = opencode_adapter_models.resolve_opencode_config(
+                repo,
+                runner=runner,
+                which=which,
+            )
+            self._mappings = opencode_adapter_models.apply_autodev_model_profile(
+                repo,
+                opencode_adapter_models.model_mappings_from_config(config),
+            )
+        except opencode_adapter_contract.OpenCodeAdapterError as exc:
+            raise role_runtime.RoleRuntimeError(
+                f"scheduler runtime preflight failed for {self.name}: {exc}"
+            ) from exc
 
     def privacy_evidence(
         self,

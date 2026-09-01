@@ -24,19 +24,19 @@ def reject_unsupported_model_overrides(arguments: str) -> None:
             "before starting the OpenCode session"
         )
 
-def resolve_opencode_model_mappings(
+def resolve_opencode_config(
     repo: Path,
     *,
     runner=subprocess.run,
     which=None,
-) -> dict[str, dict[str, str]]:
+) -> dict[str, object]:
     repo = repo.expanduser().resolve()
     if which is None:
         which = shutil.which if runner is subprocess.run else lambda command: command
     opencode_cli = which("opencode")
     if not opencode_cli:
         raise OpenCodeAdapterError(
-            "OpenCode CLI was not found on PATH; model mapping introspection requires an installed `opencode` CLI"
+            "OpenCode CLI was not found on PATH; configuration introspection requires an installed `opencode` CLI"
         )
     try:
         completed = runner(
@@ -65,12 +65,23 @@ def resolve_opencode_model_mappings(
         config = json.loads(raw or "{}")
     except json.JSONDecodeError as exc:
         raise OpenCodeAdapterError(
-            "opencode debug config returned invalid JSON; AutoDev cannot safely resolve role models"
+            "opencode debug config returned invalid JSON; AutoDev cannot safely inspect runtime configuration"
         ) from exc
     if not isinstance(config, dict):
         raise OpenCodeAdapterError(
-            "opencode debug config returned an unexpected value; AutoDev cannot safely resolve role models"
+            "opencode debug config returned an unexpected value; AutoDev cannot safely inspect runtime configuration"
         )
+    return config
+
+
+def resolve_opencode_model_mappings(
+    repo: Path,
+    *,
+    runner=subprocess.run,
+    which=None,
+) -> dict[str, dict[str, str]]:
+    repo = repo.expanduser().resolve()
+    config = resolve_opencode_config(repo, runner=runner, which=which)
     return apply_autodev_model_profile(repo, model_mappings_from_config(config))
 
 def apply_autodev_model_profile(

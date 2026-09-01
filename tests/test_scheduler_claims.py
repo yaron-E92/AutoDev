@@ -64,6 +64,14 @@ class DummyLease:
 
 
 class SchedulerClaimTests(unittest.TestCase):
+    def setUp(self):
+        self.runtime_validation = patch.object(
+            scheduler.scheduler_runtime_worker,
+            "validate_worker",
+        )
+        self.runtime_validation.start()
+        self.addCleanup(self.runtime_validation.stop)
+
     def _common(self):
         return (
             patch.object(scheduler, "_prepare_worker", return_value=queue_selection.ExistingRun("NONE")),

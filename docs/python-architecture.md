@@ -30,7 +30,7 @@ The retired standalone issue-runner and evaluation layers are not alternate prod
 - `role_coordinator_contract.py`, `role_coordinator_state.py` — coordinator state/contract.
 - `role_coordinator_runtime.py`, `role_coordinator_stages.py`, `role_coordinator_flow.py` — runtime execution, stage transitions and coordinator flow.
 - `coordination_contract.py`, `coordination_state.py` — shared runtime-neutral coordinator primitives.
-- `role_runtime.py`, `opencode_role_runtime.py`, `role_resume.py` — runtime abstraction and durable role resume.
+- `role_runtime.py`, `opencode_role_runtime.py`, `role_resume.py` — runtime abstraction, optional scheduler-worker provisioning/preflight hooks, and durable role resume.
 
 ### Scheduling and autonomous queueing
 
@@ -38,6 +38,7 @@ The retired standalone issue-runner and evaluation layers are not alternate prod
 - `scheduler_types.py` — scheduler state and contracts.
 - `scheduler_process.py` — process/Git execution.
 - `scheduler_backends.py` — native scheduler backends.
+- `scheduler_runtime_worker.py` — runtime-owned worker provisioning/validation boundary used by scheduler dispatch.
 - `scheduler_registration.py` — install/uninstall lifecycle.
 - `scheduler_health_*` — health state, probes, notification decisions, lifecycle and CLI.
 - `queue_contract.py`, `queue_policy.py` — queue state and repository policy.
@@ -80,7 +81,7 @@ Resume-budget semantics live in the repair-budget policy layer; workflow orchest
 
 ### OpenCode integration and resume
 
-- `opencode_adapter_contract.py`, `opencode_adapter_assets.py`, `opencode_adapter_models.py` — adapter contract, installed assets and role/model mapping.
+- `opencode_adapter_contract.py`, `opencode_adapter_assets.py`, `opencode_adapter_models.py` — adapter contract, repository/worker-owned asset provisioning, resolved OpenCode configuration and role/model mapping.
 - `opencode_privacy_adapter.py` — OpenCode-specific route/privacy evidence and runtime configuration overlays; it does not own grants.
 - `opencode_adapter_storage.py`, `opencode_adapter_handoff.py`, `opencode_adapter_protocol.py` — durable state, handoffs and protocol checks.
 - `opencode_adapter_roles.py`, `opencode_adapter_workflow.py`, `opencode_adapter_cli.py` — role preparation/acceptance, workflow integration and CLI.

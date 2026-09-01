@@ -175,6 +175,10 @@ class DocumentationContractTests(unittest.TestCase):
         self.assertNotIn("autodev install --user", prerequisites)
         self.assertIn("runtime-neutral AutoDev privacy layer", scheduler)
         self.assertIn("autodev privacy consent", scheduler)
+        self.assertIn(".git/autodev/scheduler-runtime-assets/", scheduler)
+        self.assertIn(".git/info/exclude", scheduler)
+        self.assertIn("opencode agent list", scheduler)
+        self.assertIn("reported as `RUN_HEALTH_BLOCKED`, not merely `DISPATCHED`", scheduler)
 
     def test_windows_verification_uses_public_repository_setup(self) -> None:
         windows = self._read("docs/windows-verification.md")

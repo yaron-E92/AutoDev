@@ -73,11 +73,18 @@ Before starting new work, the worker fetches the remote, verifies that no unexpe
 
 The dedicated worker uses a canonical GitHub HTTPS origin with the GitHub CLI credential helper rather than copying an interactive checkout's SSH transport. Scheduler Git/GitHub subprocesses disable terminal prompting and SSH uses batch mode, so an encrypted developer SSH key can never turn a cron/systemd/Task Scheduler tick into a passphrase prompt. Installation validates non-interactive fetch and dry-run push access before registering the native scheduler.
 
+For the selected role runtime, AutoDev also provisions scheduler-owned runtime assets into the dedicated worker before installation can succeed. For the current OpenCode runtime this includes the maintained AutoDev `.opencode/agents/` and `.opencode/commands/` files needed by the worker. Repository-tracked files at the same paths remain repository-owned and are never overwritten.
+
+Worker-owned runtime files are recorded in a manifest under `.git/autodev/scheduler-runtime-assets/` and excluded by exact path through the worker's `.git/info/exclude`. They therefore do not enter Git status, workspace/source identity, implementation diffs, commits, or PRs. Existing untracked files are adopted only when they exactly match the canonical AutoDev asset; conflicting or modified files fail closed instead of being overwritten.
+
+OpenCode provisioning is followed by the model-free `opencode agent list` preflight. All six workflow agents must be discoverable before native scheduler registration. A file merely existing on disk is not considered sufficient.
+
+The same runtime provisioning and discovery check runs again immediately before every scheduler dispatch. This refreshes scheduler-owned assets after an AutoDev package upgrade and detects unexpected modifications to ignored worker-owned runtime files before any role can run.
 Installation also performs a headless model/privacy preflight inside the dedicated worker. The selected role runtime supplies effective route/privacy evidence; the runtime-neutral AutoDev privacy layer then applies repository policy and persistent-grant matching. Every runnable role must resolve to a concrete route, and each route must already satisfy repository privacy policy or an existing valid grant. The installer does not create, widen, renew, or replace consent.
 
 If consent is missing, installation fails before native scheduler registration with the uncovered role/routes and an actionable instruction to run `autodev privacy consent` in the source repository, then retry `autodev scheduler install`. SSH and HTTPS remotes for the same canonical GitHub `OWNER/REPO` share the same persistent-grant repository identity.
 
-AutoDev does **not** run `git reset --hard` or `git clean` to make a scheduler tick succeed. Unexpected worker modifications stop the tick and require inspection.
+AutoDev does **not** run `git reset --hard` or `git clean` to make a scheduler tick succeed. Unexpected worker modifications stop the tick and require inspection. Scheduler-owned runtime files are the narrow exception to ordinary untracked-file handling: they are explicitly owned, hash-verified, and excluded as described above; unrelated worker changes remain fatal.
 
 A durable in-progress AutoDev run is different: its checkpointed branch and patch are preserved so the shared resume path can continue it before unrelated new work is selected.
 
@@ -227,7 +234,7 @@ CLAIM_RELEASE_FAILED
 RUN_HEALTH_BLOCKED
 ```
 
-`NO_READY_WORK`, `NO_CAPACITY`, `OVERLAP_SUPPRESSED`, and `ATTENTION_REQUIRED` are expected scheduler outcomes. Claim conflicts/release failures are surfaced because continuing after ownership ambiguity would violate the one-worker-per-issue invariant.
+`NO_READY_WORK`, `NO_CAPACITY`, `OVERLAP_SUPPRESSED`, and `ATTENTION_REQUIRED` are expected scheduler outcomes. Claim conflicts/release failures are surfaced because continuing after ownership ambiguity would violate the one-worker-per-issue invariant. A coordinator that exits nonzero without a more specific terminal state is reported as `RUN_HEALTH_BLOCKED`, not merely `DISPATCHED`.
 
 ## Notifications
 
