@@ -38,6 +38,7 @@ The retired standalone issue-runner and evaluation layers are not alternate prod
 - `scheduler_types.py` — scheduler state and contracts.
 - `scheduler_process.py` — process/Git execution.
 - `scheduler_backends.py` — native scheduler backends.
+- `scheduler_runtime_worker.py` — runtime-owned worker provisioning/validation boundary used by scheduler dispatch.
 - `scheduler_registration.py` — install/uninstall lifecycle.
 - `scheduler_health_*` — health state, probes, notification decisions, lifecycle and CLI.
 - `queue_contract.py`, `queue_policy.py` — queue state and repository policy.
