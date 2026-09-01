@@ -203,9 +203,11 @@ def _validate_headless_model_policy(
     *,
     runner: Callable[..., object],
     which: Callable[[str], str | None],
+    runtime=None,
 ) -> None:
     try:
-        runtime, _ = role_runtime.select_runtime(worker)
+        if runtime is None:
+            runtime, _ = role_runtime.select_runtime(worker)
         evidence = runtime.privacy_evidence(
             worker,
             runner=runner,
@@ -359,7 +361,22 @@ def install_scheduler(
         which=which,
     )
     _validate_headless_worker_transport(worker, runner=runner)
-    _validate_headless_model_policy(worker, runner=runner, which=which)
+    try:
+        runtime, _ = role_runtime.select_runtime(worker)
+        role_runtime.prepare_scheduler_worker(
+            runtime,
+            worker,
+            runner=runner,
+            which=which,
+        )
+    except role_runtime.RoleRuntimeError as exc:
+        raise SchedulerError(str(exc)) from exc
+    _validate_headless_model_policy(
+        worker,
+        runner=runner,
+        which=which,
+        runtime=runtime,
+    )
     claim_identity.worker_identity(home=home)
     registration = SchedulerRegistration(
         github_repository=resolved,
