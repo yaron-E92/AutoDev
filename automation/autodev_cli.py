@@ -49,7 +49,7 @@ def _help() -> str:
         "  autodev models             Show effective OpenCode role/model mappings.\n"
         "  --runtime NAME             Override role runtime for issue-to-pr/resume.\n"
         "  Runtime precedence         explicit > AUTODEV_ROLE_RUNTIME > repository > user > opencode.\n"
-        "  Model routing              AutoDev profiles fill inherited roles; explicit OpenCode agent models win.\n"
+        "  Model routing              AutoDev profiles fill inherited roles; explicit opencode.json / opencode.jsonc agent models win.\n"
         "\n"
         "Contributors:\n"
         "  End-user `autodev` commands are separate from source-development checks.\n"
