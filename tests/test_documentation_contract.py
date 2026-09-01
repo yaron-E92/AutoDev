@@ -76,9 +76,10 @@ class DocumentationContractTests(unittest.TestCase):
             "repositories",
             "scheduler.cadence_minutes",
             "autodev config profile use mixed --repo .",
-            "opencode.json / opencode.jsonc",
         ):
             self.assertIn(expected, configuration)
+        self.assertIn("opencode.json", configuration)
+        self.assertIn("opencode.jsonc", configuration)
 
         default = json.loads(self._read("examples/autodev/config.default.json"))
         self.assertEqual(default["version"], 1)
