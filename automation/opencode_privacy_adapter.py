@@ -152,7 +152,7 @@ def evaluate_role(
         initial = _debug_config(repo, opencode_cli, runner, env)
         overlay = _openrouter_overlay(initial, model_id, controls)
         env = _merge_inline_config(env, overlay)
-        resolved = privacy._debug_config(repo, opencode_cli, runner, env)
+        resolved = _debug_config(repo, opencode_cli, runner, env)
         request_verified = _resolved_openrouter_verified(resolved, model_id, policy)
         decision = privacy.PrivacyDecision(
             "ALLOW", role, route, provider, model_id, "routed-cloud",
