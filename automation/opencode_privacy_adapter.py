@@ -8,6 +8,110 @@ from pathlib import Path
 from automation import privacy
 
 
+def _debug_config(
+    repo: Path, executable: str, runner, env: dict[str, str]
+) -> dict[str, object]:
+    completed = runner(
+        [executable, "debug", "config"],
+        cwd=repo,
+        env=env,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        capture_output=True,
+        check=False,
+    )
+    if int(getattr(completed, "returncode", 1)) != 0:
+        raise privacy.PrivacyError(
+            "opencode debug config failed while verifying privacy controls"
+        )
+    try:
+        value = json.loads(str(getattr(completed, "stdout", "") or "{}"))
+    except json.JSONDecodeError as exc:
+        raise privacy.PrivacyError(
+            "opencode debug config returned invalid JSON while verifying privacy controls"
+        ) from exc
+    if not isinstance(value, dict):
+        raise privacy.PrivacyError(
+            "opencode debug config returned an unexpected value while verifying privacy controls"
+        )
+    return value
+
+
+def _openrouter_overlay(
+    config: dict[str, object], model_id: str, controls: dict[str, object]
+) -> dict[str, object]:
+    if "providers" in config:
+        return {"providers": {"openrouter": {"body": {"provider": controls}}}}
+    return {
+        "provider": {
+            "openrouter": {
+                "models": {model_id: {"options": {"provider": controls}}}
+            }
+        }
+    }
+
+
+def _resolved_openrouter_verified(
+    config: dict[str, object], model_id: str, policy: privacy.PrivacyPolicy
+) -> bool:
+    effective: dict[str, object] = {}
+    providers = config.get("providers")
+    if isinstance(providers, dict):
+        openrouter = providers.get("openrouter", {})
+        if isinstance(openrouter, dict):
+            body = openrouter.get("body", {})
+            if isinstance(body, dict) and isinstance(body.get("provider"), dict):
+                effective = dict(body["provider"])
+            models = openrouter.get("models", {})
+            model = models.get(model_id, {}) if isinstance(models, dict) else {}
+            if isinstance(model, dict):
+                model_body = model.get("body", {})
+                if isinstance(model_body, dict) and isinstance(
+                    model_body.get("provider"), dict
+                ):
+                    effective.update(model_body["provider"])
+    else:
+        providers_v1 = config.get("provider", {})
+        openrouter = (
+            providers_v1.get("openrouter", {})
+            if isinstance(providers_v1, dict)
+            else {}
+        )
+        models = openrouter.get("models", {}) if isinstance(openrouter, dict) else {}
+        model = models.get(model_id, {}) if isinstance(models, dict) else {}
+        options = model.get("options", {}) if isinstance(model, dict) else {}
+        if isinstance(options, dict) and isinstance(options.get("provider"), dict):
+            effective = dict(options["provider"])
+    return (
+        (not policy.no_training or effective.get("data_collection") == "deny")
+        and (not policy.zero_retention or effective.get("zdr") is True)
+    )
+
+
+def _merge_inline_config(
+    env: dict[str, str], overlay: dict[str, object]
+) -> dict[str, str]:
+    existing: dict[str, object] = {}
+    raw = env.get("OPENCODE_CONFIG_CONTENT", "").strip()
+    if raw:
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise privacy.PrivacyError(
+                "existing OPENCODE_CONFIG_CONTENT is invalid JSON"
+            ) from exc
+        if not isinstance(parsed, dict):
+            raise privacy.PrivacyError(
+                "existing OPENCODE_CONFIG_CONTENT must be a JSON object"
+            )
+        existing = parsed
+    result = dict(env)
+    result["OPENCODE_CONFIG_CONTENT"] = json.dumps(
+        privacy._deep_merge(existing, overlay), separators=(",", ":")
+    )
+    return result
+
 def evaluate_role(
     repo: Path,
     *,
@@ -45,11 +149,11 @@ def evaluate_role(
 
     if provider == "openrouter":
         controls = privacy._openrouter_controls(policy)
-        initial = privacy._debug_config(repo, opencode_cli, runner, env)
-        overlay = privacy._openrouter_overlay(initial, model_id, controls)
-        env = privacy._merge_inline_config(env, overlay)
+        initial = _debug_config(repo, opencode_cli, runner, env)
+        overlay = _openrouter_overlay(initial, model_id, controls)
+        env = _merge_inline_config(env, overlay)
         resolved = privacy._debug_config(repo, opencode_cli, runner, env)
-        request_verified = privacy._resolved_openrouter_verified(resolved, model_id, policy)
+        request_verified = _resolved_openrouter_verified(resolved, model_id, policy)
         decision = privacy.PrivacyDecision(
             "ALLOW", role, route, provider, model_id, "routed-cloud",
             training="unknown", retention="unknown",
