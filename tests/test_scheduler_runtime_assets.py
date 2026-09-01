@@ -5,6 +5,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 from automation import opencode_adapter_assets, opencode_adapter_contract
 
@@ -105,6 +106,29 @@ class SchedulerRuntimeAssetTests(unittest.TestCase):
             opencode_adapter_assets.provision_scheduler_worker_assets(repo, fake_root)
 
             self.assertIn("refreshed-contract", reader.read_text(encoding="utf-8"))
+
+    def test_git_ownership_probe_failure_aborts_before_provisioning(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = self._repo(Path(temp_dir))
+
+            def broken_git(*args, **kwargs):
+                return SimpleNamespace(
+                    returncode=128,
+                    stdout="",
+                    stderr="fatal: ownership probe failed",
+                )
+
+            with self.assertRaisesRegex(
+                opencode_adapter_contract.OpenCodeAdapterError,
+                "cannot determine repository ownership",
+            ):
+                opencode_adapter_assets.provision_scheduler_worker_assets(
+                    repo,
+                    REPO_ROOT,
+                    runner=broken_git,
+                )
+
+            self.assertFalse((repo / ".opencode").exists())
 
     def test_matching_untracked_canonical_asset_can_be_adopted(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
