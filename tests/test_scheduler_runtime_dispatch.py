@@ -57,6 +57,9 @@ class SchedulerRuntimeDispatchTests(unittest.TestCase):
                     return_value=selection,
                 ),
                 mock.patch(
+                    "automation.scheduler.scheduler_runtime_worker.validate_worker",
+                ),
+                mock.patch(
                     "automation.scheduler._coordinator_state",
                     return_value="Prepared",
                 ),
@@ -103,7 +106,7 @@ class SchedulerRuntimeDispatchTests(unittest.TestCase):
                     return_value=selection,
                 ),
                 mock.patch(
-                    "automation.scheduler._validate_worker_runtime",
+                    "automation.scheduler.scheduler_runtime_worker.validate_worker",
                     side_effect=AssertionError(
                         "runtime discovery must not run for an empty queue"
                     ),
@@ -147,7 +150,7 @@ class SchedulerRuntimeDispatchTests(unittest.TestCase):
                     return_value=selection,
                 ),
                 mock.patch(
-                    "automation.scheduler._validate_worker_runtime",
+                    "automation.scheduler.scheduler_runtime_worker.validate_worker",
                     side_effect=validate,
                 ),
                 mock.patch(
@@ -179,11 +182,11 @@ class SchedulerRuntimeDispatchTests(unittest.TestCase):
                     return_value=queue_selection.ExistingRun("RESUME_EXISTING"),
                 ),
                 mock.patch(
-                    "automation.scheduler.role_runtime.select_runtime",
+                    "automation.scheduler_runtime_worker.role_runtime.select_runtime",
                     return_value=(runtime, "test"),
                 ),
                 mock.patch(
-                    "automation.scheduler.role_runtime.provision_scheduler_worker"
+                    "automation.scheduler_runtime_worker.role_runtime.provision_scheduler_worker"
                 ) as prepare_runtime,
             ):
                 existing = scheduler._prepare_worker(
