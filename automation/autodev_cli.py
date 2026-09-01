@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from automation import claim_cli, cli_help, config_cli, manage_cli, notification_cli, product_runtime, scheduler_health_cli
+from automation import claim_cli, cli_help, config_cli, manage_cli, notification_cli, privacy_grant_cli, product_runtime, scheduler_health_cli
 
 import os
 import sys
@@ -149,6 +149,8 @@ def run(argv: list[str] | None = None) -> int:
         return notification_cli.run_cli(rest)
     if command == "manage":
         return manage_cli.run_cli(rest)
+    if command == "privacy":
+        return privacy_grant_cli.run_cli(rest)
 
     _enable_interactive_consent_for_direct_cli(explicit=explicit_interactive)
     if command == "issue-to-pr":
