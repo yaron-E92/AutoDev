@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 from typing import Callable, TextIO
 
-from automation import opencode_entrypoint, privacy, queue_selection, workflow_stages
+from automation import opencode_entrypoint, privacy, queue_selection, role_runtime, workflow_stages
 from automation.scheduler_backends import (
     _backend_state,
     _cron_command,
@@ -138,6 +138,22 @@ class SchedulerLock:
             self.acquired = False
 
 
+def _prepare_worker_runtime(
+    worker: Path,
+    *,
+    runner: Callable[..., object],
+) -> None:
+    try:
+        runtime, _ = role_runtime.select_runtime(worker)
+        role_runtime.prepare_scheduler_worker(
+            runtime,
+            worker,
+            runner=runner,
+        )
+    except role_runtime.RoleRuntimeError as exc:
+        raise SchedulerError(str(exc)) from exc
+
+
 def _prepare_worker(
     registration: SchedulerRegistration,
     *,
@@ -150,6 +166,7 @@ def _prepare_worker(
     _git(worker, fetch, runner=runner)
     existing = queue_selection.inspect_existing_run(worker)
     if existing.state != "NONE":
+        _prepare_worker_runtime(worker, runner=runner)
         return existing
     dirty = _git_status(worker, runner=runner)
     if dirty:
@@ -162,6 +179,7 @@ def _prepare_worker(
         ["merge", "--ff-only", f"origin/{registration.default_branch}"],
         runner=runner,
     )
+    _prepare_worker_runtime(worker, runner=runner)
     dirty = _git_status(worker, runner=runner)
     if dirty:
         raise SchedulerError(
