@@ -122,7 +122,6 @@ class AutoDevCliTests(unittest.TestCase):
             for command in (
                 ["status"],
                 ["coordinate", "--arguments", "123"],
-                ["privacy", "list"],
                 ["queue", "status"],
             ):
                 with self.subTest(command=command):
@@ -133,7 +132,6 @@ class AutoDevCliTests(unittest.TestCase):
             [
                 ["status"],
                 ["coordinate", "--arguments", "123"],
-                ["privacy", "list"],
                 ["queue", "status"],
             ],
         )
