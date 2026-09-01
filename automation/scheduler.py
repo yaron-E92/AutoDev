@@ -577,7 +577,7 @@ def run_cli(
         default=BACKEND_AUTO,
         choices=[BACKEND_AUTO, BACKEND_SYSTEMD, BACKEND_CRON, BACKEND_WINDOWS],
     )
-    install_parser.add_argument("--cadence-minutes", type=int, default=DEFAULT_CADENCE_MINUTES)
+    install_parser.add_argument("--cadence-minutes", type=int, default=None)
     install_parser.add_argument("--launcher", default="")
     install_parser.add_argument("--json", action="store_true")
 
