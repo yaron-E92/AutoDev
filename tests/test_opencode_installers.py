@@ -26,6 +26,8 @@ class OpenCodeInstallerTests(unittest.TestCase):
         self.assertIn("ref: ${{ inputs.autodev_ref }}", first)
         self.assertNotIn("__AUTODEV_WORKFLOW_REF__", first)
         self.assertNotIn(opencode_install.WINDOWS_SETUP_PLACEHOLDER.strip(), first)
+        self.assertIn("\npermissions:\n  contents: read\n\njobs:\n", first)
+        self.assertNotIn("persist-credentials: false\n\n\n      - name: Execute Windows verification", first)
 
     def test_canonical_installer_renders_repository_setup_and_secret_name_mapping(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -63,6 +65,7 @@ class OpenCodeInstallerTests(unittest.TestCase):
         self.assertIn("autodev-tooling\\windows\\scripts\\configure-nuget-source.ps1", workflow)
         self.assertIn("-SourceName 'private-feed'", workflow)
         self.assertLess(workflow.index("Configure private packages"), workflow.index("Execute Windows verification"))
+        self.assertIn("\npermissions:\n  contents: read\n\njobs:\n", workflow)
 
     def test_installer_writes_only_final_autodev_opencode_assets(self):
         with tempfile.TemporaryDirectory() as temp_dir:
