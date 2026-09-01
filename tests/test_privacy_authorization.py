@@ -240,6 +240,71 @@ class PrivacyAuthorizationTests(unittest.TestCase):
             self.assertEqual(registration.backend, "cron")
             install_backend.assert_called_once()
 
+    def test_scheduler_install_without_grant_stops_before_backend_registration(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = self._repo(temp_dir)
+            home = Path(temp_dir) / "home"
+            runtime = _FakeRuntime(
+                {
+                    "planner": self._decision(
+                        "planner", "openai/gpt-5.6-terra"
+                    )
+                }
+            )
+
+            with self._environment(temp_dir):
+                with (
+                    mock.patch(
+                        "automation.scheduler_registration._repo_root",
+                        return_value=repo,
+                    ),
+                    mock.patch(
+                        "automation.scheduler_registration._validate_source_policy"
+                    ),
+                    mock.patch(
+                        "automation.scheduler_registration.queue_github.resolve_github_repo",
+                        return_value="yaron-E92/PHOODAB",
+                    ),
+                    mock.patch(
+                        "automation.scheduler_registration._select_backend",
+                        return_value="cron",
+                    ),
+                    mock.patch(
+                        "automation.scheduler_registration._resolve_launcher",
+                        return_value="/usr/bin/autodev",
+                    ),
+                    mock.patch(
+                        "automation.scheduler_registration._ensure_worker",
+                        return_value=(repo, "main"),
+                    ),
+                    mock.patch(
+                        "automation.scheduler_registration._validate_headless_worker_transport"
+                    ),
+                    mock.patch(
+                        "automation.scheduler_registration.role_runtime.select_runtime",
+                        return_value=(runtime, "test"),
+                    ),
+                    mock.patch(
+                        "automation.scheduler_registration.claim_identity.worker_identity",
+                        return_value="worker-test",
+                    ),
+                    mock.patch(
+                        "automation.scheduler_registration._install_backend"
+                    ) as install_backend,
+                    self.assertRaises(SchedulerError) as raised,
+                ):
+                    scheduler_registration.install_scheduler(
+                        repo,
+                        home=home,
+                    )
+
+            install_backend.assert_not_called()
+            message = str(raised.exception)
+            self.assertIn("scheduler privacy preflight requires consent for", message)
+            self.assertIn("planner", message)
+            self.assertIn("openai/gpt-5.6-terra", message)
+            self.assertIn("autodev privacy consent", message)
+
     def test_scheduler_preflight_missing_grant_is_actionable(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = self._repo(temp_dir)
