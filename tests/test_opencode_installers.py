@@ -29,6 +29,31 @@ class OpenCodeInstallerTests(unittest.TestCase):
         self.assertIn("\npermissions:\n  contents: read\n\njobs:\n", first)
         self.assertNotIn("persist-credentials: false\n\n\n      - name: Execute Windows verification", first)
 
+    def test_canonical_installer_preserves_existing_top_level_concurrency(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target = Path(temp_dir).resolve()
+            opencode_install.install_assets(target, REPO_ROOT)
+            workflow = target / opencode_install.WINDOWS_CALLER_TARGET
+            original = workflow.read_text(encoding="utf-8")
+            concurrency = (
+                "concurrency:\n"
+                "  group: autodev-windows-\${{ inputs.expected_sha }}\n"
+                "  cancel-in-progress: false\n"
+            )
+            workflow.write_text(
+                original.replace("\njobs:\n", f"\n{concurrency}\njobs:\n", 1),
+                encoding="utf-8",
+            )
+
+            opencode_install.install_assets(target, REPO_ROOT)
+            reinstalled = workflow.read_text(encoding="utf-8")
+
+        self.assertIn(
+            "\npermissions:\n  contents: read\n\n" + concurrency + "\njobs:\n",
+            reinstalled,
+        )
+        self.assertEqual(reinstalled.count("\nconcurrency:\n"), 1)
+
     def test_canonical_installer_renders_repository_setup_and_secret_name_mapping(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             target = Path(temp_dir).resolve()
