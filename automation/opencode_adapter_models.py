@@ -4,7 +4,7 @@ import json
 import shutil
 import subprocess
 from pathlib import Path
-from automation import workflow_stages
+from automation import user_config, workflow_stages
 
 from automation.opencode_adapter_contract import (
     AUTODEV_AGENT_BY_ROLE,
@@ -71,7 +71,30 @@ def resolve_opencode_model_mappings(
         raise OpenCodeAdapterError(
             "opencode debug config returned an unexpected value; AutoDev cannot safely resolve role models"
         )
-    return model_mappings_from_config(config)
+    return apply_autodev_model_profile(repo, model_mappings_from_config(config))
+
+def apply_autodev_model_profile(
+    repo: Path,
+    mappings: dict[str, dict[str, str]],
+) -> dict[str, dict[str, str]]:
+    try:
+        profile, scope, models = user_config.effective_model_profile(repo)
+    except user_config.UserConfigError as exc:
+        raise OpenCodeAdapterError(f"invalid AutoDev user model configuration: {exc}") from exc
+    if not profile:
+        return mappings
+    result = {role: dict(value) for role, value in mappings.items()}
+    for role, model in models.items():
+        current = result.get(role)
+        if current is None or current.get("source") == "explicit":
+            continue
+        result[role] = {
+            "agent": current.get("agent", AUTODEV_AGENT_BY_ROLE[role]),
+            "source": f"autodev-profile:{scope}:{profile}",
+            "model": model,
+            "inherits_from": "",
+        }
+    return result
 
 def model_mappings_from_config(config: dict[str, object]) -> dict[str, dict[str, str]]:
     global_model = _configured_model(config.get("model"), "OpenCode global/default model")
@@ -157,8 +180,12 @@ def render_model_mappings(mappings: dict[str, dict[str, str]]) -> str:
     for role in OPENCODE_ROLE_NAMES:
         value = mappings[role]
         model = value.get("model", "")
-        if value.get("source") == "explicit":
+        source = str(value.get("source", ""))
+        if source == "explicit":
             resolution = f"{model} (explicit)"
+        elif source.startswith("autodev-profile:"):
+            _, scope, profile = source.split(":", 2)
+            resolution = f"{model} (AutoDev profile {profile!r}, {scope})"
         elif model:
             resolution = f"{model} (inherited from {value.get('inherits_from', '')})"
         else:
