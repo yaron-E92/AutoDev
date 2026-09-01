@@ -1,6 +1,15 @@
 from __future__ import annotations
 
-from automation import claim_identity, queue_contract, queue_github, queue_policy
+from automation import (
+    claim_identity,
+    opencode_adapter_contract,
+    opencode_adapter_models,
+    opencode_cli,
+    queue_contract,
+    queue_github,
+    queue_policy,
+    user_config,
+)
 
 import json
 import shutil
@@ -17,6 +26,7 @@ from automation.scheduler_backends import (
 )
 from automation.scheduler_process import (
     _default_branch,
+    _git,
     _git_status,
     _origin_url,
     _require_ok,
@@ -110,13 +120,31 @@ def _ensure_worker(
     *,
     home: Path | None = None,
     runner: Callable[..., object] = subprocess.run,
+    which: Callable[[str], str | None] = shutil.which,
 ) -> tuple[Path, str]:
     worker = worker_path(github_repo, home=home)
-    origin = _origin_url(source, runner=runner)
+    gh = which("gh")
+    if not gh:
+        raise SchedulerError(
+            "GitHub CLI was not found on PATH; scheduler workers require non-interactive gh authentication"
+        )
+    auth_argv = [gh, "auth", "status", "--hostname", "github.com"]
+    _require_ok(_run_command(auth_argv, runner=runner), auth_argv)
+    origin = f"https://github.com/{github_repo}.git"
+    credential_helper = "!" + subprocess.list2cmdline([gh, "auth", "git-credential"])
     created = False
     if not worker.exists():
         worker.parent.mkdir(parents=True, exist_ok=True)
-        argv = ["git", "clone", "--origin", "origin", origin, str(worker)]
+        argv = [
+            "git",
+            "-c",
+            f"credential.https://github.com.helper={credential_helper}",
+            "clone",
+            "--origin",
+            "origin",
+            origin,
+            str(worker),
+        ]
         completed = _run_command(argv, runner=runner)
         try:
             _require_ok(completed, argv)
@@ -130,10 +158,18 @@ def _ensure_worker(
             f"dedicated worker path exists but is not an AutoDev-managed Git clone: {worker}"
         )
     worker_origin = _origin_url(worker, runner=runner)
-    if worker_origin != origin:
+    worker_repo = user_config.github_repository_from_remote(worker_origin)
+    if not worker_repo or worker_repo.casefold() != github_repo.casefold():
         raise SchedulerError(
-            f"dedicated worker origin does not match source repository: {worker_origin!r} != {origin!r}; refusing to reuse {worker}"
+            f"dedicated worker origin does not match source repository identity {github_repo}: "
+            f"{worker_origin!r}; refusing to reuse {worker}"
         )
+    _git(worker, ["remote", "set-url", "origin", origin], runner=runner)
+    _git(
+        worker,
+        ["config", "credential.https://github.com.helper", credential_helper],
+        runner=runner,
+    )
     if not created and _git_status(worker, runner=runner):
         existing = queue_selection.inspect_existing_run(worker)
         if existing.state == "NONE":
@@ -142,6 +178,77 @@ def _ensure_worker(
             )
     _validate_worker_policy(source, worker)
     return worker, _default_branch(worker, runner=runner)
+
+
+def _validate_headless_worker_transport(
+    worker: Path,
+    *,
+    runner: Callable[..., object],
+) -> None:
+    _git(worker, ["fetch", "--prune", "origin"], runner=runner)
+    _git(
+        worker,
+        [
+            "push",
+            "--dry-run",
+            "--porcelain",
+            "origin",
+            "HEAD:refs/heads/autodev/scheduler-auth-probe",
+        ],
+        runner=runner,
+    )
+
+
+def _validate_headless_model_policy(
+    worker: Path,
+    *,
+    runner: Callable[..., object],
+    which: Callable[[str], str | None],
+) -> None:
+    try:
+        mappings = opencode_adapter_models.resolve_opencode_model_mappings(
+            worker, runner=runner, which=which
+        )
+    except (
+        opencode_adapter_contract.OpenCodeAdapterError,
+        opencode_cli.OpenCodeCliError,
+        user_config.UserConfigError,
+    ) as exc:
+        raise SchedulerError(f"scheduler headless model preflight failed: {exc}") from exc
+    missing = [
+        role
+        for role in opencode_adapter_contract.ROLE_NAMES
+        if not str(mappings.get(role, {}).get("model", "")).strip()
+    ]
+    if missing:
+        raise SchedulerError(
+            "scheduler headless model preflight cannot resolve concrete provider/model routes for: "
+            + ", ".join(missing)
+            + "; configure an AutoDev model profile or explicit OpenCode agent models before installing the scheduler"
+        )
+    policy = privacy.load_policy(worker)
+    if not policy.enabled:
+        return
+    try:
+        executable = opencode_cli.resolve_opencode_cli(which=which)
+    except opencode_cli.OpenCodeCliError as exc:
+        raise SchedulerError(f"scheduler headless model preflight failed: {exc}") from exc
+    for role in opencode_adapter_contract.ROLE_NAMES:
+        model = str(mappings[role]["model"])
+        try:
+            privacy.authorize_opencode_role(
+                worker,
+                role=role,
+                model=model,
+                opencode_cli=executable,
+                runner=runner,
+                consent_reader=lambda _prompt: "",
+            )
+        except privacy.PrivacyError as exc:
+            raise SchedulerError(
+                f"scheduler headless privacy preflight failed for {role} ({model}): {exc}; "
+                "create a valid time-bounded privacy grant interactively or choose a compliant model profile"
+            ) from exc
 
 
 def _load_registration(path: Path) -> SchedulerRegistration | None:
@@ -223,7 +330,7 @@ def install_scheduler(
     *,
     github_repo: str = "",
     backend: str = BACKEND_AUTO,
-    cadence_minutes: int = DEFAULT_CADENCE_MINUTES,
+    cadence_minutes: int | None = None,
     launcher: str = "",
     home: Path | None = None,
     platform_name: str | None = None,
@@ -232,6 +339,13 @@ def install_scheduler(
 ) -> SchedulerRegistration:
     source = _repo_root(repo)
     _validate_source_policy(source)
+    if cadence_minutes is None:
+        try:
+            cadence_minutes = user_config.scheduler_cadence()
+        except user_config.UserConfigError as exc:
+            raise SchedulerError(f"invalid AutoDev user scheduler configuration: {exc}") from exc
+        if cadence_minutes is None:
+            cadence_minutes = DEFAULT_CADENCE_MINUTES
     if not MIN_CADENCE_MINUTES <= cadence_minutes <= MAX_CADENCE_MINUTES:
         raise SchedulerError(
             f"cadence must be between {MIN_CADENCE_MINUTES} and {MAX_CADENCE_MINUTES} minutes"
@@ -255,7 +369,10 @@ def install_scheduler(
         resolved,
         home=home,
         runner=runner,
+        which=which,
     )
+    _validate_headless_worker_transport(worker, runner=runner)
+    _validate_headless_model_policy(worker, runner=runner, which=which)
     claim_identity.worker_identity(home=home)
     registration = SchedulerRegistration(
         github_repository=resolved,

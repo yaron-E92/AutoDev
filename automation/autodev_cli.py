@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from automation import claim_cli, cli_help, manage_cli, notification_cli, product_runtime, scheduler_health_cli
+from automation import claim_cli, cli_help, config_cli, manage_cli, notification_cli, product_runtime, scheduler_health_cli
 
 import os
 import sys
@@ -49,7 +49,7 @@ def _help() -> str:
         "  autodev models             Show effective OpenCode role/model mappings.\n"
         "  --runtime NAME             Override role runtime for issue-to-pr/resume.\n"
         "  Runtime precedence         explicit > AUTODEV_ROLE_RUNTIME > repository > user > opencode.\n"
-        "  OpenCode model mappings    Configure in opencode.json / opencode.jsonc.\n"
+        "  Model routing              AutoDev profiles fill inherited roles; explicit opencode.json / opencode.jsonc agent models win.\n"
         "\n"
         "Contributors:\n"
         "  End-user `autodev` commands are separate from source-development checks.\n"
@@ -134,6 +134,8 @@ def run(argv: list[str] | None = None) -> int:
 
     if command == "install":
         return user_install.run_cli(rest, autodev_root=product_runtime.product_root())
+    if command == "config":
+        return config_cli.run_cli(rest)
     if command in {"repo", "doctor"}:
         from automation import local_verification_doctor, repo_setup
 

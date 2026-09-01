@@ -145,12 +145,16 @@ class OpenCodeRoleRuntime:
             "run",
             "--agent",
             f"autodev-{context.role}",
+        ]
+        if model:
+            command.extend(["--model", model])
+        command.extend([
             "--dir",
             str(repo),
             "--format",
             "json",
             context.prompt,
-        ]
+        ])
         started = time.monotonic()
         try:
             completed = runner(

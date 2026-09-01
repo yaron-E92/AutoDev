@@ -4,6 +4,7 @@ import subprocess
 from pathlib import Path
 from typing import Callable
 
+from automation import headless_environment
 from automation.scheduler_types import SchedulerError
 
 
@@ -20,11 +21,14 @@ def _run_command(
         "errors": "replace",
         "capture_output": True,
         "check": False,
+        "env": headless_environment.environment(),
     }
     if cwd is not None:
         kwargs["cwd"] = cwd
     if input_text is not None:
         kwargs["input"] = input_text
+    else:
+        kwargs["stdin"] = subprocess.DEVNULL
     try:
         return runner(argv, **kwargs)
     except OSError as exc:

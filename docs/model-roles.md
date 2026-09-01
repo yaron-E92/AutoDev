@@ -31,7 +31,22 @@ For OpenCode runs, OpenCode configuration is authoritative. Configure agent mode
 }
 ```
 
-All seven OpenCode agent mappings may be configured independently. When a workflow-role agent has no explicit model, it inherits according to AutoDev's OpenCode resolution contract; the coordinator itself inherits the OpenCode global/default model when it has no explicit mapping. AutoDev does not duplicate this mapping in `.autodev` and does not support ad-hoc per-run model override flags that would create a competing routing layer.
+All OpenCode agent mappings may still be configured independently. AutoDev additionally supports named user-local model profiles in its existing user configuration file. Explicit OpenCode agent models remain highest precedence; a selected AutoDev profile fills workflow roles that would otherwise inherit from the OpenCode coordinator/global/default model. AutoDev passes the resolved profile route through OpenCode's documented `--model provider/model` flag, so scheduled runs do not depend on an interactive `/models` selection.
+
+Profile selection is machine/user-local. A user-wide active profile may be overridden for one canonical GitHub `OWNER/REPO` in the same user config, so no `.autodev` or `opencode.jsonc` noise file is required in each repository. Root `opencode.json` / `opencode.jsonc` remains supported and can override individual AutoDev roles explicitly.
+
+Example:
+
+```text
+autodev config profile set mixed \
+  reader=ollama/gpt-oss:20b-autodev \
+  synthesizer=ollama/gpt-oss:20b-autodev \
+  planner=openai/gpt-5.6-terra \
+  implementer=openai/gpt-5.6-sol \
+  fixer=openai/gpt-5.6-sol \
+  verifier=openai/gpt-5.6-terra
+autodev config profile use mixed
+```
 
 Inspect the effective safe mapping—including the coordinator—with:
 
