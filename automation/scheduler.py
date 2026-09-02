@@ -233,7 +233,16 @@ def _resolve_merged_ready_run(
         )
 
     _git(worker, ["reset", "--hard", "HEAD"], runner=runner)
-    _git(worker, ["clean", "-fd"], runner=runner)
+    verified_changes = state.get("VerifiedChanges", [])
+    added_paths = sorted(
+        str(item.get("path", "")).strip()
+        for item in verified_changes
+        if isinstance(item, dict)
+        and str(item.get("status", "")).strip().casefold() == "added"
+        and str(item.get("path", "")).strip()
+    ) if isinstance(verified_changes, list) else []
+    if added_paths:
+        _git(worker, ["clean", "-fd", "--", *added_paths], runner=runner)
     _git(worker, ["checkout", registration.default_branch], runner=runner)
     _git(
         worker,
