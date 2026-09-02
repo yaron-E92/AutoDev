@@ -14,6 +14,7 @@ def write_bundle(root: Path, *, product: str = "demo") -> None:
     (root / "contract.yaml").write_text("product: demo\n", encoding="utf-8")
     (root / "principles.md").write_text("# Principles\n", encoding="utf-8")
     (root / "journeys.yaml").write_text("journeys: []\n", encoding="utf-8")
+    (root / "journey-inbox.yaml").write_text("id: inbox-flow\n", encoding="utf-8")
     (root / "prototype.html").write_text("<script>window.neverExecute = true</script>\n", encoding="utf-8")
     (root / "screens" / "home.png").write_bytes(b"not-executed-reference-bytes")
     (root / "ux-manifest.json").write_text(
@@ -28,6 +29,8 @@ def write_bundle(root: Path, *, product: str = "demo") -> None:
                 "references": {"root": "screens"},
                 "screens": {"home": "screens/home.png"},
                 "states": {"empty": "screens/home.png"},
+                "journey_files": {"inbox-flow": "journey-inbox.yaml"},
+                "figma": {"url": "https://www.figma.com/file/example", "node": "1:2"},
                 "shared": {"artifact": "fake://shared@sha256:parent"},
             },
             indent=2,
@@ -91,13 +94,15 @@ class UXArtifactTests(unittest.TestCase):
             selected = manifest.selected_paths(
                 screen_ids=("home",),
                 state_ids=("missing",),
-                include_journeys=True,
+                journey_ids=("inbox-flow",),
+                include_journeys=False,
             )
 
         self.assertEqual(manifest.schema, BUNDLE_SCHEMA)
         self.assertIn("contract.yaml", selected)
         self.assertIn("principles.md", selected)
-        self.assertIn("journeys.yaml", selected)
+        self.assertIn("journey-inbox.yaml", selected)
+        self.assertNotIn("journeys.yaml", selected)
         self.assertIn("screens/home.png", selected)
         self.assertNotIn("prototype.html", selected)
 
