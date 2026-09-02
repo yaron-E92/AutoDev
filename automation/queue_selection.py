@@ -296,6 +296,8 @@ def inspect_existing_run(repo: Path) -> ExistingRun:
             reason=f"existing AutoDev run cannot determine a safe resume boundary: {exc}",
         )
     if action == "complete":
+        if bool(state.get("PrMergeResolved")):
+            return ExistingRun("NONE")
         pr_url = str(state.get("PrUrl", "")).strip()
         if pr_url:
             return ExistingRun(
