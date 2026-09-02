@@ -31,6 +31,8 @@ class UXBundleManifest:
     screens: dict[str, str] | None = None
     states: dict[str, str] | None = None
     verifier: str = ""
+    metadata: dict[str, str] | None = None
+    figma: dict[str, str] | None = None
 
     def selected_paths(
         self,
@@ -100,6 +102,25 @@ def _path_map(value: object, *, field: str) -> dict[str, str]:
     return result
 
 
+def _string_map(value: object, *, field: str) -> dict[str, str]:
+    if value in (None, ""):
+        return {}
+    if not isinstance(value, dict):
+        raise UXBundleError(f"{field} must be a JSON object")
+    if len(value) > 64:
+        raise UXBundleError(f"{field} contains too many entries")
+    result: dict[str, str] = {}
+    for raw_key, raw_value in value.items():
+        key = str(raw_key or "").strip()
+        item = str(raw_value or "").strip()
+        if not key or len(key) > 128:
+            raise UXBundleError(f"{field} contains an invalid key")
+        if len(item) > 2048:
+            raise UXBundleError(f"{field}.{key} is too long")
+        result[key] = item
+    return result
+
+
 def parse_manifest(value: object) -> UXBundleManifest:
     if not isinstance(value, dict):
         raise UXBundleError("UX bundle manifest must be a JSON object")
@@ -136,6 +157,8 @@ def parse_manifest(value: object) -> UXBundleManifest:
         screens=_path_map(value.get("screens"), field="screens"),
         states=_path_map(value.get("states"), field="states"),
         verifier=_safe_relative_path(value.get("verifier"), field="verifier", allow_empty=True),
+        metadata=_string_map(value.get("metadata"), field="metadata"),
+        figma=_string_map(value.get("figma"), field="figma"),
     )
 
 
@@ -233,4 +256,6 @@ def manifest_summary(manifest: UXBundleManifest) -> dict[str, object]:
         "screen_ids": sorted((manifest.screens or {}).keys()),
         "state_ids": sorted((manifest.states or {}).keys()),
         "shared_artifact": manifest.shared_artifact,
+        "metadata_keys": sorted((manifest.metadata or {}).keys()),
+        "figma_keys": sorted((manifest.figma or {}).keys()),
     }
