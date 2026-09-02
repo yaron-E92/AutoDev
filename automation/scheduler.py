@@ -707,6 +707,9 @@ def run_cli(
     uninstall_parser.add_argument("--json", action="store_true")
 
     args = parser.parse_args(argv)
+    failure_started_at = _now()
+    failure_registration_file: Path | None = None
+    failure_registration: SchedulerRegistration | None = None
     try:
         if args.command == "install":
             registration = install_scheduler(
@@ -770,6 +773,8 @@ def run_cli(
                 runner=runner,
             )
             path = registration_path(resolved, home=home)
+        failure_registration_file = path.expanduser().resolve()
+        failure_registration = _load_registration(failure_registration_file)
         return run_once(
             path,
             home=home,
@@ -785,6 +790,25 @@ def run_cli(
         queue_selection.RoadmapError,
         privacy.PrivacyError,
     ) as exc:
+        if (
+            args.command == "run-once"
+            and failure_registration_file is not None
+            and failure_registration is not None
+        ):
+            try:
+                _record_last_run(
+                    failure_registration_file,
+                    failure_registration,
+                    DispatchResult(
+                        state="SCHEDULER_ERROR",
+                        github_repository=failure_registration.github_repository,
+                        detail=str(exc),
+                    ),
+                    started_at=failure_started_at,
+                )
+            except Exception:
+                # Persisting diagnostics must never replace the original scheduler failure.
+                pass
         print(str(exc), file=stderr)
         return 2
 
