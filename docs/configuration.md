@@ -231,6 +231,22 @@ If neither is configured explicitly, the built-in cadence remains 15 minutes.
 
 Scheduler installation uses the same effective AutoDev/OpenCode model resolution as interactive execution and requires concrete headless-safe routes before registering the native task. See [`scheduler.md`](scheduler.md).
 
+## Repository UX artifact policy
+
+UI-bearing repositories may opt into an external immutable UX artifact through the tracked `.autodev/repo.json`. This is repository-owned product policy, not user-local model configuration:
+
+```json
+{
+  "version": 1,
+  "ux": {
+    "enabled": true,
+    "artifact": "example://designs/product@sha256:...",
+    "product": "product"
+  }
+}
+```
+
+The core contract is provider-neutral. Use `autodev ux doctor`, `autodev ux inspect`, `autodev ux resolve`, and `autodev ux lock` for model-free diagnostics and immutable locking. See [`ux-artifacts.md`](ux-artifacts.md) for the bundle schema, cache, resume identity rules, security boundary, and resolver extension contract.
 ## Credentials and privacy
 
 Do **not** put API keys, access tokens, SSH private keys, passwords, or privacy-consent grants in AutoDev user configuration.
