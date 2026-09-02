@@ -66,6 +66,7 @@ class ResolvedUXArtifact:
         *,
         screen_ids: tuple[str, ...] = (),
         state_ids: tuple[str, ...] = (),
+        journey_ids: tuple[str, ...] = (),
         include_journeys: bool = False,
     ) -> tuple[Path, ...]:
         return tuple(
@@ -73,6 +74,7 @@ class ResolvedUXArtifact:
             for relative in self.manifest.selected_paths(
                 screen_ids=screen_ids,
                 state_ids=state_ids,
+                journey_ids=journey_ids,
                 include_journeys=include_journeys,
             )
         )
