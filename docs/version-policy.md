@@ -137,7 +137,7 @@ The product repository remains responsible for deciding which CI jobs are mandat
 
 The exact-one-directive rule remains strict. Recovery does not require a dummy source commit:
 
-1. Edit the pull request body so it contains exactly one valid `+semver: major|minor|patch|none` line. A caller subscribed to the `edited` PR event starts a fresh validation run automatically.
+1. Edit the pull request body so it contains exactly one valid `+semver: major|minor|patch|none` line. A caller subscribed to the `edited` PR event starts a fresh version-intent validation automatically. In AutoDev's own CI, body-edit runs use a separate concurrency lane and skip source/build/package jobs, so correcting PR metadata cannot cancel or replay an in-progress source CI run.
 2. Alternatively, after correcting the body, use GitHub's normal **Re-run failed jobs** action on the previous workflow run. The reusable workflow fetches the current PR body before validating it, so the stale triggering payload is not authoritative.
 
 Duplicate/conflicting directives still fail. This recovery behavior does not silently add a default to manual/non-AutoDev PRs.
