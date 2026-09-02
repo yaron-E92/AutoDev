@@ -46,7 +46,7 @@ The outcomes are intentionally explicit:
 - `SELECTED` — there is no active run and one eligible issue won deterministic ranking;
 - `NO_READY_WORK` — no issue is eligible; this is a successful idle outcome, not an error.
 
-A completed durable run with no associated PR does not prevent selection of the next issue. When a completed run has a PR, AutoDev keeps it as an awaiting-merge gate: an open PR blocks unrelated selection, a merged PR releases the gate and selection continues in the same reconciliation pass, and a closed-unmerged PR requires attention.
+A completed durable run does not prevent selection of the next issue.
 
 ## Optional roadmap ranking
 
@@ -112,10 +112,9 @@ For an issue participating in the queue, reconciliation uses this order:
 Selection then adds these repository-level gates without changing issue eligibility truth:
 
 1. existing durable run/attention/health state wins before unrelated work;
-2. a completed durable run with an associated PR remains pending until GitHub reports that PR merged; closed-unmerged PRs require attention;
-3. an open AutoDev PR for an otherwise ready issue excludes that issue;
-4. roadmap ranking applies only to the remaining eligible set;
-5. unmatched work falls back to oldest-first;
-6. empty eligible set returns `NO_READY_WORK`.
+2. an open AutoDev PR for an otherwise ready issue excludes that issue;
+3. roadmap ranking applies only to the remaining eligible set;
+4. unmatched work falls back to oldest-first;
+5. empty eligible set returns `NO_READY_WORK`.
 
 This keeps temporary operational conditions such as privacy consent expiry out of GitHub dependency state. Those conditions can move a run into attention-required state without pretending that another issue is a dependency.
