@@ -1,0 +1,28 @@
+name: PR version intent
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - edited
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: version-intent-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  version-intent:
+    name: Version intent
+    uses: ./.github/workflows/version-intent.yml
+    with:
+      pr_body: ${{ github.event.pull_request.body }}
+      pr_number: ${{ github.event.pull_request.number }}
+      head: ${{ github.event.pull_request.head.sha }}
+    permissions:
+      contents: read
+      pull-requests: read
