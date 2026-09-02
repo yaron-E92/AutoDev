@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
+from pathlib import Path
 
 
 VALID_INTENTS = ("major", "minor", "patch", "none")
 DEFAULT_INTENT = "patch"
+REPO_CONFIG = Path(".autodev") / "repo.json"
 INTENT_RE = re.compile(
     r"^\s*\+semver:\s*(major|minor|patch|none)\s*$",
     re.IGNORECASE | re.MULTILINE,
@@ -69,6 +72,30 @@ def resolve_intent(
         )
 
     return ResolvedSemVerIntent(DEFAULT_INTENT, "built-in-default")
+
+
+def repository_default(repo: Path) -> str:
+    path = repo.expanduser().resolve() / REPO_CONFIG
+    if not path.is_file():
+        return ""
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SemVerIntentError(
+            f"cannot resolve repository SemVer intent from invalid AutoDev config: {path}"
+        ) from exc
+    if not isinstance(value, dict):
+        raise SemVerIntentError(
+            f"AutoDev repository config must be a JSON object: {path}"
+        )
+    raw = value.get("default_semver_intent", "")
+    if raw in (None, ""):
+        return ""
+    if not isinstance(raw, str):
+        raise SemVerIntentError(
+            "repository default_semver_intent must be a string"
+        )
+    return normalize_intent(raw, source="repository-default")
 
 
 def without_directives(text: str) -> str:
