@@ -395,6 +395,35 @@ class SchedulerDispatchTests(unittest.TestCase):
             coordinator.assert_not_called()
             self.assertEqual(json.loads(output.getvalue())["state"], "ATTENTION_REQUIRED")
 
+    def test_prepare_worker_reprovisions_runtime_after_default_branch_refresh(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            _registration_file, registration = make_registration(root)
+
+            with patch.object(
+                scheduler,
+                "_git",
+                return_value=SimpleNamespace(returncode=0, stdout="", stderr=""),
+            ), patch.object(
+                scheduler,
+                "_git_status",
+                return_value="",
+            ), patch.object(
+                scheduler.queue_selection,
+                "inspect_existing_run",
+                return_value=queue_selection.ExistingRun("NONE"),
+            ), patch.object(
+                scheduler.scheduler_runtime_worker,
+                "provision_worker",
+            ) as provision_worker:
+                existing = scheduler._prepare_worker(
+                    registration,
+                    runner=RecordingRunner(),
+                )
+
+            self.assertEqual(existing.state, "NONE")
+            self.assertEqual(provision_worker.call_count, 2)
+
     def test_dirty_worker_without_durable_run_fails_without_reset(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
