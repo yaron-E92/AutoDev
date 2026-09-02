@@ -31,6 +31,22 @@ manual release later
 
 Creating a version tag does not publish a GitHub Release, package, signing job, deployment, or store artifact.
 
+
+## AutoDev-created pull requests
+
+The shared version-policy workflow remains strict: a PR must contain exactly one explicit directive. AutoDev's issue-to-PR workflow satisfies that contract by construction rather than weakening the validator.
+
+For a newly prepared AutoDev run, the resolved intent is persisted in durable state and used for all later PR/CI repair cycles. Precedence is:
+
+1. exactly one directive in the source GitHub issue;
+2. explicit `--semver major|minor|patch|none` on `autodev issue-to-pr`;
+3. repository `.autodev/repo.json` `default_semver_intent`;
+4. built-in `patch`.
+
+The generated PR body removes any directive line from the embedded issue copy and appends one canonical resolved directive, so the final body contains exactly one. Duplicate/conflicting issue directives and contradictory issue/CLI intent fail closed before role work begins.
+
+Manual/non-AutoDev PRs are not silently defaulted by this behavior; they continue to own their explicit version intent themselves.
+
 ## Components
 
 ### JavaScript Action
