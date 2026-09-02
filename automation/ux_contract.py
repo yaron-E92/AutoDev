@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Iterable
@@ -25,6 +24,7 @@ class UXBundleManifest:
     contract: str
     prototype: str = ""
     journeys: str = ""
+    principles: str = ""
     annexes: tuple[str, ...] = ()
     references_root: str = ""
     shared_artifact: str = ""
@@ -41,6 +41,8 @@ class UXBundleManifest:
     ) -> tuple[str, ...]:
         """Return a bounded, explicit subset for downstream role/context generation."""
         selected = {self.contract}
+        if self.principles:
+            selected.add(self.principles)
         selected.update(self.annexes)
         if include_journeys and self.journeys:
             selected.add(self.journeys)
@@ -59,8 +61,11 @@ def _safe_relative_path(value: object, *, field: str, allow_empty: bool = False)
         if allow_empty:
             return ""
         raise UXBundleError(f"{field} must be a non-empty bundle-relative path")
+    if "\x00" in text:
+        raise UXBundleError(f"{field} contains a NUL byte")
     path = PurePosixPath(text)
-    if path.is_absolute() or ".." in path.parts or "." in path.parts:
+    drive_like = bool(path.parts and ":" in path.parts[0])
+    if path.is_absolute() or drive_like or ".." in path.parts or "." in path.parts:
         raise UXBundleError(f"{field} must not escape the UX bundle root: {text!r}")
     if any(part in {"", "~"} for part in path.parts):
         raise UXBundleError(f"{field} contains an unsafe path component: {text!r}")
@@ -122,6 +127,7 @@ def parse_manifest(value: object) -> UXBundleManifest:
         contract=_safe_relative_path(value.get("contract"), field="contract"),
         prototype=_safe_relative_path(value.get("prototype"), field="prototype", allow_empty=True),
         journeys=_safe_relative_path(value.get("journeys"), field="journeys", allow_empty=True),
+        principles=_safe_relative_path(value.get("principles"), field="principles", allow_empty=True),
         annexes=_path_list(value.get("annexes"), field="annexes"),
         references_root=_safe_relative_path(
             references.get("root"), field="references.root", allow_empty=True
@@ -164,6 +170,7 @@ def _required_manifest_paths(manifest: UXBundleManifest) -> set[str]:
         manifest.contract,
         manifest.prototype,
         manifest.journeys,
+        manifest.principles,
         manifest.verifier,
         *manifest.annexes,
         *(manifest.screens or {}).values(),
@@ -221,6 +228,7 @@ def manifest_summary(manifest: UXBundleManifest) -> dict[str, object]:
         "contract": manifest.contract,
         "prototype": manifest.prototype,
         "journeys": manifest.journeys,
+        "principles": manifest.principles,
         "annex_count": len(manifest.annexes),
         "screen_ids": sorted((manifest.screens or {}).keys()),
         "state_ids": sorted((manifest.states or {}).keys()),
