@@ -104,7 +104,11 @@ same-machine lock
   -> NO_READY_WORK / NO_CAPACITY: successful fast exit
   -> heartbeat the claim while the existing issue-to-PR coordinator runs headlessly
   -> release claim at terminal/PR-ready/attention outcomes
-  -> persist scheduler outcome
+  -> while a ready PR is open, idle successfully without selecting unrelated work
+  -> when the PR is merged, verify the worker still matches AutoDev's recorded post-shipment snapshot
+  -> normalize the proven AutoDev-owned workspace, fast-forward the default branch, and continue queue reconciliation/selection in that tick
+  -> if the PR is closed unmerged, surface ATTENTION_REQUIRED
+  -> persist successful outcomes and scheduler failures so status reflects every completed tick attempt
   -> refresh deterministic scheduler health
   -> optionally notify on a material health transition
 ```
@@ -207,7 +211,7 @@ ALL_MANAGED_WORK_BLOCKED: all 6 managed open issue(s) are dependency-blocked. To
 ATTENTION_REQUIRED: Issue #57 requires privacy consent before autonomous model work; the privacy gate prevents model content from being sent without authorization.
 ```
 
-`NO_READY_WORK` is harmless queue exhaustion, not scheduler failure. A safely resumable run is not collapsed into a terminal error, and `ReadyForReview` durable run state is surfaced as `PR_READY` rather than looking idle.
+`NO_READY_WORK` is harmless queue exhaustion, not scheduler failure. A safely resumable run is not collapsed into a terminal error, and `ReadyForReview` durable run state is surfaced as `PR_READY` while its PR is still open. The execution claim is released at that point, but the durable run remains the scheduler's queue gate until GitHub reports the PR merged. On merge, AutoDev only normalizes the dedicated worker after its current scoped workspace matches the recorded post-shipment snapshot and its local HEAD still matches the prepared base; unexpected drift continues to fail closed. A closed-unmerged PR becomes `ATTENTION_REQUIRED` instead of silently advancing. Pre-dispatch scheduler failures are persisted as `SCHEDULER_ERROR`, so `scheduler status` does not leave an old successful tick as the apparent latest run.
 
 The persisted health fingerprint contains only bounded scheduler metadata: repository identity, counts, issue numbers, blocker numbers/counts, durable state/stage/action identifiers, privacy-grant counts, and last scheduler outcome. It does not persist source code, model prompts, credentials, secret values, or arbitrary model-generated notification prose.
 
