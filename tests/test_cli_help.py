@@ -51,6 +51,8 @@ class CliHelpTests(unittest.TestCase):
         self.assertIn("autodev issue-to-pr ISSUE", text)
         self.assertIn("Required positive GitHub issue number", text)
         self.assertIn("--runtime NAME", text)
+        self.assertIn("--semver INTENT", text)
+        self.assertIn("major|minor|patch|none", text)
         self.assertIn("Default: repository/user configuration, then opencode", text)
         self.assertIn("Privacy:", text)
         self.assertIn("explicit consent grant", text)
