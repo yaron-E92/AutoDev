@@ -46,6 +46,7 @@ class ExistingRun:
     next_stage: str = ""
     next_action: str = ""
     reason: str = ""
+    pr_url: str = ""
 
 
 @dataclass(frozen=True)
@@ -295,6 +296,16 @@ def inspect_existing_run(repo: Path) -> ExistingRun:
             reason=f"existing AutoDev run cannot determine a safe resume boundary: {exc}",
         )
     if action == "complete":
+        pr_url = str(state.get("PrUrl", "")).strip()
+        if pr_url:
+            return ExistingRun(
+                "AWAITING_MERGE",
+                issue_number=issue_number,
+                branch=branch,
+                next_action="wait for pull request merge",
+                reason="completed AutoDev run is waiting for its pull request to be merged",
+                pr_url=pr_url,
+            )
         return ExistingRun("NONE")
     return ExistingRun(
         "RESUME_EXISTING",
@@ -304,6 +315,39 @@ def inspect_existing_run(repo: Path) -> ExistingRun:
         next_action=action,
         reason="existing durable AutoDev run takes precedence over unrelated new work",
     )
+
+
+def _completed_pr_state(
+    repo: Path,
+    github_repo: str,
+    pr_url: str,
+    *,
+    runner: Callable[..., object] = subprocess.run,
+) -> str:
+    result = _run_gh(  # type: ignore[attr-defined]
+        repo,
+        [
+            "pr",
+            "view",
+            pr_url,
+            "--repo",
+            github_repo,
+            "--json",
+            "state,mergedAt",
+        ],
+        runner=runner,
+    )
+    raw = _json_result(result, context="gh pr view")  # type: ignore[attr-defined]
+    if not isinstance(raw, dict):
+        raise QueueError("gh pr view did not return an object")
+    if str(raw.get("mergedAt", "")).strip():
+        return "MERGED"
+    state = str(raw.get("state", "")).strip().upper()
+    if state == "OPEN":
+        return "OPEN"
+    if state == "CLOSED":
+        return "CLOSED"
+    raise QueueError(f"gh pr view returned unsupported pull request state {state!r}")
 
 
 def active_autodev_prs(
@@ -413,6 +457,38 @@ def select_next(
         )
 
     existing = existing_run_inspector(repo)
+    if existing.state == "AWAITING_MERGE":
+        pr_state = _completed_pr_state(
+            repo,
+            github_repo,
+            existing.pr_url,
+            runner=runner,
+        )
+        if pr_state == "MERGED":
+            existing = ExistingRun("NONE")
+        elif pr_state == "OPEN":
+            return SelectionResult(
+                state="PR_READY",
+                repository=github_repo,
+                issue_number=existing.issue_number,
+                source="existing-run",
+                explanation=existing.reason,
+                next_action=existing.next_action,
+                branch=existing.branch,
+                dry_run=dry_run,
+            )
+        else:
+            return SelectionResult(
+                state="ATTENTION_REQUIRED",
+                repository=github_repo,
+                issue_number=existing.issue_number,
+                source="existing-run",
+                explanation="completed AutoDev pull request was closed without being merged",
+                next_action="inspect or reopen the pull request, then rerun the scheduler",
+                branch=existing.branch,
+                dry_run=dry_run,
+            )
+
     if existing.state != "NONE":
         matched = next(
             (state.issue for state in states if state.issue.number == existing.issue_number),
