@@ -27,6 +27,7 @@ def create_open_code_manifest(repo: Path, state: dict[str, object]) -> Path:
             role_snapshots={},
             prompt_policy={},
             semantic_verification={"enabled": True, "frontend": "opencode"},
+            ux_artifact=dict(state.get("UXArtifact", {})) if isinstance(state.get("UXArtifact", {}), dict) else {},
         )
         run_manifest.complete_stage(
             path,
@@ -37,11 +38,13 @@ def create_open_code_manifest(repo: Path, state: dict[str, object]) -> Path:
                 "github_repo": str(state.get("RepoFullName", "")),
                 "issue_number": int(state.get("IssueNumber", 0) or 0),
                 "base_sha": str(state.get("BaseSha", "")),
+                "ux_immutable_identity": str((state.get("UXArtifact", {}) if isinstance(state.get("UXArtifact", {}), dict) else {}).get("immutable_identity", "")),
             },
             details={
                 "branch": str(state.get("BranchName", "")),
                 "base_tree_sha": str(state.get("BaseTreeSha", "")),
                 "prepared_snapshot_hash": str(state.get("PreparedSnapshotHash", "")),
+                "ux_artifact": dict(state.get("UXArtifact", {})) if isinstance(state.get("UXArtifact", {}), dict) else {},
             },
         )
     except run_manifest.ManifestError as exc:
