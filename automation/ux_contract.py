@@ -30,6 +30,7 @@ class UXBundleManifest:
     shared_artifact: str = ""
     screens: dict[str, str] | None = None
     states: dict[str, str] | None = None
+    journey_files: dict[str, str] | None = None
     verifier: str = ""
     metadata: dict[str, str] | None = None
     figma: dict[str, str] | None = None
@@ -39,6 +40,7 @@ class UXBundleManifest:
         *,
         screen_ids: Iterable[str] = (),
         state_ids: Iterable[str] = (),
+        journey_ids: Iterable[str] = (),
         include_journeys: bool = False,
     ) -> tuple[str, ...]:
         """Return a bounded, explicit subset for downstream role/context generation."""
@@ -54,6 +56,11 @@ class UXBundleManifest:
         for key in state_ids:
             if self.states and key in self.states:
                 selected.add(self.states[key])
+        for key in journey_ids:
+            if self.journey_files and key in self.journey_files:
+                selected.add(self.journey_files[key])
+            elif self.journeys:
+                selected.add(self.journeys)
         return tuple(sorted(path for path in selected if path))
 
 
@@ -156,6 +163,7 @@ def parse_manifest(value: object) -> UXBundleManifest:
         shared_artifact=str(shared.get("artifact", "") or "").strip(),
         screens=_path_map(value.get("screens"), field="screens"),
         states=_path_map(value.get("states"), field="states"),
+        journey_files=_path_map(value.get("journey_files"), field="journey_files"),
         verifier=_safe_relative_path(value.get("verifier"), field="verifier", allow_empty=True),
         metadata=_string_map(value.get("metadata"), field="metadata"),
         figma=_string_map(value.get("figma"), field="figma"),
@@ -198,6 +206,7 @@ def _required_manifest_paths(manifest: UXBundleManifest) -> set[str]:
         *manifest.annexes,
         *(manifest.screens or {}).values(),
         *(manifest.states or {}).values(),
+        *(manifest.journey_files or {}).values(),
     }
     return {value for value in values if value}
 
@@ -255,6 +264,7 @@ def manifest_summary(manifest: UXBundleManifest) -> dict[str, object]:
         "annex_count": len(manifest.annexes),
         "screen_ids": sorted((manifest.screens or {}).keys()),
         "state_ids": sorted((manifest.states or {}).keys()),
+        "journey_ids": sorted((manifest.journey_files or {}).keys()),
         "shared_artifact": manifest.shared_artifact,
         "metadata_keys": sorted((manifest.metadata or {}).keys()),
         "figma_keys": sorted((manifest.figma or {}).keys()),
