@@ -19,22 +19,38 @@ class VersionIntentWorkflowContractTests(unittest.TestCase):
         self.assertIn("pr-body: ${{ steps.pr.outputs.body }}", text)
         self.assertIn("FALLBACK_BODY: ${{ inputs.pr_body }}", text)
 
-    def test_ci_retriggers_on_pr_body_edits_and_passes_pr_identity(self) -> None:
+    def test_pr_body_edits_use_isolated_version_intent_workflow(self) -> None:
+        ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
+            encoding="utf-8"
+        )
+        intent = (ROOT / ".github" / "workflows" / "pr-version-intent.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertNotIn("- edited", ci)
+        self.assertNotIn("github.event.action", ci)
+        self.assertIn("- edited", intent)
+        self.assertIn("uses: ./.github/workflows/version-intent.yml", intent)
+        self.assertIn(
+            "pr_number: ${{ github.event.pull_request.number }}",
+            intent,
+        )
+        self.assertIn(
+            "head: ${{ github.event.pull_request.head.sha }}",
+            intent,
+        )
+
+    def test_source_ci_exposes_one_aggregate_gate(self) -> None:
         text = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
             encoding="utf-8"
         )
-        self.assertIn("- edited", text)
-        self.assertIn(
-            "pr_number: ${{ github.event.pull_request.number }}",
-            text,
-        )
-        version_job = text.split("  version-intent:\n", 1)[1].split("\n  workflow-lint:", 1)[0]
-        self.assertIn("pull-requests: read", version_job)
-        self.assertIn(
-            "github.event.action == 'edited' && 'intent' || 'source'",
-            text,
-        )
+
+        self.assertIn("  ci-gate:\n", text)
+        gate = text.split("  ci-gate:\n", 1)[1].split("\n  version-tag:", 1)[0]
+        self.assertIn("name: CI gate", gate)
+        self.assertIn("if: always()", gate)
         for job in (
+            "version-intent",
             "workflow-lint",
             "release-reproducibility",
             "version-policy-action",
@@ -44,8 +60,11 @@ class VersionIntentWorkflowContractTests(unittest.TestCase):
             "powershell-syntax",
             "repository-hygiene",
         ):
-            section = text.split(f"  {job}:\n", 1)[1].split("\n  ", 1)[0]
-            self.assertIn("github.event.action != 'edited'", section, job)
+            self.assertIn(f"      - {job}\n", gate, job)
+
+        version_tag = text.split("  version-tag:\n", 1)[1]
+        self.assertIn("needs.ci-gate.result == 'success'", version_tag)
+        self.assertIn("      - ci-gate\n", version_tag)
 
 
 if __name__ == "__main__":
