@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from automation import opencode_adapter_contract
+from automation import opencode_adapter_contract, semver_intent
 
 import argparse
 import json
@@ -38,14 +38,21 @@ def run(argv: list[str] | None = None) -> int:
     parser.add_argument("--arguments", default="")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--runtime", default="")
+    parser.add_argument("--semver", default="")
     args = parser.parse_args(argv)
     try:
+        semver_override = (
+            semver_intent.normalize_intent(args.semver, source="explicit")
+            if args.semver.strip()
+            else ""
+        )
         payload = coordinate(
             Path(args.repo),
             arguments=args.arguments,
             resume=args.resume,
             invalidated_roles=invalidations(args.arguments) if args.resume else set(),
             runtime_name=args.runtime,
+            semver_intent_override=semver_override,
         )
     except (
         RoleCoordinatorError,
