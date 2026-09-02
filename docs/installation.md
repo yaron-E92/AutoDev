@@ -153,6 +153,25 @@ autodev queue next
 
 `autodev issue-to-pr ISSUE` is the canonical user-facing spelling for working a specific issue. `autodev coordinate --arguments ISSUE` remains available only as the advanced/integration spelling over the same coordinator.
 
+AutoDev-created PRs always carry exactly one version intent:
+
+```text
++semver: major
++semver: minor
++semver: patch
++semver: none
+```
+
+Resolution is deterministic:
+
+1. one explicit `+semver:` directive in the source issue body;
+2. `autodev issue-to-pr ISSUE --semver INTENT` when the issue has no directive;
+3. repository `.autodev/repo.json` `default_semver_intent`;
+4. built-in fallback `patch`.
+
+If the issue already owns an intent, a conflicting `--semver` fails closed instead of silently replacing it. Duplicate/conflicting issue directives also fail before AutoDev marks the issue running.
+
+
 ## Runtime and provider configuration
 
 `opencode` is the default role runtime. Runtime selection precedence is:
@@ -179,7 +198,7 @@ AutoDev separates configuration, run state, and frontend integration:
 
 ```text
 .autodev/
-  repo.json       # AutoDev repository feature/config ownership
+  repo.json       # AutoDev repository feature/config ownership, including default_semver_intent
   queue.json      # autonomous queue policy
   roadmap.yaml    # optional deterministic priority overlay
   privacy.json    # repository privacy policy
