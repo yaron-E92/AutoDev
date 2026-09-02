@@ -436,6 +436,9 @@ class SchedulerDispatchTests(unittest.TestCase):
                     "PrUrl": "https://github.test/owner/repo/pull/10",
                     "LastCommitSnapshotHash": workflow_storage._file_sha256(snapshot_path),
                     "PreparedLocalHeadSha": "base-sha",
+                    "VerifiedChanges": [
+                        {"path": "src/app.py", "status": "added", "sha256": "ABC123"}
+                    ],
                 },
             )
             git_calls: list[list[str]] = []
@@ -469,7 +472,7 @@ class SchedulerDispatchTests(unittest.TestCase):
                 )
 
             self.assertIn(["reset", "--hard", "HEAD"], git_calls)
-            self.assertIn(["clean", "-fd"], git_calls)
+            self.assertIn(["clean", "-fd", "--", "src/app.py"], git_calls)
             self.assertIn(["checkout", "main"], git_calls)
             self.assertIn(["merge", "--ff-only", "origin/main"], git_calls)
             resolved = workflow_stages.read_state(current)
@@ -521,7 +524,7 @@ class SchedulerDispatchTests(unittest.TestCase):
                     )
 
             self.assertNotIn(["reset", "--hard", "HEAD"], git_calls)
-            self.assertNotIn(["clean", "-fd"], git_calls)
+            self.assertFalse(any(call[:2] == ["clean", "-fd"] for call in git_calls))
 
     def test_merged_awaiting_run_is_normalized_before_next_selection(self):
         with tempfile.TemporaryDirectory() as temp_dir:
