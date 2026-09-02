@@ -13,7 +13,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
-from automation import repository_identity, semver_intent
+from automation import repository_identity, semver_intent, ux_resolver, ux_workflow
 from automation.semantic_contract import SemanticVerifierError
 from automation.semantic_invocation import prepare_semantic_repair_prompt
 from automation.semantic_prompts import extract_acceptance_criteria
@@ -56,6 +56,7 @@ def ensure_prepared_issue(
     semver_intent_override: str = "",
     autodev_root: Path = AUTODEV_ROOT,
     runner: Callable[..., object] = subprocess.run,
+    ux_registry: ux_resolver.UXResolverRegistry | None = None,
 ) -> Path:
     current = repo / CURRENT_DIR
     requested_issue = issue_number_from_arguments(arguments)
@@ -122,6 +123,18 @@ def ensure_prepared_issue(
         autodev_root=autodev_root,
     )
 
+    try:
+        ux_artifact = ux_workflow.resolve_configured(
+            repo,
+            registry=ux_registry,
+            unattended=bool(os.environ.get("AUTODEV_HEADLESS", "").strip()),
+        )
+    except (ux_resolver.UXResolutionError, ValueError) as exc:
+        raise WorkflowStageError(
+            f"UX artifact resolution failed: {exc}",
+            classification="setup/configuration",
+        ) from exc
+
     gh(
         repo,
         ["issue", "edit", str(requested_issue), "--repo", repo_full, "--add-label", "autodev:running"],
@@ -171,6 +184,7 @@ def ensure_prepared_issue(
         "PromptDir": os.environ.get("PROMPT_DIR", str(autodev_root / "promptTemplates")),
         "ProfilesPath": str(profiles_path),
         "ProviderProfile": os.environ.get("PROVIDER_PROFILE", ""),
+        "UXArtifact": ux_workflow.evidence(ux_artifact),
         "RunDir": str(current.resolve()),
         "PrUrl": "",
         "PrNumber": 0,
