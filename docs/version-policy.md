@@ -64,7 +64,9 @@ It exposes:
 
 `.github/workflows/version-intent.yml`
 
-This workflow is read-only. It checks out the caller repository with full history, executes the Action in `check-pr` mode, and exposes the candidate version outputs.
+This workflow is read-only. It checks out the caller repository with full history, resolves the pull request's **current** body through the GitHub API when a PR number is available, executes the Action in `check-pr` mode, and exposes the candidate version outputs. The caller-supplied body remains only a compatibility fallback for contexts without a PR number.
+
+Because the body is re-fetched at execution time, GitHub's ordinary **Re-run failed jobs** action evaluates the current PR text rather than the stale body captured by the original event.
 
 ### Reusable trusted-main workflow
 
@@ -85,18 +87,25 @@ The caller must grant sufficient `GITHUB_TOKEN` permissions for the called workf
 
 Consumers should pin the reusable workflow to an immutable AutoDev commit SHA.
 
-Pull-request validation:
+Pull-request validation should run again when the PR body is edited:
 
 ```yaml
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, edited]
+
 jobs:
   version-intent:
     if: github.event_name == 'pull_request'
     uses: yaron-E92/AutoDev/.github/workflows/version-intent.yml@<AUTODEV_COMMIT_SHA>
     with:
       pr_body: ${{ github.event.pull_request.body }}
+      pr_number: ${{ github.event.pull_request.number }}
       head: ${{ github.sha }}
     permissions:
       contents: read
+      pull-requests: read
 ```
 
 Trusted-main allocation should depend on every required repository-specific CI job:
@@ -123,6 +132,15 @@ jobs:
 ```
 
 The product repository remains responsible for deciding which CI jobs are mandatory before version advancement.
+
+## Recovering a failed PR intent check
+
+The exact-one-directive rule remains strict. Recovery does not require a dummy source commit:
+
+1. Edit the pull request body so it contains exactly one valid `+semver: major|minor|patch|none` line. A caller subscribed to the `edited` PR event starts a fresh validation run automatically.
+2. Alternatively, after correcting the body, use GitHub's normal **Re-run failed jobs** action on the previous workflow run. The reusable workflow fetches the current PR body before validating it, so the stale triggering payload is not authoritative.
+
+Duplicate/conflicting directives still fail. This recovery behavior does not silently add a default to manual/non-AutoDev PRs.
 
 ## Product-specific metadata
 
