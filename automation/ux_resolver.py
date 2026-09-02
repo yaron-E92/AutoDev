@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
+from urllib.parse import urlsplit, urlunsplit
 
 from automation.ux_contract import UXBundleManifest, UXBundleError, load_manifest
 
@@ -50,10 +51,10 @@ class ResolvedUXArtifact:
 
     def safe_evidence(self) -> dict[str, object]:
         return {
-            "configured_reference": self.source_reference,
+            "configured_reference": safe_reference(self.source_reference),
             "resolver_kind": self.resolver_kind,
             "immutable_identity": self.immutable_identity,
-            "immutable_reference": self.immutable_reference,
+            "immutable_reference": safe_reference(self.immutable_reference),
             "bundle_schema": self.manifest.schema,
             "product": self.manifest.product,
             "cache_hit": self.cache_hit,
@@ -216,6 +217,22 @@ def _validated_artifact(
             resolver_kind=resolver_kind,
         )
     return artifact
+
+
+def safe_reference(reference: str) -> str:
+    value = str(reference or "").strip()
+    if not value:
+        return ""
+    try:
+        parts = urlsplit(value)
+    except ValueError:
+        return "configured"
+    if not parts.scheme:
+        return "configured"
+    hostname = parts.hostname or ""
+    if parts.port is not None:
+        hostname += f":{parts.port}"
+    return urlunsplit((parts.scheme, hostname, parts.path, "", ""))
 
 
 def default_registry() -> UXResolverRegistry:
