@@ -565,6 +565,38 @@ class SchedulerDispatchTests(unittest.TestCase):
             resolve_merged.assert_called_once()
             self.assertEqual(json.loads(output.getvalue())["state"], "NO_READY_WORK")
 
+    def test_run_once_failure_is_persisted_as_scheduler_error(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            registration_file, _registration = make_registration(root)
+            err = io.StringIO()
+
+            with patch.object(
+                scheduler,
+                "_prepare_worker",
+                side_effect=scheduler.SchedulerError("dedicated worker is dirty"),
+            ):
+                code = scheduler.run_cli(
+                    [
+                        "run-once",
+                        "--registration",
+                        str(registration_file),
+                    ],
+                    stderr=err,
+                )
+
+            self.assertEqual(code, 2)
+            self.assertIn("dedicated worker is dirty", err.getvalue())
+            latest = scheduler._load_registration(registration_file)
+            self.assertIsNotNone(latest)
+            assert latest is not None
+            self.assertIsNotNone(latest.last_run)
+            assert latest.last_run is not None
+            self.assertEqual(latest.last_run["state"], "SCHEDULER_ERROR")
+            self.assertIn("dedicated worker is dirty", str(latest.last_run["detail"]))
+            self.assertTrue(str(latest.last_run["started_at"]).strip())
+            self.assertTrue(str(latest.last_run["finished_at"]).strip())
+
     def test_overlap_is_suppressed_before_worker_or_coordinator_activity(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
