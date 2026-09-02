@@ -340,7 +340,8 @@ def _completed_pr_state(
     raw = _json_result(result, context="gh pr view")  # type: ignore[attr-defined]
     if not isinstance(raw, dict):
         raise QueueError("gh pr view did not return an object")
-    if str(raw.get("mergedAt", "")).strip():
+    merged_at = raw.get("mergedAt")
+    if merged_at is not None and str(merged_at).strip():
         return "MERGED"
     state = str(raw.get("state", "")).strip().upper()
     if state == "OPEN":
