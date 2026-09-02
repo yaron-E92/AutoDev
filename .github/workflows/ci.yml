@@ -11,7 +11,6 @@ on:
       - opened
       - synchronize
       - reopened
-      - edited
   workflow_call:
     inputs:
       ref:
@@ -27,9 +26,7 @@ env:
   AUTODEV_CI_REF: ${{ inputs.ref || github.sha }}
 
 concurrency:
-  group: >-
-    ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-
-    ${{ github.event_name == 'pull_request' && github.event.action == 'edited' && 'intent' || 'source' }}
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -46,7 +43,6 @@ jobs:
       pull-requests: read
 
   workflow-lint:
-    if: github.event_name != 'pull_request' || github.event.action != 'edited'
     name: Workflow lint and immutable refs
     runs-on: ubuntu-latest
 
@@ -81,7 +77,6 @@ jobs:
         run: python -m automation.validate_workflows --repo .
 
   release-reproducibility:
-    if: github.event_name != 'pull_request' || github.event.action != 'edited'
     name: Release bundle reproducibility
     runs-on: ubuntu-latest
 
@@ -107,7 +102,6 @@ jobs:
           diff -ru "$RUNNER_TEMP/release-a" "$RUNNER_TEMP/release-b"
 
   version-policy-action:
-    if: github.event_name != 'pull_request' || github.event.action != 'edited'
     name: Shared policy actions
     runs-on: ubuntu-latest
 
@@ -161,7 +155,6 @@ jobs:
           [[ "$CHECKED_FILES" =~ ^[1-9][0-9]*$ ]]
 
   python:
-    if: github.event_name != 'pull_request' || github.event.action != 'edited'
     name: Python ${{ matrix.python-version }} / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
@@ -198,7 +191,6 @@ jobs:
           tests.test_role_runtime.RuntimeAgnosticCoordinatorTests.test_mock_runtime_executes_reader_synthesizer_planner_through_same_coordinator
 
   native-packaging:
-    if: github.event_name != 'pull_request' || github.event.action != 'edited'
     name: Native installer verification
     uses: ./.github/workflows/native-packaging.yml
     with:
@@ -209,7 +201,6 @@ jobs:
       contents: read
 
   bash-syntax:
-    if: github.event_name != 'pull_request' || github.event.action != 'edited'
     name: Bash syntax
     runs-on: ubuntu-latest
 
@@ -235,7 +226,6 @@ jobs:
           fi
 
   powershell-syntax:
-    if: github.event_name != 'pull_request' || github.event.action != 'edited'
     name: PowerShell syntax
     runs-on: windows-latest
 
@@ -280,7 +270,6 @@ jobs:
           }
 
   repository-hygiene:
-    if: github.event_name != 'pull_request' || github.event.action != 'edited'
     name: Repository hygiene
     runs-on: ubuntu-latest
 
@@ -304,21 +293,11 @@ jobs:
             exit 1
           fi
 
-  version-tag:
-    name: Advance version tag
-    if: >-
-      github.event_name == 'push' &&
-      github.ref == 'refs/heads/main' &&
-      always() &&
-      needs.workflow-lint.result == 'success' &&
-      needs.release-reproducibility.result == 'success' &&
-      needs.version-policy-action.result == 'success' &&
-      needs.python.result == 'success' &&
-      needs.native-packaging.result == 'success' &&
-      needs.bash-syntax.result == 'success' &&
-      needs.powershell-syntax.result == 'success' &&
-      needs.repository-hygiene.result == 'success'
+  ci-gate:
+    name: CI gate
+    if: always()
     needs:
+      - version-intent
       - workflow-lint
       - release-reproducibility
       - version-policy-action
@@ -327,6 +306,60 @@ jobs:
       - bash-syntax
       - powershell-syntax
       - repository-hygiene
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Require all source validation
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          VERSION_INTENT: ${{ needs.version-intent.result }}
+          WORKFLOW_LINT: ${{ needs.workflow-lint.result }}
+          RELEASE_REPRODUCIBILITY: ${{ needs.release-reproducibility.result }}
+          VERSION_POLICY_ACTION: ${{ needs.version-policy-action.result }}
+          PYTHON: ${{ needs.python.result }}
+          NATIVE_PACKAGING: ${{ needs.native-packaging.result }}
+          BASH_SYNTAX: ${{ needs.bash-syntax.result }}
+          POWERSHELL_SYNTAX: ${{ needs.powershell-syntax.result }}
+          REPOSITORY_HYGIENE: ${{ needs.repository-hygiene.result }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            [[ "$VERSION_INTENT" == "success" ]] || {
+              echo "Version intent did not succeed: $VERSION_INTENT" >&2
+              exit 1
+            }
+          elif [[ "$VERSION_INTENT" != "skipped" && "$VERSION_INTENT" != "success" ]]; then
+            echo "Unexpected version-intent result for $EVENT_NAME: $VERSION_INTENT" >&2
+            exit 1
+          fi
+
+          for result in \
+            "$WORKFLOW_LINT" \
+            "$RELEASE_REPRODUCIBILITY" \
+            "$VERSION_POLICY_ACTION" \
+            "$PYTHON" \
+            "$NATIVE_PACKAGING" \
+            "$BASH_SYNTAX" \
+            "$POWERSHELL_SYNTAX" \
+            "$REPOSITORY_HYGIENE"
+          do
+            [[ "$result" == "success" ]] || {
+              echo "Required source-validation job did not succeed: $result" >&2
+              exit 1
+            }
+          done
+
+  version-tag:
+    name: Advance version tag
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      always() &&
+      needs.ci-gate.result == 'success'
+    needs:
+      - ci-gate
     uses: ./.github/workflows/version-tag.yml
     with:
       head: ${{ github.sha }}
