@@ -162,6 +162,26 @@ class UXResolverRegistry:
                 resolver_kind=resolver.kind,
             ) from exc
 
+    def identity(self, reference: str) -> str:
+        resolver = self.resolver_for(reference)
+        try:
+            identity = str(resolver.identity(reference) or "").strip()
+        except UXResolutionError:
+            raise
+        except Exception as exc:
+            raise UXResolutionError(
+                f"UX artifact identity lookup failed through {resolver.kind}: {exc}",
+                classification=FAILURE_TRANSPORT,
+                resolver_kind=resolver.kind,
+            ) from exc
+        if not identity:
+            raise UXResolutionError(
+                "UX resolver returned no immutable artifact identity",
+                classification=FAILURE_IDENTITY,
+                resolver_kind=resolver.kind,
+            )
+        return identity
+
     @property
     def kinds(self) -> tuple[str, ...]:
         return tuple(resolver.kind for resolver in self._resolvers)
@@ -199,17 +219,16 @@ def _validated_artifact(
             classification=classification,
             resolver_kind=resolver_kind,
         ) from exc
-    if manifest != artifact.manifest:
-        artifact = ResolvedUXArtifact(
-            immutable_identity=artifact.immutable_identity,
-            immutable_reference=artifact.immutable_reference,
-            local_root=artifact.local_root.expanduser().resolve(),
-            manifest=manifest,
-            source_reference=artifact.source_reference,
-            resolver_kind=artifact.resolver_kind,
-            cache_hit=artifact.cache_hit,
-            provenance=dict(artifact.provenance),
-        )
+    artifact = ResolvedUXArtifact(
+        immutable_identity=identity,
+        immutable_reference=immutable_reference,
+        local_root=artifact.local_root.expanduser().resolve(),
+        manifest=manifest,
+        source_reference=artifact.source_reference,
+        resolver_kind=artifact.resolver_kind,
+        cache_hit=artifact.cache_hit,
+        provenance=dict(artifact.provenance),
+    )
     if artifact.resolver_kind != resolver_kind:
         raise UXResolutionError(
             "UX resolver returned an artifact owned by a different resolver kind",
