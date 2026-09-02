@@ -7,6 +7,11 @@ on:
   pull_request:
     branches:
       - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - edited
   workflow_call:
     inputs:
       ref:
@@ -22,7 +27,9 @@ env:
   AUTODEV_CI_REF: ${{ inputs.ref || github.sha }}
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: >-
+    ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-
+    ${{ github.event_name == 'pull_request' && github.event.action == 'edited' && 'intent' || 'source' }}
   cancel-in-progress: true
 
 jobs:
@@ -32,11 +39,14 @@ jobs:
     uses: ./.github/workflows/version-intent.yml
     with:
       pr_body: ${{ github.event.pull_request.body }}
+      pr_number: ${{ github.event.pull_request.number }}
       head: ${{ github.sha }}
     permissions:
       contents: read
+      pull-requests: read
 
   workflow-lint:
+    if: github.event_name != 'pull_request' || github.event.action != 'edited'
     name: Workflow lint and immutable refs
     runs-on: ubuntu-latest
 
@@ -71,6 +81,7 @@ jobs:
         run: python -m automation.validate_workflows --repo .
 
   release-reproducibility:
+    if: github.event_name != 'pull_request' || github.event.action != 'edited'
     name: Release bundle reproducibility
     runs-on: ubuntu-latest
 
@@ -96,6 +107,7 @@ jobs:
           diff -ru "$RUNNER_TEMP/release-a" "$RUNNER_TEMP/release-b"
 
   version-policy-action:
+    if: github.event_name != 'pull_request' || github.event.action != 'edited'
     name: Shared policy actions
     runs-on: ubuntu-latest
 
@@ -149,6 +161,7 @@ jobs:
           [[ "$CHECKED_FILES" =~ ^[1-9][0-9]*$ ]]
 
   python:
+    if: github.event_name != 'pull_request' || github.event.action != 'edited'
     name: Python ${{ matrix.python-version }} / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
@@ -185,6 +198,7 @@ jobs:
           tests.test_role_runtime.RuntimeAgnosticCoordinatorTests.test_mock_runtime_executes_reader_synthesizer_planner_through_same_coordinator
 
   native-packaging:
+    if: github.event_name != 'pull_request' || github.event.action != 'edited'
     name: Native installer verification
     uses: ./.github/workflows/native-packaging.yml
     with:
@@ -195,6 +209,7 @@ jobs:
       contents: read
 
   bash-syntax:
+    if: github.event_name != 'pull_request' || github.event.action != 'edited'
     name: Bash syntax
     runs-on: ubuntu-latest
 
@@ -220,6 +235,7 @@ jobs:
           fi
 
   powershell-syntax:
+    if: github.event_name != 'pull_request' || github.event.action != 'edited'
     name: PowerShell syntax
     runs-on: windows-latest
 
@@ -264,6 +280,7 @@ jobs:
           }
 
   repository-hygiene:
+    if: github.event_name != 'pull_request' || github.event.action != 'edited'
     name: Repository hygiene
     runs-on: ubuntu-latest
 

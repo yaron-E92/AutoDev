@@ -4,9 +4,15 @@ on:
   workflow_call:
     inputs:
       pr_body:
-        description: Pull request body containing exactly one +semver directive
-        required: true
+        description: Compatibility fallback PR body when no PR number is available
+        required: false
         type: string
+        default: ''
+      pr_number:
+        description: Pull request number used to fetch the current authoritative body
+        required: false
+        type: number
+        default: 0
       head:
         description: Exact caller ref/SHA to inspect; defaults to caller workflow SHA
         required: false
@@ -35,6 +41,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   version:
@@ -50,6 +57,30 @@ jobs:
       tag_required: ${{ steps.version.outputs.tag_required }}
 
     steps:
+      - name: Resolve current pull request body
+        id: pr
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ inputs.pr_number || github.event.pull_request.number || 0 }}
+          FALLBACK_BODY: ${{ inputs.pr_body }}
+        run: |
+          set -euo pipefail
+          body="$FALLBACK_BODY"
+          if [[ "$PR_NUMBER" != "0" ]]; then
+            if ! body="$(gh api "repos/$GH_REPO/pulls/$PR_NUMBER" --jq '.body // ""')"; then
+              echo "::error::Version intent could not read current PR #$PR_NUMBER. Grant pull-requests: read to the caller job."
+              exit 1
+            fi
+          fi
+          delimiter="AUTODEV_PR_BODY_$(python -c 'import uuid; print(uuid.uuid4().hex)')"
+          {
+            echo "body<<$delimiter"
+            printf '%s\n' "$body"
+            echo "$delimiter"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Check out caller repository with full history
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -61,7 +92,7 @@ jobs:
         uses: $/.github/actions/version-policy
         with:
           mode: check-pr
-          pr-body: ${{ inputs.pr_body }}
+          pr-body: ${{ steps.pr.outputs.body }}
           head: ${{ inputs.head || github.sha }}
           base-version: ${{ inputs.base_version }}
 
