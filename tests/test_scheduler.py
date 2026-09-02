@@ -405,7 +405,7 @@ class SchedulerDispatchTests(unittest.TestCase):
                 git_calls.append(list(args))
                 return SimpleNamespace(returncode=0, stdout="", stderr="")
 
-            with patch.object(scheduler_merge_resolution, "_git", side_effect=fake_git), patch.object(
+            with patch.object(scheduler, "_git", side_effect=fake_git), patch.object(
                 scheduler,
                 "_git_status",
                 return_value=" M user-file.txt",
