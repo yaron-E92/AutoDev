@@ -9,7 +9,13 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from automation import queue_selection, scheduler, scheduler_registration
+from automation import (
+    queue_selection,
+    scheduler,
+    scheduler_registration,
+    workflow_stages,
+    workflow_storage,
+)
 
 
 class CronRunner:
@@ -413,6 +419,186 @@ class SchedulerDispatchTests(unittest.TestCase):
             flat = " ".join(" ".join(call) for call in git_calls)
             self.assertNotIn("reset", flat)
             self.assertNotIn("clean", flat)
+
+    def test_merged_ready_pr_normalizes_exact_shipped_worker_before_reuse(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            _registration_file, registration = make_registration(root)
+            worker = Path(registration.worker_repository)
+            current = worker / workflow_stages.CURRENT_DIR
+            current.mkdir(parents=True)
+            snapshot_path = current / "last-commit-workspace-snapshot.json"
+            snapshot = {"src/app.py": "ABC123"}
+            snapshot_path.write_text(json.dumps(snapshot, sort_keys=True), encoding="utf-8")
+            workflow_stages.write_state(
+                current,
+                {
+                    "PrUrl": "https://github.test/owner/repo/pull/10",
+                    "LastCommitSnapshotHash": workflow_storage._file_sha256(snapshot_path),
+                    "PreparedLocalHeadSha": "base-sha",
+                    "VerifiedChanges": [
+                        {"path": "src/app.py", "status": "added", "sha256": "ABC123"}
+                    ],
+                },
+            )
+            git_calls: list[list[str]] = []
+
+            def fake_git(_repo, args, **_kwargs):
+                git_calls.append(list(args))
+                stdout = "base-sha\n" if args == ["rev-parse", "HEAD"] else ""
+                return SimpleNamespace(returncode=0, stdout=stdout, stderr="")
+
+            existing = queue_selection.ExistingRun(
+                "AWAITING_MERGE",
+                issue_number=10,
+                pr_url="https://github.test/owner/repo/pull/10",
+            )
+            with patch.object(scheduler, "_git", side_effect=fake_git), patch.object(
+                scheduler,
+                "_git_status",
+                return_value="",
+            ), patch.object(
+                scheduler.workflow_workspace,
+                "workspace_snapshot",
+                return_value=snapshot,
+            ), patch.object(
+                scheduler,
+                "_prepare_worker_runtime",
+            ):
+                scheduler._resolve_merged_ready_run(
+                    registration,
+                    existing,
+                    runner=RecordingRunner(),
+                )
+
+            self.assertIn(["reset", "--hard", "HEAD"], git_calls)
+            self.assertIn(["clean", "-fd", "--", "src/app.py"], git_calls)
+            self.assertIn(["checkout", "main"], git_calls)
+            self.assertIn(["merge", "--ff-only", "origin/main"], git_calls)
+            resolved = workflow_stages.read_state(current)
+            self.assertTrue(resolved["PrMergeResolved"])
+            self.assertTrue(str(resolved["PrMergeResolvedAt"]).strip())
+
+    def test_merged_ready_pr_refuses_normalization_when_workspace_drifted(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            _registration_file, registration = make_registration(root)
+            worker = Path(registration.worker_repository)
+            current = worker / workflow_stages.CURRENT_DIR
+            current.mkdir(parents=True)
+            snapshot_path = current / "last-commit-workspace-snapshot.json"
+            snapshot = {"src/app.py": "ABC123"}
+            snapshot_path.write_text(json.dumps(snapshot, sort_keys=True), encoding="utf-8")
+            workflow_stages.write_state(
+                current,
+                {
+                    "PrUrl": "https://github.test/owner/repo/pull/10",
+                    "LastCommitSnapshotHash": workflow_storage._file_sha256(snapshot_path),
+                    "PreparedLocalHeadSha": "base-sha",
+                },
+            )
+            git_calls: list[list[str]] = []
+
+            def fake_git(_repo, args, **_kwargs):
+                git_calls.append(list(args))
+                return SimpleNamespace(returncode=0, stdout="base-sha\n", stderr="")
+
+            existing = queue_selection.ExistingRun(
+                "AWAITING_MERGE",
+                issue_number=10,
+                pr_url="https://github.test/owner/repo/pull/10",
+            )
+            with patch.object(scheduler, "_git", side_effect=fake_git), patch.object(
+                scheduler.workflow_workspace,
+                "workspace_snapshot",
+                return_value={"src/app.py": "DIFFERENT"},
+            ):
+                with self.assertRaisesRegex(
+                    scheduler.SchedulerError,
+                    "exact AutoDev-shipped workspace",
+                ):
+                    scheduler._resolve_merged_ready_run(
+                        registration,
+                        existing,
+                        runner=RecordingRunner(),
+                    )
+
+            self.assertNotIn(["reset", "--hard", "HEAD"], git_calls)
+            self.assertFalse(any(call[:2] == ["clean", "-fd"] for call in git_calls))
+
+    def test_merged_awaiting_run_is_normalized_before_next_selection(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            registration_file, _registration = make_registration(root)
+            output = io.StringIO()
+            awaiting = queue_selection.ExistingRun(
+                "AWAITING_MERGE",
+                issue_number=10,
+                pr_url="https://github.test/owner/repo/pull/10",
+            )
+            selection = queue_selection.SelectionResult(
+                state="NO_READY_WORK",
+                repository="owner/repo",
+                explanation="nothing eligible after merged PR",
+            )
+
+            with patch.object(
+                scheduler,
+                "_prepare_worker",
+                return_value=awaiting,
+            ), patch.object(
+                scheduler.queue_selection,
+                "_completed_pr_state",
+                return_value="MERGED",
+            ), patch.object(
+                scheduler,
+                "_resolve_merged_ready_run",
+            ) as resolve_merged, patch.object(
+                scheduler.queue_selection,
+                "select_next",
+                return_value=selection,
+            ):
+                code = scheduler.run_once(
+                    registration_file,
+                    stdout=output,
+                    claiming_enabled=False,
+                )
+
+            self.assertEqual(code, 0)
+            resolve_merged.assert_called_once()
+            self.assertEqual(json.loads(output.getvalue())["state"], "NO_READY_WORK")
+
+    def test_run_once_failure_is_persisted_as_scheduler_error(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            registration_file, _registration = make_registration(root)
+            err = io.StringIO()
+
+            with patch.object(
+                scheduler,
+                "_prepare_worker",
+                side_effect=scheduler.SchedulerError("dedicated worker is dirty"),
+            ):
+                code = scheduler.run_cli(
+                    [
+                        "run-once",
+                        "--registration",
+                        str(registration_file),
+                    ],
+                    stderr=err,
+                )
+
+            self.assertEqual(code, 2)
+            self.assertIn("dedicated worker is dirty", err.getvalue())
+            latest = scheduler._load_registration(registration_file)
+            self.assertIsNotNone(latest)
+            assert latest is not None
+            self.assertIsNotNone(latest.last_run)
+            assert latest.last_run is not None
+            self.assertEqual(latest.last_run["state"], "SCHEDULER_ERROR")
+            self.assertIn("dedicated worker is dirty", str(latest.last_run["detail"]))
+            self.assertTrue(str(latest.last_run["started_at"]).strip())
+            self.assertTrue(str(latest.last_run["finished_at"]).strip())
 
     def test_overlap_is_suppressed_before_worker_or_coordinator_activity(self):
         with tempfile.TemporaryDirectory() as temp_dir:

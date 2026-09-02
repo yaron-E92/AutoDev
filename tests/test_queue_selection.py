@@ -36,6 +36,7 @@ class SelectionGitHub:
         self.issues: dict[int, dict[str, object]] = {}
         self.blocked_by: dict[int, list[int]] = {}
         self.open_prs: list[dict[str, str]] = []
+        self.pr_states: dict[str, dict[str, object]] = {}
         self.calls: list[list[str]] = []
         self.mutations: list[list[str]] = []
 
@@ -79,12 +80,22 @@ class SelectionGitHub:
             self._ensure_label_metadata(name)
 
     def add_pr(self, issue_number: int) -> None:
+        url = f"https://github.test/owner/repo/pull/{issue_number}"
         self.open_prs.append(
             {
                 "headRefName": f"autodev/issue-{issue_number}-work",
-                "url": f"https://github.test/owner/repo/pull/{issue_number}",
+                "url": url,
             }
         )
+        self.pr_states[url] = {"state": "OPEN", "mergedAt": None}
+
+    def set_pr_state(self, issue_number: int, state: str, *, merged: bool = False) -> str:
+        url = f"https://github.test/owner/repo/pull/{issue_number}"
+        self.pr_states[url] = {
+            "state": state.upper(),
+            "mergedAt": "2026-09-02T08:00:00Z" if merged else None,
+        }
+        return url
 
     def set_blockers(self, issue: int, blockers: list[int]) -> None:
         self.blocked_by[issue] = list(blockers)
@@ -195,6 +206,13 @@ class SelectionGitHub:
             return SimpleNamespace(
                 returncode=0,
                 stdout=json.dumps(self.open_prs),
+                stderr="",
+            )
+        if command[:2] == ["pr", "view"]:
+            url = command[2]
+            return SimpleNamespace(
+                returncode=0,
+                stdout=json.dumps(self.pr_states[url]),
                 stderr="",
             )
         if command and command[0] == "api":
@@ -400,6 +418,77 @@ class QueueSelectionTests(unittest.TestCase):
                     for item in result.ineligible
                 )
             )
+
+
+    def test_ready_run_with_open_pr_blocks_unrelated_selection(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            fake = SelectionGitHub()
+            self._ready(fake, 10)
+            self._ready(fake, 20)
+            pr_url = fake.set_pr_state(10, "OPEN")
+
+            result = queue_selection.select_next(
+                repo,
+                fake.repo,
+                runner=fake,
+                existing_run_inspector=lambda _repo: queue_selection.ExistingRun(
+                    "AWAITING_MERGE",
+                    issue_number=10,
+                    branch="autodev/issue-10-work",
+                    pr_url=pr_url,
+                    reason="waiting for merge",
+                    next_action="wait for pull request merge",
+                ),
+            )
+
+            self.assertEqual(result.state, "PR_READY")
+            self.assertEqual(result.issue_number, 10)
+
+    def test_merged_ready_pr_allows_next_issue_in_same_selection(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            fake = SelectionGitHub()
+            self._ready(fake, 20)
+            pr_url = fake.set_pr_state(10, "CLOSED", merged=True)
+
+            result = queue_selection.select_next(
+                repo,
+                fake.repo,
+                runner=fake,
+                existing_run_inspector=lambda _repo: queue_selection.ExistingRun(
+                    "AWAITING_MERGE",
+                    issue_number=10,
+                    branch="autodev/issue-10-work",
+                    pr_url=pr_url,
+                ),
+            )
+
+            self.assertEqual(result.state, "SELECTED")
+            self.assertEqual(result.issue_number, 20)
+
+    def test_closed_unmerged_ready_pr_requires_attention(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            fake = SelectionGitHub()
+            self._ready(fake, 20)
+            pr_url = fake.set_pr_state(10, "CLOSED")
+
+            result = queue_selection.select_next(
+                repo,
+                fake.repo,
+                runner=fake,
+                existing_run_inspector=lambda _repo: queue_selection.ExistingRun(
+                    "AWAITING_MERGE",
+                    issue_number=10,
+                    branch="autodev/issue-10-work",
+                    pr_url=pr_url,
+                ),
+            )
+
+            self.assertEqual(result.state, "ATTENTION_REQUIRED")
+            self.assertEqual(result.issue_number, 10)
+            self.assertIn("closed without being merged", result.explanation)
 
     def test_malformed_roadmap_fails_safely_and_actionably(self):
         with tempfile.TemporaryDirectory() as temp_dir:
