@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from automation import opencode_adapter_models
+from automation import opencode_adapter_models, semver_intent
 
 from automation import opencode_adapter_contract
 
@@ -65,6 +65,11 @@ def run(argv: list[str] | None = None) -> int:
         default="",
         help="role runtime override (default: configured runtime, then opencode)",
     )
+    parser.add_argument(
+        "--semver",
+        default="",
+        help="AutoDev PR SemVer intent override: major|minor|patch|none",
+    )
     args = parser.parse_args(argv)
     repo = Path(args.repo).expanduser().resolve()
     proxy = opencode_failure_entrypoint.JsonEventProxy(sys.stdout, repo)
@@ -73,6 +78,11 @@ def run(argv: list[str] | None = None) -> int:
     sys.stdout = proxy
     try:
         try:
+            semver_override = (
+                semver_intent.normalize_intent(args.semver, source="explicit")
+                if args.semver.strip()
+                else ""
+            )
             selected_name, _ = role_runtime.resolve_runtime_name(repo, args.runtime)
             if selected_name == "opencode":
                 opencode_adapter_models.reject_unsupported_model_overrides(args.arguments)
@@ -86,6 +96,7 @@ def run(argv: list[str] | None = None) -> int:
                     else set()
                 ),
                 runtime_name=args.runtime,
+                semver_intent_override=semver_override,
                 runner=diagnostic_runner,
             )
         except (
