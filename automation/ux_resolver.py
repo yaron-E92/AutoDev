@@ -249,8 +249,12 @@ def safe_reference(reference: str) -> str:
     if not parts.scheme:
         return "configured"
     hostname = parts.hostname or ""
-    if parts.port is not None:
-        hostname += f":{parts.port}"
+    try:
+        port = parts.port
+    except ValueError:
+        port = None
+    if port is not None:
+        hostname += f":{port}"
     return urlunsplit((parts.scheme, hostname, parts.path, "", ""))
 
 
