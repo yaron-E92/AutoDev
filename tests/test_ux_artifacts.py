@@ -203,6 +203,40 @@ class UXArtifactTests(unittest.TestCase):
             self.assertFalse(repaired_hit)
             self.assertTrue(ux_cache.validate_entry(repaired, "sha256:demo"))
 
+    def test_resume_identity_rejects_silent_design_change(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir) / "repo"
+            bundle = Path(temp_dir) / "bundle"
+            repo.mkdir()
+            bundle.mkdir()
+            write_bundle(bundle)
+            (repo / ".autodev").mkdir()
+            (repo / ".autodev" / "repo.json").write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "ux": {
+                            "enabled": True,
+                            "artifact": "fake://demo@sha256:demo",
+                            "product": "demo",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            expected = {"immutable_identity": "sha256:demo"}
+
+            same = ux_resolver.UXResolverRegistry()
+            same.register(FakeResolver(bundle, identity="sha256:demo"))
+            ux_workflow.validate_resume_identity(repo, expected, registry=same)
+
+            changed = ux_resolver.UXResolverRegistry()
+            changed.register(FakeResolver(bundle, identity="sha256:changed"))
+            with self.assertRaises(ux_resolver.UXResolutionError) as raised:
+                ux_workflow.validate_resume_identity(repo, expected, registry=changed)
+
+        self.assertEqual(raised.exception.classification, ux_resolver.FAILURE_IDENTITY)
+
     def test_cli_lock_rewrites_only_configured_reference_to_immutable_value(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir) / "repo"
