@@ -30,6 +30,10 @@ from automation.scheduler_backends import (
     _uninstall_backend,
     _windows_task_action,
 )
+from automation.scheduler_lock import SchedulerLock
+from automation.scheduler_merge_resolution import (
+    resolve_merged_ready_run as _resolve_merged_ready_run,
+)
 from automation.scheduler_process import (
     _default_branch,
     _git,
@@ -83,62 +87,6 @@ from automation.scheduler_types import (
 )
 
 
-class SchedulerLock:
-    def __init__(self, path: Path):
-        self.path = path.expanduser().resolve()
-        self.file: object | None = None
-        self.acquired = False
-        self._windows = os.name == "nt"
-
-    def __enter__(self) -> "SchedulerLock":
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        file = open(self.path, "a+b")
-        self.file = file
-        if self._windows:
-            import msvcrt
-
-            file.seek(0, os.SEEK_END)
-            if file.tell() == 0:
-                file.write(b"0")
-                file.flush()
-            file.seek(0)
-            try:
-                msvcrt.locking(file.fileno(), msvcrt.LK_NBLCK, 1)
-                self.acquired = True
-            except OSError:
-                self.acquired = False
-            return self
-
-        import fcntl
-
-        try:
-            fcntl.flock(file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            self.acquired = True
-        except OSError:
-            self.acquired = False
-        return self
-
-    def __exit__(self, exc_type, exc, tb) -> None:
-        file = self.file
-        if file is None:
-            return
-        try:
-            if self.acquired:
-                if self._windows:
-                    import msvcrt
-
-                    file.seek(0)
-                    msvcrt.locking(file.fileno(), msvcrt.LK_UNLCK, 1)
-                else:
-                    import fcntl
-
-                    fcntl.flock(file.fileno(), fcntl.LOCK_UN)
-        finally:
-            file.close()
-            self.file = None
-            self.acquired = False
-
-
 def _prepare_worker(
     registration: SchedulerRegistration,
     *,
@@ -164,7 +112,7 @@ def _prepare_worker(
         ["merge", "--ff-only", f"origin/{registration.default_branch}"],
         runner=runner,
     )
-    _prepare_worker_runtime(worker, runner=runner)
+    scheduler_runtime_worker.provision_worker(worker, runner=runner)
     dirty = _git_status(worker, runner=runner)
     if dirty:
         raise SchedulerError(
@@ -289,6 +237,20 @@ def run_once(
 
         worker = Path(registration.worker_repository).expanduser().resolve()
         prepared_existing = _prepare_worker(registration, runner=runner)
+        if prepared_existing.state == "AWAITING_MERGE":
+            pr_state = queue_selection._completed_pr_state(
+                worker,
+                registration.github_repository,
+                prepared_existing.pr_url,
+                runner=runner,
+            )
+            if pr_state == "MERGED":
+                _resolve_merged_ready_run(
+                    registration,
+                    prepared_existing,
+                    runner=runner,
+                )
+                prepared_existing = queue_selection.ExistingRun("NONE")
         claim_policy = claim_contract.ClaimPolicy()
         worker_id = ""
         excluded: set[int] = set()
@@ -359,6 +321,17 @@ def run_once(
                 state="NO_READY_WORK",
                 github_repository=registration.github_repository,
                 selection_state=selection.state,
+                detail=selection.explanation,
+            )
+            _record_last_run(path, registration, result, started_at=started_at)
+            print(json.dumps(result.to_json(), sort_keys=True), file=stdout)
+            return 0
+        if selection.state == "PR_READY":
+            result = DispatchResult(
+                state="PR_READY",
+                github_repository=registration.github_repository,
+                selection_state=selection.state,
+                issue_number=selection.issue_number,
                 detail=selection.explanation,
             )
             _record_last_run(path, registration, result, started_at=started_at)
@@ -603,6 +576,9 @@ def run_cli(
     uninstall_parser.add_argument("--json", action="store_true")
 
     args = parser.parse_args(argv)
+    failure_started_at = _now()
+    failure_registration_file: Path | None = None
+    failure_registration: SchedulerRegistration | None = None
     try:
         if args.command == "install":
             registration = install_scheduler(
@@ -666,6 +642,8 @@ def run_cli(
                 runner=runner,
             )
             path = registration_path(resolved, home=home)
+        failure_registration_file = path.expanduser().resolve()
+        failure_registration = _load_registration(failure_registration_file)
         return run_once(
             path,
             home=home,
@@ -681,6 +659,25 @@ def run_cli(
         queue_selection.RoadmapError,
         privacy.PrivacyError,
     ) as exc:
+        if (
+            args.command == "run-once"
+            and failure_registration_file is not None
+            and failure_registration is not None
+        ):
+            try:
+                _record_last_run(
+                    failure_registration_file,
+                    failure_registration,
+                    DispatchResult(
+                        state="SCHEDULER_ERROR",
+                        github_repository=failure_registration.github_repository,
+                        detail=str(exc),
+                    ),
+                    started_at=failure_started_at,
+                )
+            except Exception:
+                # Persisting diagnostics must never replace the original scheduler failure.
+                pass
         print(str(exc), file=stderr)
         return 2
 

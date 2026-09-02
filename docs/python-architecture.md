@@ -37,6 +37,8 @@ The retired standalone issue-runner and evaluation layers are not alternate prod
 - `scheduler.py` — scheduler command/orchestration surface.
 - `scheduler_types.py` — scheduler state and contracts.
 - `scheduler_process.py` — process/Git execution.
+- `scheduler_lock.py` — same-machine scheduler tick lock.
+- `scheduler_merge_resolution.py` — safe post-merge worker normalization and durable merge resolution.
 - `scheduler_backends.py` — native scheduler backends.
 - `scheduler_runtime_worker.py` — runtime-owned worker provisioning/validation boundary used by scheduler dispatch.
 - `scheduler_registration.py` — install/uninstall lifecycle.
