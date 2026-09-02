@@ -364,6 +364,17 @@ def run_once(
             _record_last_run(path, registration, result, started_at=started_at)
             print(json.dumps(result.to_json(), sort_keys=True), file=stdout)
             return 0
+        if selection.state == "PR_READY":
+            result = DispatchResult(
+                state="PR_READY",
+                github_repository=registration.github_repository,
+                selection_state=selection.state,
+                issue_number=selection.issue_number,
+                detail=selection.explanation,
+            )
+            _record_last_run(path, registration, result, started_at=started_at)
+            print(json.dumps(result.to_json(), sort_keys=True), file=stdout)
+            return 0
         if selection.state == "ATTENTION_REQUIRED":
             result = DispatchResult(
                 state="ATTENTION_REQUIRED",
