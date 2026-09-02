@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from automation import privacy_grant_commands, queue_contract, queue_github, queue_policy
+from automation import privacy_grant_commands, queue_contract, queue_github, queue_policy, semver_intent
 
 from automation import opencode_adapter_models
 
@@ -121,6 +121,16 @@ def _load_repo_config(repo: Path) -> dict[str, object]:
         raise RepoSetupError(
             f"unsupported AutoDev repository config version in {path}: {value.get('version')!r}"
         )
+    if "default_semver_intent" in value:
+        raw_semver = value.get("default_semver_intent")
+        if not isinstance(raw_semver, str):
+            raise RepoSetupError(
+                f"default_semver_intent in {path} must be a string"
+            )
+        try:
+            semver_intent.normalize_intent(raw_semver, source="repository-default")
+        except semver_intent.SemVerIntentError as exc:
+            raise RepoSetupError(str(exc)) from exc
     return value
 
 
@@ -140,6 +150,7 @@ def _ensure_repo_config(
                 {
                     "version": REPO_SCHEMA,
                     "opencode": {"enabled": enable_opencode},
+                    "default_semver_intent": semver_intent.DEFAULT_INTENT,
                 }
             ),
             encoding="utf-8",
@@ -148,12 +159,18 @@ def _ensure_repo_config(
         return
 
     value = dict(current)
+    changed = False
+    if "default_semver_intent" not in value:
+        value["default_semver_intent"] = semver_intent.DEFAULT_INTENT
+        changed = True
     raw = value.get("opencode", {})
     opencode = dict(raw) if isinstance(raw, dict) else {}
-    if opencode.get("enabled") is enable_opencode:
+    if opencode.get("enabled") is not enable_opencode:
+        opencode["enabled"] = enable_opencode
+        value["opencode"] = opencode
+        changed = True
+    if not changed:
         return
-    opencode["enabled"] = enable_opencode
-    value["opencode"] = opencode
     path.write_text(_json_text(value), encoding="utf-8")
     updated.append(REPO_CONFIG.as_posix())
 
