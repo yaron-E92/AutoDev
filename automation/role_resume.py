@@ -12,7 +12,7 @@ import subprocess
 from pathlib import Path
 from typing import Callable
 
-from automation import repair_lineage, run_manifest, workflow_stages
+from automation import repair_lineage, run_manifest, workflow_stages, ux_resolver, ux_workflow
 
 
 class RoleResumeError(ValueError):
@@ -50,6 +50,7 @@ def create_manifest(
             role_snapshots={},
             prompt_policy={},
             semantic_verification={"enabled": True, "frontend": runtime_name},
+            ux_artifact=dict(state.get("UXArtifact", {})) if isinstance(state.get("UXArtifact", {}), dict) else {},
         )
         manifest = run_manifest.load_manifest(path)
         manifest["role_runtime"] = {"name": runtime_name}
@@ -64,12 +65,14 @@ def create_manifest(
                 "issue_number": int(state.get("IssueNumber", 0) or 0),
                 "base_sha": str(state.get("BaseSha", "")),
                 "role_runtime": runtime_name,
+                "ux_immutable_identity": str((state.get("UXArtifact", {}) if isinstance(state.get("UXArtifact", {}), dict) else {}).get("immutable_identity", "")),
             },
             details={
                 "branch": str(state.get("BranchName", "")),
                 "base_tree_sha": str(state.get("BaseTreeSha", "")),
                 "prepared_snapshot_hash": str(state.get("PreparedSnapshotHash", "")),
                 "role_runtime": runtime_name,
+                "ux_artifact": dict(state.get("UXArtifact", {})) if isinstance(state.get("UXArtifact", {}), dict) else {},
             },
         )
     except run_manifest.ManifestError as exc:
@@ -291,6 +294,13 @@ def resume(
         )
     try:
         manifest = run_manifest.load_manifest(path)
+        try:
+            ux_workflow.validate_resume_identity(
+                repo,
+                manifest.get("ux_artifact", {}),
+            )
+        except ux_resolver.UXResolutionError as exc:
+            raise RoleResumeError(str(exc)) from exc
         invalidated_roles = invalidated_roles or set()
         for role in invalidated_roles:
             affected = run_manifest.invalidated_stages_for_role(manifest, role)
