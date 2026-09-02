@@ -30,6 +30,22 @@ class VersionIntentWorkflowContractTests(unittest.TestCase):
         )
         version_job = text.split("  version-intent:\n", 1)[1].split("\n  workflow-lint:", 1)[0]
         self.assertIn("pull-requests: read", version_job)
+        self.assertIn(
+            "github.event.action == 'edited' && 'intent' || 'source'",
+            text,
+        )
+        for job in (
+            "workflow-lint",
+            "release-reproducibility",
+            "version-policy-action",
+            "python",
+            "native-packaging",
+            "bash-syntax",
+            "powershell-syntax",
+            "repository-hygiene",
+        ):
+            section = text.split(f"  {job}:\n", 1)[1].split("\n  ", 1)[0]
+            self.assertIn("github.event.action != 'edited'", section, job)
 
 
 if __name__ == "__main__":
