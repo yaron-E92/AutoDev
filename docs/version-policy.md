@@ -103,26 +103,29 @@ The caller must grant sufficient `GITHUB_TOKEN` permissions for the called workf
 
 Consumers should pin the reusable workflow to an immutable AutoDev commit SHA.
 
-Pull-request validation should run again when the PR body is edited:
+Pull-request source validation and pull-request metadata validation should use separate workflow triggers. Source/build/test CI should run on `opened`, `synchronize`, and `reopened`; a lightweight version-intent caller should run on `edited`. This prevents a metadata-only edit from producing a mostly-skipped run under the same CI workflow/check identity as source validation.
+
+For the metadata-only caller:
 
 ```yaml
 on:
   pull_request:
     branches: [main]
-    types: [opened, synchronize, reopened, edited]
+    types: [edited]
 
 jobs:
   version-intent:
-    if: github.event_name == 'pull_request'
     uses: yaron-E92/AutoDev/.github/workflows/version-intent.yml@<AUTODEV_COMMIT_SHA>
     with:
       pr_body: ${{ github.event.pull_request.body }}
       pr_number: ${{ github.event.pull_request.number }}
-      head: ${{ github.sha }}
+      head: ${{ github.event.pull_request.head.sha }}
     permissions:
       contents: read
       pull-requests: read
 ```
+
+Repositories using required status checks should require a stable aggregate source-validation gate **and** the version-intent check. A body edit can change `+semver` without changing the source SHA, so neither check is a substitute for the other.
 
 Trusted-main allocation should depend on every required repository-specific CI job:
 
@@ -153,7 +156,7 @@ The product repository remains responsible for deciding which CI jobs are mandat
 
 The exact-one-directive rule remains strict. Recovery does not require a dummy source commit:
 
-1. Edit the pull request body so it contains exactly one valid `+semver: major|minor|patch|none` line. A caller subscribed to the `edited` PR event starts a fresh version-intent validation automatically. In AutoDev's own CI, body-edit runs use a separate concurrency lane and skip source/build/package jobs, so correcting PR metadata cannot cancel or replay an in-progress source CI run.
+1. Edit the pull request body so it contains exactly one valid `+semver: major|minor|patch|none` line. A caller subscribed to the `edited` PR event starts a fresh version-intent validation automatically. AutoDev's own repository uses a separate metadata-only workflow for this event, so correcting PR metadata cannot create a misleading mostly-skipped `CI` run or cancel/replay source validation.
 2. Alternatively, after correcting the body, use GitHub's normal **Re-run failed jobs** action on the previous workflow run. The reusable workflow fetches the current PR body before validating it, so the stale triggering payload is not authoritative.
 
 Duplicate/conflicting directives still fail. This recovery behavior does not silently add a default to manual/non-AutoDev PRs.
