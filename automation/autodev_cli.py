@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from automation import claim_cli, cli_help, config_cli, manage_cli, notification_cli, privacy_grant_cli, product_runtime, scheduler_health_cli
+from automation import claim_cli, cli_help, config_cli, manage_cli, notification_cli, privacy_grant_cli, product_runtime, scheduler_health_cli, semver_intent
 
 import os
 import sys
@@ -84,11 +84,17 @@ def _issue_to_pr(values: list[str]) -> tuple[list[str] | None, str]:
     index = 1
     while index < len(values):
         option = values[index]
-        if option not in {"--repo", "--runtime"}:
+        if option not in {"--repo", "--runtime", "--semver"}:
             return None, f"unsupported issue-to-pr option {option!r}"
         if index + 1 >= len(values) or not values[index + 1].strip():
             return None, f"{option} requires a value"
-        forwarded.extend((option, values[index + 1]))
+        value = values[index + 1]
+        if option == "--semver":
+            try:
+                value = semver_intent.normalize_intent(value, source="explicit")
+            except semver_intent.SemVerIntentError as exc:
+                return None, str(exc)
+        forwarded.extend((option, value))
         index += 2
     return forwarded, ""
 

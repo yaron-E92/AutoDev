@@ -13,7 +13,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
-from automation import external_error_sanitizer
+from automation import external_error_sanitizer, semver_intent
 from automation.semantic_contract import SemanticVerifierError
 from automation.semantic_invocation import prepare_semantic_repair_prompt
 from automation.semantic_prompts import extract_acceptance_criteria
@@ -238,14 +238,39 @@ def ensure_pr(
     repo_full = str(state.get("RepoFullName", ""))
     pr_url = str(state.get("PrUrl", "")).strip()
     if not pr_url:
+        issue_text = read_text(current / "issue.md") or str(state.get("IssueText", ""))
+        resolved_intent = str(state.get("SemVerIntent", "")).strip()
+        if resolved_intent:
+            try:
+                resolved_intent = semver_intent.normalize_intent(
+                    resolved_intent,
+                    source="persisted",
+                )
+            except semver_intent.SemVerIntentError as exc:
+                raise WorkflowStageError(str(exc)) from exc
+        else:
+            try:
+                resolved = semver_intent.resolve_intent(
+                    issue_text,
+                    repository_default=semver_intent.repository_default(repo),
+                )
+            except semver_intent.SemVerIntentError as exc:
+                raise WorkflowStageError(str(exc)) from exc
+            resolved_intent = resolved.intent
+            state["SemVerIntent"] = resolved.intent
+            state["SemVerIntentSource"] = resolved.source
+            write_state(current, state)
+
         body = (
             "Implements:\n\n"
-            + (read_text(current / "issue.md") or str(state.get("IssueText", "")))
-            + "\nAutoDev plan:\n\n"
+            + semver_intent.without_directives(issue_text)
+            + "\n\nAutoDev plan:\n\n"
             + read_text(current / "plan.md")
             + "\nLocal verification:\n\n```text\n"
             + str(state.get("LocalCheck", ""))
-            + "\n```\n"
+            + "\n```\n\n"
+            + semver_intent.directive(resolved_intent)
+            + "\n"
         )
         body_path = current / "pr-body.md"
         write_text(body_path, body)

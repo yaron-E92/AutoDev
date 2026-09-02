@@ -36,6 +36,7 @@ def coordinate(
     resume: bool = False,
     invalidated_roles: set[str] | None = None,
     runtime_name: str = "",
+    semver_intent_override: str = "",
     runtime_registry: Mapping[str, role_runtime.RuntimeFactory] | None = None,
     runner: Callable[..., object] = subprocess.run,
     which=None,
@@ -121,6 +122,7 @@ def coordinate(
                 "prepare",
                 runtime_name=runtime.name,
                 arguments=arguments,
+                semver_intent_override=semver_intent_override,
                 runner=runner,
                 which=which,
             )
@@ -247,6 +249,7 @@ def coordinate(
                 "prepare",
                 runtime_name=runtime.name,
                 arguments=str(cursor.get("issue_number", "")),
+                semver_intent_override=semver_intent_override,
                 runner=runner,
                 which=which,
             )

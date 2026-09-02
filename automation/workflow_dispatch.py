@@ -71,6 +71,7 @@ def execute_stage(
     repo: Path,
     *,
     arguments: str = "",
+    semver_intent_override: str = "",
     autodev_root: Path = AUTODEV_ROOT,
     attempt: int = 0,
     reason: str = "",
@@ -95,6 +96,7 @@ def execute_stage(
             name,
             repo,
             arguments=arguments,
+            semver_intent_override=semver_intent_override,
             autodev_root=autodev_root,
             attempt=attempt,
             reason=reason,
@@ -122,6 +124,7 @@ def _execute_stage_impl(
     repo: Path,
     *,
     arguments: str,
+    semver_intent_override: str,
     autodev_root: Path,
     attempt: int,
     reason: str,
@@ -148,6 +151,7 @@ def _execute_stage_impl(
         current = ensure_prepared_issue(
             repo,
             arguments,
+            semver_intent_override=semver_intent_override,
             autodev_root=autodev_root,
             runner=runner,
         )
@@ -401,6 +405,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("stage", choices=STAGES)
     parser.add_argument("--repo", default=".")
     parser.add_argument("--arguments", default="")
+    parser.add_argument("--semver", default="")
     parser.add_argument("--autodev-root", default=str(AUTODEV_ROOT))
     parser.add_argument("--attempt", type=int, default=0)
     parser.add_argument("--reason", default="")
@@ -414,6 +419,7 @@ def run(argv: list[str] | None = None) -> int:
             args.stage,
             repo,
             arguments=args.arguments,
+            semver_intent_override=args.semver,
             autodev_root=Path(args.autodev_root),
             attempt=args.attempt,
             reason=args.reason,

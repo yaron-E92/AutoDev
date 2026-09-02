@@ -13,7 +13,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
-from automation import repository_identity
+from automation import repository_identity, semver_intent
 from automation.semantic_contract import SemanticVerifierError
 from automation.semantic_invocation import prepare_semantic_repair_prompt
 from automation.semantic_prompts import extract_acceptance_criteria
@@ -53,6 +53,7 @@ def ensure_prepared_issue(
     repo: Path,
     arguments: str,
     *,
+    semver_intent_override: str = "",
     autodev_root: Path = AUTODEV_ROOT,
     runner: Callable[..., object] = subprocess.run,
 ) -> Path:
@@ -81,6 +82,15 @@ def ensure_prepared_issue(
         for item in issue.get("labels", [])
         if isinstance(item, dict) and str(item.get("name", "")).strip()
     ]
+    title = str(issue.get("title", "")).strip()
+    url = str(issue.get("url", "")).strip()
+    body = str(issue.get("body", "") or "")
+    issue_text = f"# GitHub Issue #{requested_issue}: {title}\n\nURL: {url}\n\n{body}\n"
+    resolved_semver = semver_intent.resolve_intent(
+        issue_text,
+        explicit=semver_intent_override,
+        repository_default=semver_intent.repository_default(repo),
+    )
 
     base = os.environ.get("BASE_BRANCH", "main").strip() or "main"
     remote = os.environ.get("REMOTE_NAME", "origin").strip() or "origin"
@@ -123,10 +133,6 @@ def ensure_prepared_issue(
         shutil.rmtree(current)
     current.mkdir(parents=True)
 
-    title = str(issue.get("title", "")).strip()
-    url = str(issue.get("url", "")).strip()
-    body = str(issue.get("body", "") or "")
-    issue_text = f"# GitHub Issue #{requested_issue}: {title}\n\nURL: {url}\n\n{body}\n"
     write_text(current / "issue.md", issue_text)
     snapshot_path = current / "workspace-snapshot.json"
     write_workspace_snapshot(repo, snapshot_path)
@@ -148,6 +154,8 @@ def ensure_prepared_issue(
         "IssueUrl": url,
         "IssueText": issue_text,
         "Labels": labels,
+        "SemVerIntent": resolved_semver.intent,
+        "SemVerIntentSource": resolved_semver.source,
         "Base": base,
         "Remote": remote,
         "BranchName": branch_name,
@@ -185,5 +193,7 @@ def ensure_prepared_issue(
         prepared_base_tree=base_tree_sha,
         prepared_local_head=prepared_local_head,
         prepared_snapshot_hash=prepared_snapshot_hash,
+        semver_intent=resolved_semver.intent,
+        semver_intent_source=resolved_semver.source,
     )
     return current

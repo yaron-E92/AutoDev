@@ -184,7 +184,7 @@ HELP: dict[tuple[str, ...], HelpEntry] = {
         examples=("autodev doctor", "autodev doctor --fix", "autodev doctor --json"),
     ),
     ("issue-to-pr",): _entry(
-        "autodev issue-to-pr ISSUE [--repo PATH] [--runtime NAME]",
+        "autodev issue-to-pr ISSUE [--repo PATH] [--runtime NAME] [--semver INTENT]",
         "Work one GitHub issue through AutoDev's implementation, verification, and PR flow.",
         description=(
             "This is the normal interactive entrypoint for a specific issue. AutoDev prepares or "
@@ -194,11 +194,13 @@ HELP: dict[tuple[str, ...], HelpEntry] = {
         options=(
             ("--repo PATH", "Repository root. Default: current directory (.)."),
             ("--runtime NAME", "Role runtime override. Default: repository/user configuration, then opencode."),
+            ("--semver INTENT", "PR version intent override when the source issue has none: major|minor|patch|none."),
         ),
         aliases=("autodev coordinate --arguments ISSUE",),
         examples=(
             "autodev issue-to-pr 123",
             "autodev issue-to-pr 123 --runtime opencode",
+            "autodev issue-to-pr 123 --semver minor",
             "autodev issue-to-pr 123 --repo ../my-project",
         ),
         privacy_note=CLOUD_MODEL_NOTE,
@@ -252,6 +254,7 @@ HELP: dict[tuple[str, ...], HelpEntry] = {
             ("--arguments TEXT", "Coordinator argument payload; an issue number selects that GitHub issue."),
             ("--resume", "Resume existing durable run state instead of preparing a new issue run."),
             ("--runtime NAME", "Role runtime override. Default: configured runtime, then opencode."),
+            ("--semver INTENT", "Advanced PR version intent override for a newly prepared issue: major|minor|patch|none."),
         ),
         aliases=("autodev issue-to-pr ISSUE", "autodev resume"),
         examples=("autodev coordinate --arguments 123",),

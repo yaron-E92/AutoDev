@@ -52,6 +52,7 @@ The retired standalone issue-runner and evaluation layers are not alternate prod
 - `workflow_contract.py` — workflow constants, errors and shared contracts.
 - `workflow_storage.py`, `workflow_commands.py`, `workflow_workspace.py` — persistence, subprocess/GitHub commands and workspace scope.
 - `workflow_prompts.py`, `workflow_diagnostics.py` — prompt rendering and durable diagnostics.
+- `semver_intent.py` — strict AutoDev PR version-intent parsing, repository fallback, and canonical rendering.
 - `workflow_github.py` — commit, PR and CI operations.
 - `workflow_preparation.py`, `workflow_verification.py`, `workflow_dispatch.py` — preparation, verification and stage dispatch.
 - `workflow_stages.py` — maintained integration surface; policy hooks are resolved lazily when execution begins.
