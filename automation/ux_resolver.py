@@ -54,7 +54,6 @@ class PublishedUXArtifact:
             "resolver_kind": self.resolver_kind,
             "immutable_identity": self.immutable_identity,
             "immutable_reference": safe_reference(self.immutable_reference),
-            "provenance": dict(self.provenance),
         }
 
 
