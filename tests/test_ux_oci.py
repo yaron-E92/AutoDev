@@ -11,8 +11,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from automation import ux_cli, ux_resolver
-from automation.ux_contract import BUNDLE_SCHEMA
 from automation.ux_oci import OCIUXArtifactResolver
+from automation.ux_contract import BUNDLE_SCHEMA, UXBundleError
 from automation.ux_oci_bundle import (
     ARTIFACT_TYPE,
     LAYER_MEDIA_TYPE,
@@ -297,6 +297,25 @@ class OCIResolverTests(unittest.TestCase):
             any(call[1:3] == ["blob", "fetch"] for call, _kwargs in runner.calls)
         )
 
+    def test_layer_digest_mismatch_fails_closed_before_extraction(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            bundle = root / "bundle"
+            write_bundle(bundle)
+            layer = archive_bytes(bundle)
+            wrong_layer_digest = "sha256:" + "c" * 64
+            manifest = manifest_bytes(layer, layer_digest=wrong_layer_digest)
+            digest = digest_bytes(manifest)
+            runner = FakeOrasRunner(manifest=manifest, layer=layer)
+            registry = registry_with(resolver_with(runner, root / "cache"))
+
+            with self.assertRaises(ux_resolver.UXResolutionError) as raised:
+                registry.resolve(
+                    f"oci://registry.example/team/ux/demo@{digest}"
+                )
+
+        self.assertEqual(raised.exception.classification, ux_resolver.FAILURE_IDENTITY)
+
     def test_malformed_bundle_schema_has_specific_classification(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -329,7 +348,7 @@ class OCIResolverTests(unittest.TestCase):
                         tar.addfile(info, io.BytesIO(payload))
             destination = root / "out"
 
-            with self.assertRaises(Exception) as raised:
+            with self.assertRaises(UXBundleError) as raised:
                 safe_extract_bundle_archive(archive, destination)
 
             self.assertIn("unsafe", str(raised.exception))
@@ -409,6 +428,41 @@ class OCIResolverTests(unittest.TestCase):
         self.assertEqual(kwargs["input"], secret + "\n")
         self.assertNotIn("GITHUB_TOKEN", kwargs["env"])
         self.assertNotIn(secret, str(raised.exception))
+
+    def test_plain_http_is_loopback_only(self):
+        runner = FakeOrasRunner()
+        local = OrasClient(
+            executable="oras",
+            runner=runner,
+            environ={"AUTODEV_OCI_PLAIN_HTTP": "1"},
+        )
+        local.invoke(
+            ["resolve"],
+            ["127.0.0.1:5000/team/ux/demo:v1"],
+            registry="127.0.0.1:5000",
+        )
+        command, _kwargs = next(
+            (call, kwargs)
+            for call, kwargs in runner.calls
+            if len(call) > 1 and call[1] == "resolve" and "--help" not in call
+        )
+        self.assertIn("--plain-http", command)
+
+        remote = OrasClient(
+            executable="oras",
+            runner=FakeOrasRunner(),
+            environ={"AUTODEV_OCI_PLAIN_HTTP": "1"},
+        )
+        with self.assertRaises(ux_resolver.UXResolutionError) as raised:
+            remote.invoke(
+                ["resolve"],
+                ["registry.example/team/ux/demo:v1"],
+                registry="registry.example",
+            )
+        self.assertEqual(
+            raised.exception.classification,
+            ux_resolver.FAILURE_TRANSPORT,
+        )
 
     def test_paths_with_spaces_remain_atomic_argv_elements(self):
         with tempfile.TemporaryDirectory(prefix="autodev ux test ") as temp_dir:
