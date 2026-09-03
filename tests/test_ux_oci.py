@@ -55,6 +55,25 @@ def archive_bytes(bundle: Path) -> bytes:
         return target.read_bytes()
 
 
+def unvalidated_archive_bytes(root: Path) -> bytes:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        target = Path(temp_dir) / "bundle.tar.gz"
+        with target.open("wb") as raw:
+            with gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as zipped:
+                with tarfile.open(fileobj=zipped, mode="w") as tar:
+                    for path in sorted(
+                        (item for item in root.rglob("*") if item.is_file()),
+                        key=lambda item: item.relative_to(root).as_posix(),
+                    ):
+                        payload = path.read_bytes()
+                        info = tarfile.TarInfo(path.relative_to(root).as_posix())
+                        info.size = len(payload)
+                        info.mode = 0o644
+                        info.mtime = 0
+                        tar.addfile(info, io.BytesIO(payload))
+        return target.read_bytes()
+
+
 def manifest_bytes(
     layer: bytes,
     *,
@@ -230,10 +249,14 @@ class OCIResolverTests(unittest.TestCase):
         self.assertFalse(first.cache_hit)
         self.assertTrue(second.cache_hit)
         manifest_calls = [
-            call for call, _kwargs in runner.calls if call[1:3] == ["manifest", "fetch"]
+            call
+            for call, _kwargs in runner.calls
+            if call[1:3] == ["manifest", "fetch"] and "--help" not in call
         ]
         blob_calls = [
-            call for call, _kwargs in runner.calls if call[1:3] == ["blob", "fetch"]
+            call
+            for call, _kwargs in runner.calls
+            if call[1:3] == ["blob", "fetch"] and "--help" not in call
         ]
         self.assertEqual(len(manifest_calls), 1)
         self.assertEqual(len(blob_calls), 1)
@@ -300,7 +323,10 @@ class OCIResolverTests(unittest.TestCase):
 
         self.assertEqual(raised.exception.classification, ux_resolver.FAILURE_MALFORMED)
         self.assertFalse(
-            any(call[1:3] == ["blob", "fetch"] for call, _kwargs in runner.calls)
+            any(
+                call[1:3] == ["blob", "fetch"] and "--help" not in call
+                for call, _kwargs in runner.calls
+            )
         )
 
     def test_layer_digest_mismatch_fails_closed_before_extraction(self):
@@ -325,10 +351,9 @@ class OCIResolverTests(unittest.TestCase):
     def test_malformed_bundle_schema_has_specific_classification(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            _bundle, layer, _manifest, _digest = self._fixture(
-                root,
-                schema="autodev.ux.bundle/v999",
-            )
+            bundle = root / "bundle"
+            write_bundle(bundle, schema="autodev.ux.bundle/v999")
+            layer = unvalidated_archive_bytes(bundle)
             manifest = manifest_bytes(layer)
             digest = digest_bytes(manifest)
             runner = FakeOrasRunner(manifest=manifest, layer=layer)
@@ -484,7 +509,7 @@ class OCIResolverTests(unittest.TestCase):
         blob_call, kwargs = next(
             (call, kwargs)
             for call, kwargs in runner.calls
-            if call[1:3] == ["blob", "fetch"]
+            if call[1:3] == ["blob", "fetch"] and "--help" not in call
         )
         output_path = blob_call[blob_call.index("--output") + 1]
         self.assertIn(" ", output_path)
