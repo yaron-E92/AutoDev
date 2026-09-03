@@ -11,7 +11,7 @@ from typing import Callable, Mapping
 from automation import external_error_sanitizer, ux_resolver
 
 
-MIN_ORAS_VERSION = (1, 2, 0)
+MIN_ORAS_VERSION = (1, 3, 0)
 _VERSION_RE = re.compile(r"(?im)^Version:\s*(\d+)\.(\d+)\.(\d+)(?:[-+][^\s]+)?\s*$")
 
 
