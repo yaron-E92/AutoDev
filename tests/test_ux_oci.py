@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from automation import ux_cli, ux_resolver
+from automation import ux_cli, ux_registry, ux_resolver
 from automation.ux_oci import OCIUXArtifactResolver
 from automation.ux_contract import BUNDLE_SCHEMA, UXBundleError
 from automation.ux_oci_bundle import (
@@ -171,6 +171,12 @@ def registry_with(resolver: OCIUXArtifactResolver) -> ux_resolver.UXResolverRegi
     registry = ux_resolver.UXResolverRegistry()
     registry.register(resolver)
     return registry
+
+
+class OCIRegistryCompositionTests(unittest.TestCase):
+    def test_default_composition_registers_oci_without_changing_core_registry(self):
+        self.assertEqual(ux_resolver.default_registry().kinds, ())
+        self.assertEqual(ux_registry.default_registry().kinds, ("oci",))
 
 
 class OCIReferenceTests(unittest.TestCase):
