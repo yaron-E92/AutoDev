@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from automation import claim_cli, cli_help, config_cli, manage_cli, notification_cli, privacy_grant_cli, product_runtime, scheduler_health_cli, semver_intent, ux_cli
+from automation import claim_cli, cli_help, config_cli, manage_cli, notification_cli, privacy_grant_cli, product_runtime, scheduler_health_cli, semver_intent, ux_cli, ux_help
 
 import os
 import sys
@@ -9,6 +9,7 @@ from automation import opencode_entrypoint, user_install
 
 
 manage_cli.register_help()
+ux_help.register_help()
 
 INTERACTIVE_CONSENT_ARG = "--interactive-consent"
 INTERACTIVE_CONSENT_ENV = "AUTODEV_INTERACTIVE_CONSENT"
