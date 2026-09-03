@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import gzip
 import hashlib
-import os
 import tarfile
 from pathlib import Path, PurePosixPath
 
