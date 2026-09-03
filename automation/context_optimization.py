@@ -480,6 +480,7 @@ def install() -> None:
             repo: Path,
             *,
             arguments: str = "",
+            semver_intent_override: str = "",
             autodev_root: Path = workflow_stages.AUTODEV_ROOT,
             attempt: int = 0,
             reason: str = "",
@@ -488,6 +489,7 @@ def install() -> None:
         ):
             kwargs = {
                 "arguments": arguments,
+                "semver_intent_override": semver_intent_override,
                 "autodev_root": autodev_root,
                 "attempt": attempt,
                 "reason": reason,
