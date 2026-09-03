@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from automation import ux_policy, ux_resolver
+from automation import ux_policy, ux_registry, ux_resolver
 
 
 @dataclass(frozen=True)
@@ -39,7 +39,7 @@ def resolve_configured(
     policy = ux_policy.load_policy(repo)
     if not policy.enabled:
         return None
-    active = registry or ux_resolver.default_registry()
+    active = registry or ux_registry.default_registry()
     artifact = active.resolve(
         policy.artifact,
         policy=ux_resolver.ResolutionPolicy(

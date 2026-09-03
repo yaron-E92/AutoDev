@@ -107,6 +107,15 @@ autodev doctor --fix
 
 `opencode` remains the default role runtime but is separately configured; native installation does not overwrite OpenCode user configuration.
 
+OCI-backed UX artifacts use the external **ORAS CLI**. AutoDev does not bundle or silently install ORAS during native installation or autonomous execution. ORAS is required only when a repository uses an `oci://` UX artifact reference. Install ORAS 1.3.0 or newer through the official ORAS installation path for your platform, then verify it with:
+
+```text
+oras version
+autodev ux doctor
+```
+
+For private GHCR/OCI artifacts, keep package credentials outside repository policy and durable run state. See [`ux-artifacts.md`](ux-artifacts.md) for ORAS login, environment/credential-store options, least-privilege scheduler credentials, publication, immutable locking, and GHCR naming conventions.
+
 ### Source/release ZIPs
 
 The release still carries common and Windows ZIP snapshots for source inspection, reproducibility, advanced/manual workflows, and contributor use. They are no longer the preferred end-user installation path. Normal installed operation should start with the MSI, DEB, or RPM and then use only the public `autodev` command surface.

@@ -18,6 +18,11 @@ on:
         required: false
         type: string
         default: ''
+      run_oci_ux_integration:
+        description: Force the real OCI UX smoke when CI is reused
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -200,6 +205,79 @@ jobs:
     permissions:
       contents: read
 
+  oci-ux-changes:
+    name: Detect OCI UX integration changes
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.detect.outputs.run }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ env.AUTODEV_CI_REF }}
+          fetch-depth: 0
+
+      - name: Decide whether real OCI smoke is required
+        id: detect
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          FORCE_RUN: ${{ inputs.run_oci_ux_integration }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$FORCE_RUN" == "true" ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "Real OCI smoke forced by reusable-workflow input."
+            exit 0
+          fi
+
+          case "$EVENT_NAME" in
+            pull_request)
+              base="$PR_BASE_SHA"
+              ;;
+            push)
+              base="$PUSH_BEFORE_SHA"
+              ;;
+            *)
+              echo "run=false" >> "$GITHUB_OUTPUT"
+              echo "No automatic OCI smoke policy for event: $EVENT_NAME"
+              exit 0
+              ;;
+          esac
+
+          if [[ -z "$base" || "$base" =~ ^0+$ ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "No usable comparison base; fail safe by running the real OCI smoke."
+            exit 0
+          fi
+
+          git cat-file -e "$base^{commit}" 2>/dev/null || git fetch --no-tags origin "$base"
+          changed="$(git diff --name-only "$base" "$AUTODEV_CI_REF")"
+          printf '%s\n' "$changed"
+
+          if grep -Eq '^(automation/ux[^/]*\.py|tests/test_ux_oci\.py|\.github/workflows/(ci|oci-ux-integration)\.yml)$' <<<"$changed"; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "Relevant OCI/UX implementation or smoke-test change detected."
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "No OCI/UX implementation changes; real registry smoke is skipped."
+          fi
+
+  oci-ux-integration:
+    name: OCI UX resolver integration
+    needs:
+      - oci-ux-changes
+    if: needs.oci-ux-changes.outputs.run == 'true'
+    uses: ./.github/workflows/oci-ux-integration.yml
+    with:
+      ref: ${{ inputs.ref || github.sha }}
+    permissions:
+      contents: read
+
   bash-syntax:
     name: Bash syntax
     runs-on: ubuntu-latest
@@ -302,6 +380,8 @@ jobs:
       - release-reproducibility
       - version-policy-action
       - python
+      - oci-ux-changes
+      - oci-ux-integration
       - native-packaging
       - bash-syntax
       - powershell-syntax
@@ -318,6 +398,9 @@ jobs:
           RELEASE_REPRODUCIBILITY: ${{ needs.release-reproducibility.result }}
           VERSION_POLICY_ACTION: ${{ needs.version-policy-action.result }}
           PYTHON: ${{ needs.python.result }}
+          OCI_UX_CHANGES: ${{ needs.oci-ux-changes.result }}
+          OCI_UX_REQUIRED: ${{ needs.oci-ux-changes.outputs.run }}
+          OCI_UX_INTEGRATION: ${{ needs.oci-ux-integration.result }}
           NATIVE_PACKAGING: ${{ needs.native-packaging.result }}
           BASH_SYNTAX: ${{ needs.bash-syntax.result }}
           POWERSHELL_SYNTAX: ${{ needs.powershell-syntax.result }}
@@ -340,6 +423,7 @@ jobs:
             "$RELEASE_REPRODUCIBILITY" \
             "$VERSION_POLICY_ACTION" \
             "$PYTHON" \
+            "$OCI_UX_CHANGES" \
             "$NATIVE_PACKAGING" \
             "$BASH_SYNTAX" \
             "$POWERSHELL_SYNTAX" \
@@ -350,6 +434,16 @@ jobs:
               exit 1
             }
           done
+
+          if [[ "$OCI_UX_REQUIRED" == "true" ]]; then
+            [[ "$OCI_UX_INTEGRATION" == "success" ]] || {
+              echo "OCI UX changes require the real registry smoke, but it did not succeed: $OCI_UX_INTEGRATION" >&2
+              exit 1
+            }
+          elif [[ "$OCI_UX_INTEGRATION" != "skipped" && "$OCI_UX_INTEGRATION" != "success" ]]; then
+            echo "Unexpected OCI UX integration result when smoke was optional: $OCI_UX_INTEGRATION" >&2
+            exit 1
+          fi
 
   version-tag:
     name: Advance version tag

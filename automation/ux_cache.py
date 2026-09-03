@@ -62,16 +62,29 @@ def _tree_digest(root: Path) -> str:
     return digest.hexdigest()
 
 
+def read_entry_metadata(path: Path) -> dict[str, object]:
+    meta_path = path.expanduser().resolve() / CACHE_META
+    try:
+        value = json.loads(meta_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def entry_metadata(identity: str, *, root: Path | None = None) -> dict[str, object]:
+    path = entry_path(identity, root=root)
+    if not validate_entry(path, identity):
+        return {}
+    return read_entry_metadata(path)
+
+
 def validate_entry(path: Path, identity: str) -> bool:
     path = path.expanduser().resolve()
     meta_path = path / CACHE_META
     if not meta_path.is_file():
         return False
-    try:
-        meta = json.loads(meta_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return False
-    if not isinstance(meta, dict):
+    meta = read_entry_metadata(path)
+    if not meta:
         return False
     if meta.get("version") != CACHE_VERSION or meta.get("identity") != identity:
         return False
@@ -117,6 +130,7 @@ def populate(
     producer: Callable[[Path], None],
     *,
     root: Path | None = None,
+    metadata: dict[str, object] | None = None,
 ) -> tuple[Path, bool]:
     base = (root or cache_root()).expanduser().resolve()
     target = entry_path(identity, root=base)
@@ -138,6 +152,7 @@ def populate(
                         "version": CACHE_VERSION,
                         "identity": identity,
                         "tree_sha256": tree_digest,
+                        "metadata": dict(metadata or {}),
                     },
                     indent=2,
                     sort_keys=True,

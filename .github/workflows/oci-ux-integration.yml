@@ -1,0 +1,125 @@
+name: OCI UX integration
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Optional exact ref/SHA to validate
+        required: false
+        type: string
+        default: ''
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Optional exact ref/SHA to validate
+        required: false
+        type: string
+        default: ''
+  schedule:
+    - cron: '23 4 * * 1'
+
+permissions:
+  contents: read
+
+env:
+  AUTODEV_CI_REF: ${{ inputs.ref || github.sha }}
+
+concurrency:
+  group: oci-ux-integration-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integration:
+    name: OCI UX resolver integration
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ env.AUTODEV_CI_REF }}
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.11"
+
+      - name: Install pinned ORAS
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GOBIN="$RUNNER_TEMP/oras-bin"
+          mkdir -p "$GOBIN"
+          go install oras.land/oras/cmd/oras@v1.3.2
+          echo "$GOBIN" >> "$GITHUB_PATH"
+          "$GOBIN/oras" version
+
+      - name: Start pinned local OCI registry
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run -d --rm \
+            --name autodev-ux-registry \
+            -p 5000:5000 \
+            registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373
+          for _ in {1..30}; do
+            if curl -fsS http://127.0.0.1:5000/v2/ >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs autodev-ux-registry
+          exit 1
+
+      - name: Publish and resolve a real OCI UX bundle
+        shell: bash
+        env:
+          AUTODEV_OCI_PLAIN_HTTP: "1"
+        run: |
+          set -euo pipefail
+          bundle="$RUNNER_TEMP/ux-bundle"
+          mkdir -p "$bundle"
+          printf 'product: demo\n' > "$bundle/contract.yaml"
+          printf '# Shared principles\n' > "$bundle/principles.md"
+          cat > "$bundle/ux-manifest.json" <<'JSON'
+          {
+            "schema": "autodev.ux.bundle/v1",
+            "product": "demo",
+            "contract": "contract.yaml",
+            "principles": "principles.md"
+          }
+          JSON
+
+          python -m automation.autodev_cli ux publish "$bundle" \
+            --to oci://127.0.0.1:5000/autodev/ux/demo:ci \
+            --json > "$RUNNER_TEMP/published.json"
+
+          immutable="$(
+            python -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["immutable_reference"])' \
+              "$RUNNER_TEMP/published.json"
+          )"
+
+          python -m automation.autodev_cli ux inspect "$immutable" --json \
+            > "$RUNNER_TEMP/inspected.json"
+
+          python - "$RUNNER_TEMP/published.json" "$RUNNER_TEMP/inspected.json" <<'PY'
+          import json
+          import sys
+
+          published = json.load(open(sys.argv[1], encoding="utf-8"))
+          inspected = json.load(open(sys.argv[2], encoding="utf-8"))
+          assert published["immutable_identity"].startswith("sha256:")
+          assert published["immutable_reference"].startswith(
+              "oci://127.0.0.1:5000/autodev/ux/demo@sha256:"
+          )
+          assert inspected["resolver_kind"] == "oci"
+          assert inspected["artifact_type"] == "application/vnd.autodev.ux.bundle.v1"
+          assert inspected["bundle"]["schema"] == "autodev.ux.bundle/v1"
+          assert inspected["bundle"]["product"] == "demo"
+          assert inspected["validation"] == "valid"
+          PY
+
+      - name: Stop local OCI registry
+        if: always()
+        shell: bash
+        run: docker rm -f autodev-ux-registry >/dev/null 2>&1 || true

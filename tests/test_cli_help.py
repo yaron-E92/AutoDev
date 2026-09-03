@@ -115,6 +115,18 @@ class CliHelpTests(unittest.TestCase):
         self.assertIn("--dry-run", next_help)
         self.assertIn("Default:", next_help)
 
+    def test_ux_publish_help_is_public_and_model_free(self):
+        ux = self.render(["ux", "--help"])
+        publish = self.render(["ux", "publish", "--help"])
+
+        self.assertEqual(ux[0], 0)
+        self.assertIn("publish", ux[1])
+        self.assertIn("without model calls", ux[1])
+        self.assertEqual(publish[0], 0)
+        self.assertIn("autodev ux publish BUNDLE --to REFERENCE", publish[1])
+        self.assertIn("--to REFERENCE", publish[1])
+        self.assertNotIn("Privacy:", publish[1])
+
     def test_issue_specific_help_works_even_after_positional_issue(self):
         before_issue = self.render(["issue-to-pr", "--help"])
         after_issue = self.render(["issue-to-pr", "123", "--help"])

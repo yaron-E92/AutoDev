@@ -2,7 +2,7 @@
 
 AutoDev can attach an optional, immutable UX specification to a repository without committing a portfolio prototype, screenshots, Figma exports, or another large design corpus to the application repository.
 
-The core contract is transport-neutral. Issue #252 defines the bundle, resolver, cache, locking, and durable-run semantics. Concrete transports plug into that contract separately; OCI/GHCR/ORAS belongs to #253.
+The core contract is transport-neutral. Issue #252 defines the bundle, resolver, cache, locking, and durable-run semantics. Concrete transports plug into that contract separately. OCI is the first production transport; GHCR is the first documented registry and ORAS is the initial client.
 
 ## Repository policy
 
@@ -109,4 +109,120 @@ If UX is enabled and resolution fails, preparation fails closed before model/imp
 
 A future resolver must implement the common interface, return an immutable identity/reference, use the shared cache safely, validate transport integrity, expose a stable local bundle root, classify failures deterministically, and keep credentials out of repository files/durable diagnostics. It registers with the resolver registry rather than adding provider branches to workflow code.
 
-OCI is the first planned concrete resolver, but the logical bundle and downstream role semantics do not depend on OCI.
+## OCI transport
+
+OCI UX references use an explicit `oci://` scheme:
+
+```text
+oci://ghcr.io/<owner>/ux/<product>:<human-tag>
+oci://ghcr.io/<owner>/ux/<product>@sha256:<manifest-digest>
+```
+
+The resolver is registry-neutral. `ghcr.io` is only a recommended first registry; Harbor, Zot, Artifactory OCI, or another standards-compatible registry can use the same reference and resolver semantics.
+
+Recommended GHCR naming:
+
+```text
+ghcr.io/yaron-e92/ux/portfolio:2026-09-03
+ghcr.io/yaron-e92/ux/shuffletask:v1
+ghcr.io/yaron-e92/ux/shuffletask@sha256:...
+```
+
+Human-readable tags are publication/discovery aliases. The immutable OCI manifest digest is the durable identity. Interactive resolution may resolve a tag, but unattended scheduler/headless execution rejects a mutable tag and requires an explicit `autodev ux lock` first.
+
+### ORAS prerequisite
+
+AutoDev currently uses the ORAS CLI as an external OCI client. Native AutoDev installers do not silently install or update ORAS.
+
+Supported ORAS versions start at **1.3.0**. The current documented ORAS release is 1.3.2. Verify the installed tool with:
+
+```text
+oras version
+autodev ux doctor
+```
+
+Follow the official ORAS installation instructions for Windows or Linux. For example, ORAS publishes release archives for both platforms and can also be installed through its supported package-manager paths. AutoDev checks the executable, minimum version, and the required `resolve`, `manifest fetch`, `blob fetch`, and `push` capabilities before use.
+
+### Authentication
+
+Do not put registry tokens in `.autodev/repo.json`.
+
+AutoDev accepts these credential paths, in precedence order:
+
+1. `AUTODEV_OCI_USERNAME` + `AUTODEV_OCI_PASSWORD`;
+2. `AUTODEV_OCI_TOKEN` (with a username for GHCR, or identity-token mode for registries that support it);
+3. `GITHUB_TOKEN` + `GITHUB_ACTOR` for `ghcr.io` in GitHub Actions;
+4. existing ORAS-compatible local registry credential-store/login state.
+
+Secrets are passed to ORAS through stdin, not process arguments, and the token/password environment variables are removed from the ORAS subprocess environment.
+
+For a local GHCR login, a read-only worker credential is preferred:
+
+```text
+printf '%s\n' "$GHCR_TOKEN" | oras login ghcr.io -u "$GHCR_USER" --password-stdin
+```
+
+For scheduler workers, use the minimum package permission required to pull the UX artifact. A package-read credential does not become GitHub repository authority inside AutoDev.
+
+Public GHCR packages can normally resolve without credentials, but they are still subject to digest, OCI artifact-type, archive-safety, and UX bundle-schema validation.
+
+### Publication
+
+AutoDev provides a narrow model-free publisher for UX bundles:
+
+```text
+autodev ux publish ./ux-bundle \
+  --to oci://ghcr.io/yaron-e92/ux/shuffletask:v1
+```
+
+Publication first validates the local `ux-manifest.json`, then creates one deterministic gzip-compressed tar layer with media type:
+
+```text
+application/vnd.autodev.ux.bundle.v1.tar+gzip
+```
+
+The OCI manifest uses AutoDev artifact type:
+
+```text
+application/vnd.autodev.ux.bundle.v1
+```
+
+The command prints the immutable manifest digest/reference returned by ORAS. It does **not** rewrite application repository policy. If the published artifact should become repository authority, update or configure the tagged reference explicitly and then run:
+
+```text
+autodev ux lock
+```
+
+### Resolution and inspection
+
+```text
+autodev ux inspect oci://ghcr.io/yaron-e92/ux/shuffletask@sha256:...
+autodev ux resolve oci://ghcr.io/yaron-e92/ux/shuffletask@sha256:...
+autodev ux doctor
+```
+
+OCI resolution verifies:
+
+1. OCI reference syntax;
+2. immutable manifest digest;
+3. expected AutoDev OCI artifact type;
+4. exactly one expected UX bundle layer;
+5. layer size and digest;
+6. safe tar extraction without symlinks, devices, absolute paths, or traversal;
+7. the v1 UX bundle manifest and content limits;
+8. the immutable cache entry.
+
+A valid cached immutable OCI artifact is reused without re-downloading the manifest or bundle bytes.
+
+For local development/CI only, `AUTODEV_OCI_PLAIN_HTTP=1` enables plain HTTP **only for loopback registries** (`localhost`, `127.0.0.1`, or `[::1]`). It cannot disable TLS for remote registries.
+
+### OCI failure classes
+
+OCI/ORAS adds two actionable tool classifications to the core resolver failures:
+
+- `missing_tool`: ORAS is not available;
+- `unsupported_tool_version`: ORAS is too old or lacks required capabilities.
+
+Registry authentication, not-found, transport, digest mismatch, malformed artifact type/bundle, unsupported UX schema, and unsafe archive failures continue to use the provider-neutral classifications documented above.
+
+The logical UX bundle and downstream role semantics remain independent from OCI. A future resolver plugs into the same registry without changing issue semantics, prompt selection, durable-run identity, or repository UX policy.
