@@ -17,6 +17,8 @@ FAILURE_IDENTITY = "identity_mismatch"
 FAILURE_MALFORMED = "malformed_bundle"
 FAILURE_SCHEMA = "unsupported_bundle_schema"
 FAILURE_UNSAFE = "unsafe_bundle"
+FAILURE_TOOL = "missing_tool"
+FAILURE_TOOL_VERSION = "unsupported_tool_version"
 
 
 class UXResolutionError(RuntimeError):
@@ -36,6 +38,24 @@ class UXResolutionError(RuntimeError):
 class ResolutionPolicy:
     unattended: bool = False
     require_immutable_reference: bool = False
+
+
+@dataclass(frozen=True)
+class PublishedUXArtifact:
+    immutable_identity: str
+    immutable_reference: str
+    source_reference: str
+    resolver_kind: str
+    provenance: dict[str, object] = field(default_factory=dict)
+
+    def safe_evidence(self) -> dict[str, object]:
+        return {
+            "configured_reference": safe_reference(self.source_reference),
+            "resolver_kind": self.resolver_kind,
+            "immutable_identity": self.immutable_identity,
+            "immutable_reference": safe_reference(self.immutable_reference),
+            "provenance": dict(self.provenance),
+        }
 
 
 @dataclass(frozen=True)
@@ -140,7 +160,7 @@ class UXResolverRegistry:
         except UXBundleError as exc:
             raise UXResolutionError(
                 str(exc),
-                classification=FAILURE_MALFORMED,
+                classification=_bundle_error_classification(exc),
                 resolver_kind=resolver.kind,
             ) from exc
         except Exception as exc:
@@ -184,6 +204,49 @@ class UXResolverRegistry:
             )
         return identity
 
+    def publish(
+        self,
+        bundle_root: Path,
+        reference: str,
+    ) -> PublishedUXArtifact:
+        resolver = self.resolver_for(reference)
+        publisher = getattr(resolver, "publish", None)
+        if not callable(publisher):
+            raise UXResolutionError(
+                f"UX resolver {resolver.kind!r} does not support publication",
+                classification=FAILURE_UNSUPPORTED,
+                resolver_kind=resolver.kind,
+            )
+        try:
+            result = publisher(bundle_root, reference)
+        except UXResolutionError:
+            raise
+        except UXBundleError as exc:
+            raise UXResolutionError(
+                str(exc),
+                classification=_bundle_error_classification(exc),
+                resolver_kind=resolver.kind,
+            ) from exc
+        except Exception as exc:
+            raise UXResolutionError(
+                f"UX artifact publication failed through {resolver.kind}: {exc}",
+                classification=FAILURE_TRANSPORT,
+                resolver_kind=resolver.kind,
+            ) from exc
+        if not isinstance(result, PublishedUXArtifact):
+            raise UXResolutionError(
+                f"UX resolver {resolver.kind!r} returned an invalid publication result",
+                classification=FAILURE_IDENTITY,
+                resolver_kind=resolver.kind,
+            )
+        if result.resolver_kind != resolver.kind or not result.immutable_identity.strip():
+            raise UXResolutionError(
+                f"UX resolver {resolver.kind!r} returned inconsistent publication identity",
+                classification=FAILURE_IDENTITY,
+                resolver_kind=resolver.kind,
+            )
+        return result
+
     @property
     def kinds(self) -> tuple[str, ...]:
         return tuple(resolver.kind for resolver in self._resolvers)
@@ -211,11 +274,7 @@ def _validated_artifact(
     try:
         manifest = load_manifest(artifact.local_root)
     except UXBundleError as exc:
-        classification = (
-            FAILURE_SCHEMA if "unsupported UX bundle schema" in str(exc) else FAILURE_MALFORMED
-        )
-        if any(token in str(exc) for token in ("unsafe path", "size limit", "file-count limit")):
-            classification = FAILURE_UNSAFE
+        classification = _bundle_error_classification(exc)
         raise UXResolutionError(
             str(exc),
             classification=classification,
@@ -238,6 +297,25 @@ def _validated_artifact(
             resolver_kind=resolver_kind,
         )
     return artifact
+
+
+def _bundle_error_classification(exc: UXBundleError) -> str:
+    text = str(exc)
+    if "unsupported UX bundle schema" in text:
+        return FAILURE_SCHEMA
+    if any(
+        token in text
+        for token in (
+            "unsafe",
+            "escapes destination",
+            "size limit",
+            "file-count limit",
+            "unsupported non-file member",
+            "duplicate member",
+        )
+    ):
+        return FAILURE_UNSAFE
+    return FAILURE_MALFORMED
 
 
 def safe_reference(reference: str) -> str:
