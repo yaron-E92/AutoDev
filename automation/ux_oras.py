@@ -57,6 +57,13 @@ class OrasClient:
         input_text: str | None = None,
     ):
         try:
+            process_env = dict(self._environ)
+            for secret_name in (
+                "AUTODEV_OCI_PASSWORD",
+                "AUTODEV_OCI_TOKEN",
+                "GITHUB_TOKEN",
+            ):
+                process_env.pop(secret_name, None)
             return self._runner(
                 argv,
                 cwd=cwd,
@@ -67,7 +74,7 @@ class OrasClient:
                 capture_output=True,
                 check=False,
                 timeout=self._timeout_seconds,
-                env=dict(self._environ),
+                env=process_env,
             )
         except subprocess.TimeoutExpired as exc:
             raise ux_resolver.UXResolutionError(
