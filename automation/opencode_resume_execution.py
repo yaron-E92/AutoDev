@@ -3,7 +3,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 from typing import Callable
-from automation import run_manifest, workflow_stages
+from automation import run_manifest, workflow_stages, ux_resolver, ux_workflow
 
 from automation.opencode_resume_checkpoint import (
     _checkpoint_patch_applied,
@@ -37,6 +37,13 @@ def resume(
         raise OpenCodeResumeError(".autodev-run/current/run-manifest.json is missing; this run cannot be resumed through #37")
     try:
         manifest = run_manifest.load_manifest(path)
+        try:
+            ux_workflow.validate_resume_identity(
+                repo,
+                manifest.get("ux_artifact", {}),
+            )
+        except ux_resolver.UXResolutionError as exc:
+            raise OpenCodeResumeError(str(exc)) from exc
         invalidated_roles = invalidated_roles or set()
         for role in invalidated_roles:
             affected = run_manifest.invalidated_stages_for_role(manifest, role)

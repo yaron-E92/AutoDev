@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from automation import privacy_grant_commands, queue_contract, queue_github, queue_policy, semver_intent
+from automation import privacy_grant_commands, queue_contract, queue_github, queue_policy, semver_intent, ux_policy
 
 from automation import opencode_adapter_models
 
@@ -121,6 +121,10 @@ def _load_repo_config(repo: Path) -> dict[str, object]:
         raise RepoSetupError(
             f"unsupported AutoDev repository config version in {path}: {value.get('version')!r}"
         )
+    try:
+        ux_policy.parse_ux_policy(value.get("ux"), source=str(path))
+    except ux_policy.UXPolicyError as exc:
+        raise RepoSetupError(str(exc)) from exc
     if "default_semver_intent" in value:
         raw_semver = value.get("default_semver_intent")
         if not isinstance(raw_semver, str):

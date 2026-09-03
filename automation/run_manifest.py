@@ -133,6 +133,7 @@ def create_manifest(
     role_snapshots: dict[str, object],
     prompt_policy: dict[str, object] | None = None,
     semantic_verification: dict[str, object] | None = None,
+    ux_artifact: dict[str, object] | None = None,
 ) -> dict[str, object]:
     now = utc_now()
     manifest: dict[str, object] = {
@@ -154,6 +155,7 @@ def create_manifest(
         "roles": role_snapshots,
         "prompt_policy": dict(prompt_policy or {}),
         "semantic_verification": dict(semantic_verification or {}),
+        "ux_artifact": dict(ux_artifact or {}),
         "invocations": [],
         "failure": {},
         "pr": {},
@@ -200,6 +202,9 @@ def validate_manifest(value: dict[str, object]) -> None:
     roles = value.get("roles")
     if not isinstance(roles, dict):
         raise ManifestError("run manifest roles must be an object")
+    ux_artifact = value.get("ux_artifact", {})
+    if not isinstance(ux_artifact, dict):
+        raise ManifestError("run manifest ux_artifact must be an object")
 
 
 def save_manifest(path: Path, manifest: dict[str, object]) -> None:

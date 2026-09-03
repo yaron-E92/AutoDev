@@ -260,6 +260,43 @@ HELP: dict[tuple[str, ...], HelpEntry] = {
         examples=("autodev coordinate --arguments 123",),
         privacy_note=CLOUD_MODEL_NOTE,
     ),
+
+    ("ux",): _entry(
+        "autodev ux <inspect|resolve|lock|doctor|cache-prune> [options]",
+        "Inspect, resolve, lock, and maintain external UX artifacts without model calls.",
+        description=(
+            "UX artifacts are transport-neutral, immutable design evidence. The core resolver contract "
+            "does not assume GHCR, ORAS, S3, or another backend; concrete transports register separately."
+        ),
+        subcommands=(
+            ("inspect", "Inspect a configured or explicit UX artifact reference."),
+            ("resolve", "Resolve and validate a UX artifact into the immutable local cache."),
+            ("lock", "Resolve the configured reference and replace it with the immutable reference."),
+            ("doctor", "Check UX repository policy, resolver availability, and cache location."),
+            ("cache-prune", "Remove corrupt entries and bound the user-level UX cache."),
+        ),
+        examples=("autodev ux doctor", "autodev ux resolve --json", "autodev ux lock"),
+    ),
+    ("ux", "inspect"): _entry(
+        "autodev ux inspect [REFERENCE] [--repo PATH] [--json]",
+        "Inspect UX artifact metadata without invoking a model.",
+    ),
+    ("ux", "resolve"): _entry(
+        "autodev ux resolve [REFERENCE] [--repo PATH] [--json]",
+        "Resolve and validate a UX artifact through the registered transport.",
+    ),
+    ("ux", "lock"): _entry(
+        "autodev ux lock [REFERENCE] [--repo PATH] [--json]",
+        "Lock the repository UX reference to the resolver's immutable reference.",
+    ),
+    ("ux", "doctor"): _entry(
+        "autodev ux doctor [--repo PATH] [--json]",
+        "Check UX policy, resolver availability, and cache location.",
+    ),
+    ("ux", "cache-prune"): _entry(
+        "autodev ux cache-prune [--max-entries N] [--json]",
+        "Remove corrupt UX cache entries and keep only the newest N valid entries.",
+    ),
     ("notifications",): _entry(
         "autodev notifications <enable|disable|status> [options]",
         "Configure issue-to-PR outcome notifications.",
@@ -518,6 +555,7 @@ TOP_LEVEL_GROUPS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
             ("config", "Configure user-local defaults and reusable model profiles."),
             ("notifications", "Configure native ready/blocked/failed outcome notifications."),
             ("queue", "Inspect/reconcile/select managed issues without model calls."),
+            ("ux", "Inspect/resolve/lock external UX artifacts without model calls."),
             ("privacy", "Inspect, grant, or revoke explicit privacy consent."),
             ("models", "Show effective OpenCode role/model mappings."),
         ),
@@ -546,6 +584,7 @@ KNOWN_TOP_LEVEL = {
     "coordinate",
     "privacy",
     "queue",
+    "ux",
     # Maintained integration/internal surfaces are intentionally not advertised.
     "role",
     "role-check",

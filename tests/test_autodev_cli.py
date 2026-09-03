@@ -26,6 +26,7 @@ class AutoDevCliTests(unittest.TestCase):
         self.assertIn("doctor", text)
         self.assertIn("scheduler", text)
         self.assertIn("queue", text)
+        self.assertIn("ux", text)
         self.assertIn("privacy", text)
         self.assertIn("coordinate", text)
         self.assertNotIn("python3 .opencode/autodev.py", text)
@@ -52,6 +53,13 @@ class AutoDevCliTests(unittest.TestCase):
             code = autodev_cli.run(["doctor", "--json"])
 
         self.assertEqual(code, 5)
+        run_cli.assert_called_once_with(["doctor", "--json"])
+
+    def test_ux_routes_to_model_free_ux_cli(self):
+        with patch("automation.ux_cli.run_cli", return_value=3) as run_cli:
+            code = autodev_cli.run(["ux", "doctor", "--json"])
+
+        self.assertEqual(code, 3)
         run_cli.assert_called_once_with(["doctor", "--json"])
 
     def test_scheduler_routes_through_health_wrapper(self):
