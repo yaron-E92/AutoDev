@@ -234,6 +234,25 @@ class OrasClient:
 
         return [], "", "credential-store"
 
+    def _transport_args(self, registry: str) -> list[str]:
+        raw = self._environ.get("AUTODEV_OCI_PLAIN_HTTP", "").strip().casefold()
+        if raw not in {"1", "true", "yes", "on"}:
+            return []
+        host = registry.casefold()
+        if host.startswith("[::1]"):
+            loopback = True
+        else:
+            host_name = host.split(":", 1)[0]
+            loopback = host_name in {"localhost", "127.0.0.1"}
+        if not loopback:
+            raise ux_resolver.UXResolutionError(
+                "AUTODEV_OCI_PLAIN_HTTP is restricted to loopback registries",
+                classification=ux_resolver.FAILURE_TRANSPORT,
+                resolver_kind="oci",
+            )
+        return ["--plain-http"]
+
+
     @staticmethod
     def _failure_classification(text: str) -> str:
         lowered = text.casefold()
@@ -276,7 +295,8 @@ class OrasClient:
     ) -> object:
         status = self.require_tool()
         auth_args, secret_input, _source = self._credentials(registry)
-        argv = [status.path, *prefix, *auth_args, *positionals]
+        transport_args = self._transport_args(registry)
+        argv = [status.path, *prefix, *transport_args, *auth_args, *positionals]
         completed = self._raw(
             argv,
             cwd=cwd,
