@@ -7,7 +7,7 @@ from urllib.parse import urlsplit
 
 _DIGEST_RE = re.compile(r"^sha256:[0-9a-fA-F]{64}$")
 _TAG_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$")
-_REPOSITORY_SEGMENT_RE = re.compile(r"^[a-z0-9]+(?:[._-][a-z0-9]+)*$")
+_REPOSITORY_SEGMENT_RE = re.compile(r"^[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*$")
 
 
 class OCIReferenceError(ValueError):
