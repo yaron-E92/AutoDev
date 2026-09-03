@@ -5,7 +5,7 @@ import json
 import sys
 from pathlib import Path
 
-from automation import ux_cache, ux_policy, ux_resolver, ux_workflow
+from automation import ux_cache, ux_policy, ux_registry, ux_resolver, ux_workflow
 from automation.ux_contract import manifest_summary
 
 
@@ -56,8 +56,13 @@ def run_cli(
     prune.add_argument("--max-entries", type=int, default=20)
     prune.add_argument("--json", action="store_true")
 
+    publish = sub.add_parser("publish")
+    publish.add_argument("bundle")
+    publish.add_argument("--to", required=True)
+    publish.add_argument("--json", action="store_true")
+
     args = parser.parse_args(argv)
-    active = registry or ux_resolver.default_registry()
+    active = registry or ux_registry.default_registry()
 
     try:
         if args.command == "cache-prune":
@@ -68,6 +73,20 @@ def run_cli(
                     "cache_root": str(ux_cache.cache_root()),
                     "corrupt_removed": corrupt,
                     "entries_removed": len(removed),
+                },
+                as_json=args.json,
+            )
+            return 0
+
+        if args.command == "publish":
+            published = active.publish(
+                Path(args.bundle).expanduser().resolve(),
+                args.to,
+            )
+            _emit(
+                {
+                    **published.safe_evidence(),
+                    "published": True,
                 },
                 as_json=args.json,
             )
@@ -90,8 +109,31 @@ def run_cli(
             try:
                 resolver = active.resolver_for(policy.artifact)
                 result["resolver_kind"] = resolver.kind
-                result["state"] = "ready"
-                code = 0
+                diagnostics = getattr(resolver, "doctor", None)
+                resolver_status = (
+                    diagnostics(policy.artifact)
+                    if callable(diagnostics)
+                    else {"supported": True}
+                )
+                result["resolver"] = resolver_status
+                if resolver_status.get("available") is False:
+                    result["state"] = "error"
+                    result["failure_classification"] = ux_resolver.FAILURE_TOOL
+                    result["reason"] = str(resolver_status.get("reason", "resolver tool is unavailable"))
+                    code = 2
+                elif resolver_status.get("supported") is False:
+                    result["state"] = "error"
+                    result["failure_classification"] = ux_resolver.FAILURE_TOOL_VERSION
+                    result["reason"] = str(resolver_status.get("reason", "resolver tool is unsupported"))
+                    code = 2
+                elif resolver_status.get("reference_error"):
+                    result["state"] = "error"
+                    result["failure_classification"] = ux_resolver.FAILURE_MALFORMED
+                    result["reason"] = str(resolver_status["reference_error"])
+                    code = 2
+                else:
+                    result["state"] = "ready"
+                    code = 0
             except ux_resolver.UXResolutionError as exc:
                 result["state"] = "error"
                 result["failure_classification"] = exc.classification
