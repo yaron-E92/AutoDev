@@ -59,6 +59,10 @@ class UXRoleContextTests(unittest.TestCase):
             ),
             encoding="utf-8",
         )
+        (current / "run-manifest.json").write_text(
+            json.dumps({"ux_artifact": {"immutable_identity": "sha256:pinned"}}),
+            encoding="utf-8",
+        )
         return repo, current, artifact
 
     def test_disabled_run_adds_no_context(self):
@@ -88,15 +92,19 @@ class UXRoleContextTests(unittest.TestCase):
             self.assertIn("Prefer direct manipulation", prompt)
             self.assertIn("id: create-task", prompt)
             self.assertIn("screens/editor.png", prompt)
+            self.assertNotIn("png-reference", prompt)
             context = evidence["ux_context"]
             self.assertEqual(context["journeys"], ["create-task"])
             self.assertEqual(context["screens"], ["task-editor"])
             self.assertEqual(context["states"], ["task-editor-empty"])
             self.assertIn("contract.yaml", context["selected_paths"])
             self.assertIn("principles.md", context["selected_paths"])
+            self.assertIn("screens/editor.png", context["non_text_or_truncated_references"])
             self.assertTrue(evidence["ux_context_fingerprint"])
             persisted = json.loads((current / "ux-context-planner.json").read_text(encoding="utf-8"))
             self.assertEqual(persisted, evidence)
+            manifest = json.loads((current / "run-manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["ux_role_contexts"]["planner"], evidence)
 
     def test_fingerprint_changes_when_selected_file_bytes_change(self):
         with tempfile.TemporaryDirectory() as temp_dir:
