@@ -9,6 +9,9 @@ from pathlib import Path
 from automation import ux_resolver, ux_workflow
 
 
+_TEXT_SUFFIXES = {".md", ".txt", ".yaml", ".yml", ".json", ".html", ".htm", ".css", ".svg"}
+
+
 class UXRoleContextError(RuntimeError):
     """A deterministic failure while building UX role context."""
 
@@ -68,6 +71,9 @@ def prepare_role_context(
             raise UXRoleContextError(f"selected UX input is missing: {relative}")
         data = path.read_bytes()
         file_hashes[relative] = hashlib.sha256(data).hexdigest()
+        if path.suffix.casefold() not in _TEXT_SUFFIXES:
+            referenced_paths.append(relative)
+            continue
         try:
             text = data.decode("utf-8")
         except UnicodeDecodeError:
@@ -83,9 +89,10 @@ def prepare_role_context(
         if len(text) > len(bounded):
             referenced_paths.append(relative)
 
+    issue_sha256 = hashlib.sha256(issue_text.encode("utf-8", errors="replace")).hexdigest()
     fingerprint_payload = {
         "immutable_identity": artifact.immutable_identity,
-        "issue_sha256": hashlib.sha256(issue_text.encode("utf-8", errors="replace")).hexdigest(),
+        "issue_sha256": issue_sha256,
         "screen_ids": list(screen_ids),
         "state_ids": list(state_ids),
         "journey_ids": list(journey_ids),
@@ -114,7 +121,7 @@ def prepare_role_context(
             "file_sha256": file_hashes,
             "non_text_or_truncated_references": sorted(referenced_paths),
         },
-        "selection_basis_sha256": fingerprint_payload["issue_sha256"],
+        "selection_basis_sha256": issue_sha256,
         "ux_context_fingerprint": fingerprint,
     }
     _write_json(current / f"ux-context-{role}.json", evidence)
