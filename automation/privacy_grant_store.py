@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
+from automation import repository_identity as repository_identity_resolver
 from automation.privacy_grant_contract import (
     DEFAULT_STORE,
     REPOSITORY_ID_ENV,
@@ -100,29 +101,16 @@ def repository_identity(repo: Path, *, runner=subprocess.run) -> str:
     explicit = os.environ.get(REPOSITORY_ID_ENV, "").strip()
     if explicit:
         return explicit
-    owner = os.environ.get("GITHUB_OWNER", "").strip()
-    name = os.environ.get("GITHUB_REPO", "").strip()
-    if owner and name:
-        return f"github:{owner.casefold()}/{name.casefold()}"
     try:
-        completed = runner(
-            ["git", "remote", "get-url", "origin"],
-            cwd=repo,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            capture_output=True,
-            check=False,
+        resolved = repository_identity_resolver.resolve_github_repository(
+            repo,
+            runner=runner,
+            allow_gh_fallback=False,
         )
-    except OSError:
-        completed = None
-    if completed is not None and int(getattr(completed, "returncode", 1)) == 0:
-        identity = _normalize_github_remote(
-            str(getattr(completed, "stdout", "") or "")
-        )
-        if identity:
-            return identity
-    digest = hashlib.sha256(
-        str(repo.expanduser().resolve()).encode("utf-8")
-    ).hexdigest()
-    return f"path:{digest}"
+    except repository_identity_resolver.RepositoryIdentityError:
+        digest = hashlib.sha256(
+            str(repo.expanduser().resolve()).encode("utf-8")
+        ).hexdigest()
+        return f"path:{digest}"
+    owner, name = repository_identity_resolver.split_github_repository(resolved)
+    return f"github:{owner.casefold()}/{name.casefold()}"
