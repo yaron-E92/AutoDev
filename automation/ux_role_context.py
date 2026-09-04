@@ -57,10 +57,11 @@ def prepare_role_context(
     referenced_paths: list[str] = []
     file_hashes: dict[str, str] = {}
     total_text = 0
+    root = artifact.local_root.resolve()
     for relative in selected:
-        path = (artifact.local_root / relative).resolve()
+        path = (root / relative).resolve()
         try:
-            path.relative_to(artifact.local_root.resolve())
+            path.relative_to(root)
         except ValueError as exc:
             raise UXRoleContextError(f"selected UX path escapes artifact root: {relative}") from exc
         if not path.is_file():
@@ -84,6 +85,7 @@ def prepare_role_context(
 
     fingerprint_payload = {
         "immutable_identity": artifact.immutable_identity,
+        "issue_sha256": hashlib.sha256(issue_text.encode("utf-8", errors="replace")).hexdigest(),
         "screen_ids": list(screen_ids),
         "state_ids": list(state_ids),
         "journey_ids": list(journey_ids),
@@ -109,11 +111,14 @@ def prepare_role_context(
             "screens": list(screen_ids),
             "states": list(state_ids),
             "selected_paths": list(selected),
+            "file_sha256": file_hashes,
             "non_text_or_truncated_references": sorted(referenced_paths),
         },
+        "selection_basis_sha256": fingerprint_payload["issue_sha256"],
         "ux_context_fingerprint": fingerprint,
     }
     _write_json(current / f"ux-context-{role}.json", evidence)
+    _persist_manifest_evidence(current, role, evidence)
 
     prompt = (
         "\n\n# Pinned UX authority\n\n"
@@ -134,7 +139,7 @@ def prepare_role_context(
         )
     prompt += (
         "\nAutoDev records this role's selected UX inputs in "
-        f"`.autodev-run/current/ux-context-{role}.json`.\n"
+        f"`.autodev-run/current/ux-context-{role}.json` and the durable run manifest.\n"
     )
     return prompt, evidence
 
@@ -142,6 +147,20 @@ def prepare_role_context(
 def context_fingerprint(current: Path, role: str) -> str:
     value = _read_json(current / f"ux-context-{role}.json")
     return str(value.get("ux_context_fingerprint", "") or "") if isinstance(value, dict) else ""
+
+
+def _persist_manifest_evidence(current: Path, role: str, evidence: dict[str, object]) -> None:
+    path = current / "run-manifest.json"
+    if not path.is_file():
+        return
+    manifest = _read_json(path)
+    if not manifest:
+        raise UXRoleContextError("run manifest is unreadable while recording UX role evidence")
+    contexts = manifest.setdefault("ux_role_contexts", {})
+    if not isinstance(contexts, dict):
+        raise UXRoleContextError("run manifest ux_role_contexts is malformed")
+    contexts[role] = evidence
+    _write_json(path, manifest)
 
 
 def _mentioned_ids(text: str, candidates: tuple[str, ...]) -> tuple[str, ...]:
