@@ -30,6 +30,7 @@ from automation.claim_process import (
     _stdout,
 )
 
+
 def _remote_ref_sha(
     repo: Path,
     ref: str,
@@ -44,8 +45,10 @@ def _remote_ref_sha(
             return fields[0]
     return ""
 
+
 def _claim_message(metadata: dict[str, object]) -> str:
     return CLAIM_MESSAGE + "\n" + json.dumps(metadata, sort_keys=True, separators=(",", ":")) + "\n"
+
 
 def _parse_claim_message(message: str, *, ref: str, sha: str) -> Claim:
     lines = message.splitlines()
@@ -80,6 +83,7 @@ def _parse_claim_message(message: str, *, ref: str, sha: str) -> Claim:
     _parse_time(claim.heartbeat_at)
     return claim
 
+
 def _read_claim_from_ref(
     repo: Path,
     ref: str,
@@ -90,6 +94,7 @@ def _read_claim_from_ref(
     _git(repo, ["fetch", "--quiet", "--no-tags", "origin", ref], runner=runner)
     shown = _git(repo, ["show", "-s", "--format=%B", sha], runner=runner)
     return _parse_claim_message(_stdout(shown), ref=ref, sha=sha)
+
 
 def get_claim(
     repo: Path,
@@ -102,6 +107,7 @@ def get_claim(
     if not sha:
         return None
     return _read_claim_from_ref(repo, ref, sha, runner=runner)
+
 
 def list_claims(
     repo: Path,
@@ -122,10 +128,12 @@ def list_claims(
     ]
     return tuple(sorted(claims, key=lambda item: item.issue_number))
 
+
 def claim_expired(claim: Claim, *, now: datetime | None = None) -> bool:
     current = (now or _now()).astimezone(timezone.utc)
     heartbeat = _parse_time(claim.heartbeat_at)
     return current >= heartbeat + timedelta(seconds=claim.lease_seconds)
+
 
 def _base_commit(repo: Path, base_ref: str, *, runner: Callable[..., object]) -> str:
     result = _git(repo, ["rev-parse", "--verify", base_ref], runner=runner)
@@ -133,6 +141,7 @@ def _base_commit(repo: Path, base_ref: str, *, runner: Callable[..., object]) ->
     if not re.fullmatch(r"[0-9a-fA-F]{40,64}", value):
         raise ClaimError(f"could not resolve claim base ref: {base_ref}")
     return value
+
 
 def _create_claim_commit(
     repo: Path,
@@ -164,6 +173,53 @@ def _create_claim_commit(
         raise ClaimError("git commit-tree did not return a claim commit SHA")
     return sha
 
+
+def _stable_claim_parent(
+    repo: Path,
+    claim: Claim,
+    *,
+    runner: Callable[..., object],
+) -> str:
+    """Return the stable non-heartbeat parent for this claim.
+
+    Older AutoDev versions chained each heartbeat commit onto the previous
+    heartbeat. Walk only through commits that parse as the same claim identity;
+    the first different/non-claim parent is the repository commit on which the
+    claim was originally rooted.
+    """
+    current_sha = claim.sha
+    while True:
+        parents_result = _git(repo, ["show", "-s", "--format=%P", current_sha], runner=runner)
+        parents = _stdout(parents_result).split()
+        if len(parents) != 1:
+            raise ClaimError(
+                f"claim commit must have exactly one parent: {claim.ref} at {current_sha}"
+            )
+        parent_sha = parents[0]
+        message_result = _git(repo, ["show", "-s", "--format=%B", parent_sha], runner=runner)
+        try:
+            parent_claim = _parse_claim_message(
+                _stdout(message_result),
+                ref=claim.ref,
+                sha=parent_sha,
+            )
+        except ClaimError:
+            return parent_sha
+
+        same_identity = (
+            parent_claim.repository == claim.repository
+            and parent_claim.issue_number == claim.issue_number
+            and parent_claim.worker_id == claim.worker_id
+            and parent_claim.run_id == claim.run_id
+            and parent_claim.claim_id == claim.claim_id
+            and parent_claim.acquired_at == claim.acquired_at
+            and parent_claim.lease_seconds == claim.lease_seconds
+        )
+        if not same_identity:
+            return parent_sha
+        current_sha = parent_sha
+
+
 def _claim_metadata(
     *,
     github_repo: str,
@@ -186,6 +242,7 @@ def _claim_metadata(
         "heartbeat_at": heartbeat_at,
         "lease_seconds": lease_seconds,
     }
+
 
 def _push_with_lease(
     repo: Path,
@@ -210,6 +267,7 @@ def _push_with_lease(
     _require_ok(result, ["git", "push", lease, "origin", f"{new_sha}:{ref}"])
     return False
 
+
 def _delete_with_lease(
     repo: Path,
     claim: Claim,
@@ -229,6 +287,7 @@ def _delete_with_lease(
         return False
     _require_ok(result, ["git", "push", lease, "origin", f":{claim.ref}"])
     return False
+
 
 def _new_claim(
     repo: Path,
