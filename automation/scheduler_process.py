@@ -4,7 +4,7 @@ import subprocess
 from pathlib import Path
 from typing import Callable
 
-from automation import headless_environment
+from automation import development_policy, headless_environment
 from automation.scheduler_types import SchedulerError
 
 
@@ -85,7 +85,11 @@ def _origin_url(repo: Path, *, runner: Callable[..., object] = subprocess.run) -
     return value
 
 
-def _default_branch(repo: Path, *, runner: Callable[..., object] = subprocess.run) -> str:
+def _github_default_branch(
+    repo: Path,
+    *,
+    runner: Callable[..., object] = subprocess.run,
+) -> str:
     symbolic = _git(
         repo,
         ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"],
@@ -101,3 +105,19 @@ def _default_branch(repo: Path, *, runner: Callable[..., object] = subprocess.ru
     if not value:
         raise SchedulerError(f"cannot determine worker default branch: {repo}")
     return value
+
+
+def _default_branch(repo: Path, *, runner: Callable[..., object] = subprocess.run) -> str:
+    """Return AutoDev's normal-work branch for scheduler compatibility.
+
+    The historical helper name is retained because registrations already call it,
+    but Git-Flow repositories deliberately return their integration branch.
+    """
+    github_default = _github_default_branch(repo, runner=runner)
+    try:
+        return development_policy.normal_work_branch(
+            repo,
+            default_branch=github_default,
+        )
+    except development_policy.DevelopmentPolicyError as exc:
+        raise SchedulerError(f"invalid repository development strategy: {exc}") from exc

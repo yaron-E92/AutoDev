@@ -1,0 +1,36 @@
+name: CI develop
+
+on:
+  push:
+    branches:
+      - develop
+  pull_request:
+    branches:
+      - develop
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+# The reusable CI contains a release-branch-only version-tag job with
+# contents: write. GitHub validates reusable-workflow permission ceilings
+# before evaluating that job's `if`, so this caller must allow that ceiling.
+# Ordinary CI jobs inside ci.yml still declare/read only what they need, and
+# the tag job remains hard-gated to refs/heads/main.
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: ci-develop-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    name: Integration CI
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ github.sha }}
+    permissions:
+      contents: write
+      pull-requests: read

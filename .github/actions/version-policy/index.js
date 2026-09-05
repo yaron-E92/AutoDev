@@ -7,12 +7,11 @@ const { spawnSync } = require('child_process');
 const INTENT_RE = /^\s*\+semver:\s*(major|minor|patch|none)\s*$/gim;
 const TAG_RE = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const BUMP_RANK = { none: 0, patch: 1, minor: 2, major: 3 };
+const STRATEGIES = new Set(['trunk', 'git-flow']);
 
 class VersionPolicyError extends Error {}
 
 function input(name, fallback = '') {
-  // GitHub exposes action inputs as INPUT_<NAME>, uppercasing and replacing
-  // spaces with underscores while preserving punctuation such as hyphens.
   const key = `INPUT_${name.replace(/ /g, '_').toUpperCase()}`;
   const value = process.env[key];
   return value === undefined || value === '' ? fallback : value;
@@ -21,17 +20,13 @@ function input(name, fallback = '') {
 function parseVersion(value) {
   const text = String(value || '').trim();
   const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.exec(text);
-  if (!match) {
-    throw new VersionPolicyError(`not a canonical semantic version: ${JSON.stringify(text)}`);
-  }
+  if (!match) throw new VersionPolicyError(`not a canonical semantic version: ${JSON.stringify(text)}`);
   return { major: Number(match[1]), minor: Number(match[2]), patch: Number(match[3]) };
 }
 
-function parseTag(tag) {
-  const match = TAG_RE.exec(String(tag || '').trim());
-  if (!match) {
-    throw new VersionPolicyError(`not a canonical version tag: ${JSON.stringify(tag)}`);
-  }
+function parseTag(tagValue) {
+  const match = TAG_RE.exec(String(tagValue || '').trim());
+  if (!match) throw new VersionPolicyError(`not a canonical version tag: ${JSON.stringify(tagValue)}`);
   return { major: Number(match[1]), minor: Number(match[2]), patch: Number(match[3]) };
 }
 
@@ -58,9 +53,7 @@ function explicitIntents(text) {
   const source = String(text || '');
   INTENT_RE.lastIndex = 0;
   let match;
-  while ((match = INTENT_RE.exec(source)) !== null) {
-    values.push(match[1].toLowerCase());
-  }
+  while ((match = INTENT_RE.exec(source)) !== null) values.push(match[1].toLowerCase());
   return values;
 }
 
@@ -79,11 +72,57 @@ function highestBump(intents) {
   const values = [...intents].map(value => String(value).toLowerCase());
   if (values.length === 0) return 'none';
   for (const value of values) {
-    if (!(value in BUMP_RANK)) {
-      throw new VersionPolicyError(`unsupported semver intent: ${JSON.stringify(value)}`);
-    }
+    if (!(value in BUMP_RANK)) throw new VersionPolicyError(`unsupported semver intent: ${JSON.stringify(value)}`);
   }
   return values.reduce((best, value) => BUMP_RANK[value] > BUMP_RANK[best] ? value : best, 'none');
+}
+
+function validateBranchName(value, field = 'branch') {
+  const branch = String(value || '').trim();
+  if (!branch || branch === '@' || branch.startsWith('-')) throw new VersionPolicyError(`invalid ${field}: ${JSON.stringify(branch)}`);
+  if (/[\x00-\x20\x7f~^:?*\\\[]/.test(branch)) throw new VersionPolicyError(`invalid ${field}: ${JSON.stringify(branch)}`);
+  if (branch.startsWith('/') || branch.endsWith('/') || branch.endsWith('.') || branch.includes('//') || branch.includes('..') || branch.includes('@{')) {
+    throw new VersionPolicyError(`invalid ${field}: ${JSON.stringify(branch)}`);
+  }
+  for (const part of branch.split('/')) {
+    if (!part || part.startsWith('.') || part.endsWith('.lock')) throw new VersionPolicyError(`invalid ${field}: ${JSON.stringify(branch)}`);
+  }
+  return branch;
+}
+
+function loadDevelopmentPolicy(cwd = process.cwd(), defaultBranch = 'main') {
+  const fallback = validateBranchName(defaultBranch, 'default branch');
+  const configPath = path.join(cwd, '.autodev', 'repo.json');
+  if (!fs.existsSync(configPath)) {
+    return { strategy: 'trunk', integration_branch: fallback, release_branch: fallback, source: 'built-in trunk default' };
+  }
+  let root;
+  try {
+    root = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  } catch (error) {
+    throw new VersionPolicyError(`invalid AutoDev repository config ${configPath}: ${error.message}`);
+  }
+  if (!root || typeof root !== 'object' || Array.isArray(root)) throw new VersionPolicyError(`AutoDev repository config must be an object: ${configPath}`);
+  const raw = root.development;
+  if (raw === undefined || raw === null) {
+    return { strategy: 'trunk', integration_branch: fallback, release_branch: fallback, source: 'built-in trunk default' };
+  }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new VersionPolicyError(`development in ${configPath} must be an object`);
+  const strategy = String(raw.strategy || 'trunk').trim().toLowerCase();
+  if (!STRATEGIES.has(strategy)) throw new VersionPolicyError(`unsupported development strategy ${JSON.stringify(strategy)}`);
+  if (strategy === 'trunk') {
+    const integration = validateBranchName(raw.integration_branch || fallback, 'development.integration_branch');
+    const release = validateBranchName(raw.release_branch || fallback, 'development.release_branch');
+    if (integration !== release) throw new VersionPolicyError('trunk strategy requires integration_branch and release_branch to be the same branch');
+    return { strategy, integration_branch: integration, release_branch: release, source: configPath };
+  }
+  if (!Object.prototype.hasOwnProperty.call(raw, 'integration_branch') || !Object.prototype.hasOwnProperty.call(raw, 'release_branch')) {
+    throw new VersionPolicyError('git-flow strategy requires development.integration_branch and development.release_branch');
+  }
+  const integration = validateBranchName(raw.integration_branch, 'development.integration_branch');
+  const release = validateBranchName(raw.release_branch, 'development.release_branch');
+  if (integration === release) throw new VersionPolicyError('git-flow integration_branch and release_branch must differ');
+  return { strategy, integration_branch: integration, release_branch: release, source: configPath };
 }
 
 function run(command, args, options = {}) {
@@ -120,7 +159,7 @@ function latestReachableTag(head = 'HEAD', cwd = process.cwd(), baseVersion = '0
 }
 
 async function githubJson(url, token) {
-  if (!token) throw new VersionPolicyError('github-token is required for resolve-main mode');
+  if (!token) throw new VersionPolicyError('github-token is required for trusted version resolution');
   const response = await fetch(url, {
     headers: {
       Authorization: `Bearer ${token}`,
@@ -139,13 +178,11 @@ async function githubJson(url, token) {
 async function associatedPulls(repository, commit, token) {
   const apiUrl = process.env.GITHUB_API_URL || 'https://api.github.com';
   const payload = await githubJson(`${apiUrl}/repos/${repository}/commits/${commit}/pulls`, token);
-  if (!Array.isArray(payload)) {
-    throw new VersionPolicyError(`GitHub returned an unexpected PR association payload for commit ${commit.slice(0, 12)}`);
-  }
+  if (!Array.isArray(payload)) throw new VersionPolicyError(`GitHub returned an unexpected PR association payload for commit ${commit.slice(0, 12)}`);
   return payload;
 }
 
-function resolutionObject({ baseTag, baseVersion, bump, version, sourceSha, intents, superseded = false }) {
+function resolutionObject({ baseTag, baseVersion, bump, version, sourceSha, intents, contributors = [], superseded = false }) {
   return {
     base_tag: baseTag,
     base_version: semver(baseVersion),
@@ -157,6 +194,7 @@ function resolutionObject({ baseTag, baseVersion, bump, version, sourceSha, inte
     superseded,
     tag_status: 'not-requested',
     intents: [...intents],
+    contributors: [...contributors],
   };
 }
 
@@ -164,13 +202,7 @@ function candidateForPr({ body, head = 'HEAD', cwd = process.cwd(), baseVersion 
   const intent = parseExactIntent(body);
   const base = latestReachableTag(head, cwd, baseVersion);
   const sourceSha = revParse(head, cwd);
-  return resolutionObject({
-    ...base,
-    bump: intent,
-    version: bumpVersion(base.baseVersion, intent),
-    sourceSha,
-    intents: [intent],
-  });
+  return resolutionObject({ ...base, bump: intent, version: bumpVersion(base.baseVersion, intent), sourceSha, intents: [intent] });
 }
 
 async function resolveMain({ repository, head, branch = 'main', token, cwd = process.cwd(), baseVersion = '0.0.0' }) {
@@ -179,19 +211,13 @@ async function resolveMain({ repository, head, branch = 'main', token, cwd = pro
   const sourceSha = revParse(head, cwd);
   const base = latestReachableTag(sourceSha, cwd, baseVersion);
   if (remoteHead !== sourceSha) {
-    return resolutionObject({
-      ...base,
-      bump: 'none',
-      version: base.baseVersion,
-      sourceSha,
-      intents: [],
-      superseded: true,
-    });
+    return resolutionObject({ ...base, bump: 'none', version: base.baseVersion, sourceSha, intents: [], superseded: true });
   }
 
   const range = base.baseTag ? `${base.baseTag}..${sourceSha}` : sourceSha;
   const commits = git(['rev-list', '--reverse', range], { cwd }).stdout.split(/\r?\n/).map(v => v.trim()).filter(Boolean);
   const intents = [];
+  const contributors = [];
   const seenPulls = new Set();
 
   for (const commit of commits) {
@@ -203,30 +229,121 @@ async function resolveMain({ repository, head, branch = 'main', token, cwd = pro
         if (!number || seenPulls.has(number)) continue;
         seenPulls.add(number);
         const values = explicitIntents(pull.body || '');
-        if (values.length > 1) {
-          throw new VersionPolicyError(`merged PR #${number} contains duplicate/conflicting +semver directives`);
+        if (values.length > 1) throw new VersionPolicyError(`merged PR #${number} contains duplicate/conflicting +semver directives`);
+        if (values.length === 1) {
+          intents.push(values[0]);
+          contributors.push(`#${number}:${values[0]}`);
         }
-        if (values.length === 1) intents.push(values[0]);
       }
       continue;
     }
-
     const message = git(['show', '-s', '--format=%B', commit], { cwd }).stdout;
     const values = explicitIntents(message);
-    if (values.length > 1) {
-      throw new VersionPolicyError(`direct main commit ${commit.slice(0, 12)} contains duplicate/conflicting +semver directives`);
+    if (values.length > 1) throw new VersionPolicyError(`direct main commit ${commit.slice(0, 12)} contains duplicate/conflicting +semver directives`);
+    if (values.length === 1) {
+      intents.push(values[0]);
+      contributors.push(`${commit.slice(0, 12)}:${values[0]}`);
     }
-    if (values.length === 1) intents.push(values[0]);
   }
 
   const selected = highestBump(intents);
-  return resolutionObject({
-    ...base,
-    bump: selected,
-    version: bumpVersion(base.baseVersion, selected),
-    sourceSha,
-    intents,
-  });
+  return resolutionObject({ ...base, bump: selected, version: bumpVersion(base.baseVersion, selected), sourceSha, intents, contributors });
+}
+
+function assertIntegrationContainsReleasedBase(policy, baseTag, cwd) {
+  if (!baseTag) return;
+  git(['fetch', 'origin', policy.integration_branch, '--force'], { cwd });
+  const releasedCommit = revParse(`${baseTag}^{commit}`, cwd);
+  const result = git(['merge-base', '--is-ancestor', releasedCommit, `origin/${policy.integration_branch}`], { cwd, check: false });
+  if (result.code !== 0) {
+    throw new VersionPolicyError(
+      `git-flow release refused: ${policy.integration_branch} does not contain current released history ${baseTag}; synchronize ${policy.release_branch} into ${policy.integration_branch} before promotion`
+    );
+  }
+}
+
+async function resolveGitFlowRelease({ repository, head, branch, token, cwd = process.cwd(), baseVersion = '0.0.0', policy }) {
+  const releaseBranch = policy.release_branch;
+  const integrationBranch = policy.integration_branch;
+  if (branch === integrationBranch) {
+    const sourceSha = revParse(head, cwd);
+    const base = latestReachableTag(sourceSha, cwd, baseVersion);
+    return resolutionObject({ ...base, bump: 'none', version: base.baseVersion, sourceSha, intents: [], contributors: [] });
+  }
+  if (branch !== releaseBranch) {
+    throw new VersionPolicyError(`git-flow version resolution expected release branch ${releaseBranch}, got ${branch}`);
+  }
+
+  git(['fetch', 'origin', releaseBranch, integrationBranch, '--tags', '--force'], { cwd });
+  const remoteHead = revParse(`origin/${releaseBranch}`, cwd);
+  const sourceSha = revParse(head, cwd);
+  const base = latestReachableTag(sourceSha, cwd, baseVersion);
+  if (remoteHead !== sourceSha) {
+    return resolutionObject({ ...base, bump: 'none', version: base.baseVersion, sourceSha, intents: [], contributors: [], superseded: true });
+  }
+
+  const range = base.baseTag ? `${base.baseTag}..${sourceSha}` : sourceSha;
+  const commits = git(['rev-list', '--reverse', range], { cwd }).stdout.split(/\r?\n/).map(v => v.trim()).filter(Boolean);
+  const intents = [];
+  const contributors = [];
+  const seenPulls = new Set();
+  let promotionObserved = false;
+
+  for (const commit of commits) {
+    const pulls = await associatedPulls(repository, commit, token);
+    const relevant = pulls.filter(item => item && item.merged_at && item.base && [integrationBranch, releaseBranch].includes(item.base.ref));
+    let consumedPr = false;
+    for (const pull of relevant) {
+      const number = Number(pull.number || 0);
+      if (!number || seenPulls.has(number)) continue;
+      seenPulls.add(number);
+      consumedPr = true;
+      const baseRef = String(pull.base && pull.base.ref || '');
+      const headRef = String(pull.head && pull.head.ref || '');
+      const values = explicitIntents(pull.body || '');
+      if (values.length > 1) throw new VersionPolicyError(`merged PR #${number} contains duplicate/conflicting +semver directives`);
+
+      if (baseRef === integrationBranch) {
+        if (values.length !== 1) throw new VersionPolicyError(`integration PR #${number} must contain exactly one +semver directive`);
+        intents.push(values[0]);
+        contributors.push(`#${number}:${values[0]}:${integrationBranch}`);
+        continue;
+      }
+
+      if (baseRef === releaseBranch && headRef === integrationBranch) {
+        promotionObserved = true;
+        continue;
+      }
+
+      if (baseRef === releaseBranch) {
+        if (values.length !== 1) throw new VersionPolicyError(`direct release/hotfix PR #${number} must contain exactly one +semver directive`);
+        intents.push(values[0]);
+        contributors.push(`#${number}:${values[0]}:${releaseBranch}`);
+      }
+    }
+
+    if (!consumedPr) {
+      const message = git(['show', '-s', '--format=%B', commit], { cwd }).stdout;
+      const values = explicitIntents(message);
+      if (values.length > 1) throw new VersionPolicyError(`direct release commit ${commit.slice(0, 12)} contains duplicate/conflicting +semver directives`);
+      if (values.length === 1) {
+        intents.push(values[0]);
+        contributors.push(`${commit.slice(0, 12)}:${values[0]}:direct`);
+      }
+    }
+  }
+
+  if (promotionObserved) assertIntegrationContainsReleasedBase(policy, base.baseTag, cwd);
+  const selected = highestBump(intents);
+  return resolutionObject({ ...base, bump: selected, version: bumpVersion(base.baseVersion, selected), sourceSha, intents, contributors });
+}
+
+async function resolveTrusted({ repository, head, branch = 'main', token, cwd = process.cwd(), baseVersion = '0.0.0' }) {
+  const policy = loadDevelopmentPolicy(cwd, branch);
+  if (policy.strategy === 'trunk') {
+    return resolveMain({ repository, head, branch, token, cwd, baseVersion });
+  }
+  return resolveGitFlowRelease({ repository, head, branch, token, cwd, baseVersion, policy });
 }
 
 function annotatedTagType(tagName, cwd) {
@@ -242,25 +359,18 @@ function existingTagCommit(tagName, cwd) {
 function createAnnotatedTag(resolution, cwd = process.cwd()) {
   if (resolution.superseded) return 'superseded';
   if (!resolution.tag_required) return 'no-tag';
-
   const tagName = resolution.tag;
   const sourceSha = resolution.source_sha;
   const existing = existingTagCommit(tagName, cwd);
   if (existing) {
-    if (existing !== sourceSha) {
-      throw new VersionPolicyError(`refusing to move existing tag ${tagName}: it points to ${existing}, not ${sourceSha}`);
-    }
+    if (existing !== sourceSha) throw new VersionPolicyError(`refusing to move existing tag ${tagName}: it points to ${existing}, not ${sourceSha}`);
     const type = annotatedTagType(tagName, cwd);
-    if (type !== 'tag') {
-      throw new VersionPolicyError(`refusing lightweight/non-annotated existing version tag ${tagName}; expected annotated tag`);
-    }
+    if (type !== 'tag') throw new VersionPolicyError(`refusing lightweight/non-annotated existing version tag ${tagName}; expected annotated tag`);
     return 'already-exists';
   }
-
   git(['tag', '-a', tagName, sourceSha, '-m', `Version ${resolution.version}`], { cwd });
   const pushed = git(['push', 'origin', `refs/tags/${tagName}`], { cwd, check: false });
   if (pushed.code === 0) return 'created';
-
   git(['fetch', 'origin', '--tags', '--force'], { cwd });
   const remote = existingTagCommit(tagName, cwd);
   if (remote === sourceSha && annotatedTagType(tagName, cwd) === 'tag') return 'concurrent-identical';
@@ -279,7 +389,8 @@ function emitOutputs(resolution) {
 }
 
 function summary(resolution) {
-  return `base=${resolution.base_tag || '(none)'} bump=${resolution.bump} version=${resolution.version} tag=${resolution.tag} required=${resolution.tag_required} superseded=${resolution.superseded}`;
+  const contributors = resolution.contributors && resolution.contributors.length ? ` contributors=${JSON.stringify(resolution.contributors)}` : '';
+  return `base=${resolution.base_tag || '(none)'} bump=${resolution.bump} version=${resolution.version} tag=${resolution.tag} required=${resolution.tag_required} superseded=${resolution.superseded}${contributors}`;
 }
 
 function booleanInput(value) {
@@ -297,10 +408,8 @@ async function main() {
     resolution = candidateForPr({ body: input('pr-body'), head, cwd, baseVersion });
   } else if (mode === 'resolve-main') {
     const repository = input('repository', process.env.GITHUB_REPOSITORY || '').trim();
-    if (!repository || !repository.includes('/')) {
-      throw new VersionPolicyError('repository must be supplied as owner/name (or GITHUB_REPOSITORY must be set)');
-    }
-    resolution = await resolveMain({
+    if (!repository || !repository.includes('/')) throw new VersionPolicyError('repository must be supplied as owner/name (or GITHUB_REPOSITORY must be set)');
+    resolution = await resolveTrusted({
       repository,
       head,
       branch: input('branch', 'main').trim() || 'main',
@@ -308,9 +417,7 @@ async function main() {
       cwd,
       baseVersion,
     });
-    if (booleanInput(input('create-tag', 'false'))) {
-      resolution.tag_status = createAnnotatedTag(resolution, cwd);
-    }
+    if (booleanInput(input('create-tag', 'false'))) resolution.tag_status = createAnnotatedTag(resolution, cwd);
   } else {
     throw new VersionPolicyError(`unsupported mode ${JSON.stringify(mode)}; expected check-pr or resolve-main`);
   }
@@ -337,9 +444,13 @@ module.exports = {
   explicitIntents,
   parseExactIntent,
   highestBump,
+  validateBranchName,
+  loadDevelopmentPolicy,
   latestReachableTag,
   candidateForPr,
   resolveMain,
+  resolveGitFlowRelease,
+  resolveTrusted,
   createAnnotatedTag,
   resolutionObject,
 };

@@ -4,11 +4,11 @@ on:
   workflow_call:
     inputs:
       head:
-        description: Exact successful caller main SHA to tag
+        description: Exact successful caller release/trunk SHA to tag
         required: true
         type: string
       branch:
-        description: Trusted default branch
+        description: Trusted branch being resolved; repository development policy determines trunk/Git-Flow semantics
         required: false
         type: string
         default: main
@@ -36,6 +36,8 @@ on:
         value: ${{ jobs.version.outputs.superseded }}
       tag_status:
         value: ${{ jobs.version.outputs.tag_status }}
+      contributors:
+        value: ${{ jobs.version.outputs.contributors }}
 
 permissions:
   contents: read
@@ -60,9 +62,10 @@ jobs:
       tag_required: ${{ steps.version.outputs.tag_required }}
       superseded: ${{ steps.version.outputs.superseded }}
       tag_status: ${{ steps.version.outputs.tag_status }}
+      contributors: ${{ steps.version.outputs.contributors }}
 
     steps:
-      - name: Check out exact successful caller main SHA
+      - name: Check out exact successful caller SHA
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ inputs.head }}
@@ -74,7 +77,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Resolve merged change intent and allocate tag
+      - name: Resolve trusted change intent and allocate tag
         id: version
         uses: $/.github/actions/version-policy
         with:
@@ -96,6 +99,7 @@ jobs:
           TAG_REQUIRED: ${{ steps.version.outputs.tag_required }}
           SUPERSEDED: ${{ steps.version.outputs.superseded }}
           TAG_STATUS: ${{ steps.version.outputs.tag_status }}
+          CONTRIBUTORS: ${{ steps.version.outputs.contributors }}
         run: |
           {
             echo "### Version advancement"
@@ -107,6 +111,7 @@ jobs:
             echo "- Tag required: \`$TAG_REQUIRED\`"
             echo "- Superseded: \`$SUPERSEDED\`"
             echo "- Tag status: \`$TAG_STATUS\`"
+            echo "- Contributing intents: \`${CONTRIBUTORS:-'[]'}\`"
             echo
             echo "Version advancement stops here. **No release, package publication, signing, or deployment is triggered by this workflow.**"
           } >> "$GITHUB_STEP_SUMMARY"
