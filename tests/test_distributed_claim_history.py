@@ -91,7 +91,7 @@ class DistributedClaimHistoryTests(unittest.TestCase):
 
     def test_stale_renewal_loses_exact_sha_compare_and_swap(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            _origin, worker_a, worker_b = make_remote(Path(temp_dir))
+            _origin, worker_a, _worker_b = make_remote(Path(temp_dir))
             attempt = claim_lease.acquire_claim(
                 worker_a,
                 "owner/repo",
@@ -110,14 +110,15 @@ class DistributedClaimHistoryTests(unittest.TestCase):
             )
             self.assertIsNotNone(fresh)
 
-            run_git(worker_b, "fetch", "origin", stale.ref)
+            # The stale writer has the old object locally but its expected remote
+            # SHA is no longer current, so the exact-SHA lease must reject it.
             lost = claim_lease.renew_claim(
-                worker_b,
+                worker_a,
                 stale,
                 now=NOW + timedelta(minutes=2),
             )
             self.assertIsNone(lost)
-            current = claim_repository.get_claim(worker_b, 265)
+            current = claim_repository.get_claim(worker_a, 265)
             self.assertEqual(current.sha, fresh.sha)
             self.assertEqual(current.heartbeat_at, fresh.heartbeat_at)
 
