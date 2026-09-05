@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from automation import privacy_grant_commands, queue_contract, queue_github, queue_policy, semver_intent, ux_policy
+from automation import development_policy, privacy_grant_commands, queue_contract, queue_github, queue_policy, semver_intent, ux_policy
 
 from automation import opencode_adapter_models
 
@@ -123,7 +123,12 @@ def _load_repo_config(repo: Path) -> dict[str, object]:
         )
     try:
         ux_policy.parse_ux_policy(value.get("ux"), source=str(path))
-    except ux_policy.UXPolicyError as exc:
+        development_policy.parse_development_policy(
+            value.get("development"),
+            default_branch="main",
+            source=str(path),
+        )
+    except (ux_policy.UXPolicyError, development_policy.DevelopmentPolicyError) as exc:
         raise RepoSetupError(str(exc)) from exc
     if "default_semver_intent" in value:
         raw_semver = value.get("default_semver_intent")
@@ -138,27 +143,77 @@ def _load_repo_config(repo: Path) -> dict[str, object]:
     return value
 
 
+def _requested_development(
+    strategy: str,
+    integration_branch: str,
+    release_branch: str,
+) -> dict[str, str] | None:
+    strategy = str(strategy or "").strip().casefold()
+    integration_branch = str(integration_branch or "").strip()
+    release_branch = str(release_branch or "").strip()
+    if not strategy:
+        if integration_branch or release_branch:
+            raise RepoSetupError(
+                "--integration-branch/--release-branch require --development-strategy"
+            )
+        return None
+    raw: dict[str, str] = {"strategy": strategy}
+    if strategy == development_policy.GIT_FLOW:
+        raw["integration_branch"] = integration_branch or "develop"
+        raw["release_branch"] = release_branch or "main"
+    elif strategy == development_policy.TRUNK:
+        branch = integration_branch or release_branch or "main"
+        if integration_branch and release_branch and integration_branch != release_branch:
+            raise RepoSetupError(
+                "trunk strategy requires the same integration and release branch"
+            )
+        raw["integration_branch"] = branch
+        raw["release_branch"] = branch
+    else:
+        raw["integration_branch"] = integration_branch
+        raw["release_branch"] = release_branch
+    try:
+        parsed = development_policy.parse_development_policy(
+            raw,
+            default_branch="main",
+            source="repo install arguments",
+        )
+    except development_policy.DevelopmentPolicyError as exc:
+        raise RepoSetupError(str(exc)) from exc
+    return {
+        "strategy": parsed.strategy,
+        "integration_branch": parsed.integration_branch,
+        "release_branch": parsed.release_branch,
+    }
+
+
 def _ensure_repo_config(
     repo: Path,
     *,
     enable_opencode: bool,
+    development_strategy: str = "",
+    integration_branch: str = "",
+    release_branch: str = "",
     created: list[str],
     updated: list[str],
 ) -> None:
     path = repo / REPO_CONFIG
     current = _load_repo_config(repo)
+    requested_development = _requested_development(
+        development_strategy,
+        integration_branch,
+        release_branch,
+    )
     if not current:
+        value: dict[str, object] = {
+            "version": REPO_SCHEMA,
+            "opencode": {"enabled": enable_opencode},
+            "default_semver_intent": semver_intent.DEFAULT_INTENT,
+        }
+        if requested_development is not None:
+            value["development"] = requested_development
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            _json_text(
-                {
-                    "version": REPO_SCHEMA,
-                    "opencode": {"enabled": enable_opencode},
-                    "default_semver_intent": semver_intent.DEFAULT_INTENT,
-                }
-            ),
-            encoding="utf-8",
-        )
+        path.write_text(_json_text(value), encoding="utf-8")
         created.append(REPO_CONFIG.as_posix())
         return
 
@@ -172,6 +227,9 @@ def _ensure_repo_config(
     if opencode.get("enabled") is not enable_opencode:
         opencode["enabled"] = enable_opencode
         value["opencode"] = opencode
+        changed = True
+    if requested_development is not None and value.get("development") != requested_development:
+        value["development"] = requested_development
         changed = True
     if not changed:
         return
@@ -190,8 +248,8 @@ def opencode_enabled(repo: Path) -> bool:
     return bool(value) if isinstance(value, bool) else True
 
 
-
 def _validate_repo_policy(repo: Path) -> None:
+    _load_repo_config(repo)
     queue_policy.load_policy(repo)
     queue_selection.load_roadmap(repo)
     privacy.load_policy(repo)
@@ -211,6 +269,9 @@ def install_repo(
     *,
     github_repo: str = "",
     enable_opencode: bool = True,
+    development_strategy: str = "",
+    integration_branch: str = "",
+    release_branch: str = "",
     autodev_root: Path | None = None,
     runner: Callable[..., object] = subprocess.run,
 ) -> RepoInstallResult:
@@ -222,6 +283,9 @@ def install_repo(
     _ensure_repo_config(
         repo,
         enable_opencode=enable_opencode,
+        development_strategy=development_strategy,
+        integration_branch=integration_branch,
+        release_branch=release_branch,
         created=created,
         updated=updated,
     )
@@ -356,6 +420,59 @@ def _check_repo_config(repo: Path) -> tuple[DoctorCheck, bool]:
     if not config:
         return DoctorCheck("repo-config", "error", f"missing {REPO_CONFIG}", True), True
     return DoctorCheck("repo-config", "ok", f"{REPO_CONFIG} version {REPO_SCHEMA}"), opencode_enabled(repo)
+
+
+def _check_development_policy(repo: Path) -> DoctorCheck:
+    try:
+        policy = development_policy.load_development_policy(repo, default_branch="main")
+    except development_policy.DevelopmentPolicyError as exc:
+        return DoctorCheck("development-strategy", "error", str(exc))
+    return DoctorCheck(
+        "development-strategy",
+        "ok",
+        development_policy.describe(policy),
+    )
+
+
+def _development_branch_checks(
+    repo: Path,
+    github_repo: str,
+    *,
+    runner: Callable[..., object],
+) -> list[DoctorCheck]:
+    try:
+        policy = development_policy.load_development_policy(repo, default_branch="main")
+    except development_policy.DevelopmentPolicyError as exc:
+        return [DoctorCheck("development-branches", "error", str(exc))]
+
+    checks: list[DoctorCheck] = []
+    seen: set[str] = set()
+    for role, branch in (
+        ("integration", policy.integration_branch),
+        ("release", policy.release_branch),
+    ):
+        if branch in seen:
+            continue
+        seen.add(branch)
+        result = queue_github._run_gh(  # type: ignore[attr-defined]
+            repo,
+            ["api", f"repos/{github_repo}/git/ref/heads/{branch}"],
+            runner=runner,
+            check=False,
+        )
+        exists = int(getattr(result, "returncode", 1)) == 0
+        checks.append(
+            DoctorCheck(
+                f"development-{role}-branch",
+                "ok" if exists else "error",
+                (
+                    f"{branch} exists; normal AutoDev PR target={policy.normal_work_branch}"
+                    if exists
+                    else f"configured {role} branch {branch!r} does not exist; create it from the intended trusted history before running AutoDev"
+                ),
+            )
+        )
+    return checks
 
 
 def _check_policy(repo: Path) -> list[DoctorCheck]:
@@ -524,13 +641,14 @@ def doctor(
 
     repo_check, open_code = _check_repo_config(repo)
     checks.append(repo_check)
+    checks.append(_check_development_policy(repo))
     checks.extend(_check_policy(repo))
     checks.append(_grant_check(repo))
-
 
     try:
         resolved_repo = _resolve_github_repo(repo, github_repo, runner=runner)
         checks.append(DoctorCheck("github-repository", "ok", resolved_repo))
+        checks.extend(_development_branch_checks(repo, resolved_repo, runner=runner))
         checks.append(_label_check(repo, resolved_repo, runner=runner))
     except Exception as exc:
         checks.append(DoctorCheck("github-repository", "error", str(exc)))
@@ -572,6 +690,13 @@ def run_cli(
     install_parser.add_argument("--repo", default=".")
     install_parser.add_argument("--github-repo", default="")
     install_parser.add_argument("--no-opencode", action="store_true")
+    install_parser.add_argument(
+        "--development-strategy",
+        choices=sorted(development_policy.SUPPORTED_STRATEGIES),
+        default="",
+    )
+    install_parser.add_argument("--integration-branch", default="")
+    install_parser.add_argument("--release-branch", default="")
     install_parser.add_argument("--json", action="store_true")
 
     labels_parser = sub.add_parser("ensure-labels")
@@ -592,6 +717,9 @@ def run_cli(
                 Path(args.repo),
                 github_repo=args.github_repo,
                 enable_opencode=not args.no_opencode,
+                development_strategy=args.development_strategy,
+                integration_branch=args.integration_branch,
+                release_branch=args.release_branch,
                 runner=runner,
             )
             if args.json:
@@ -625,6 +753,7 @@ def run_cli(
         return 0 if result.healthy else 2
     except (
         RepoSetupError,
+        development_policy.DevelopmentPolicyError,
         queue_contract.QueueError,
         privacy.PrivacyError,
         queue_selection.RoadmapError,
