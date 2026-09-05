@@ -101,12 +101,13 @@ def ensure_prepared_issue(
         repository_default=semver_intent.repository_default(repo),
     )
 
+    base_override = os.environ.get("BASE_BRANCH", "").strip()
     try:
         policy = development_policy.load_development_policy(repo, default_branch="main")
         base = development_policy.normal_work_branch(
             repo,
             default_branch="main",
-            explicit=os.environ.get("BASE_BRANCH", ""),
+            explicit=base_override,
         )
     except development_policy.DevelopmentPolicyError as exc:
         raise WorkflowStageError(
@@ -192,6 +193,7 @@ def ensure_prepared_issue(
         "IntegrationBranch": policy.integration_branch,
         "ReleaseBranch": policy.release_branch,
         "Base": base,
+        "BaseOverride": bool(base_override),
         "Remote": remote,
         "BranchName": branch_name,
         "BaseSha": base_sha,
