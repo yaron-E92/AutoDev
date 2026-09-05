@@ -295,7 +295,7 @@ test('git-flow promotion refuses stale develop missing current released ancestry
     const hotfix = commit(repo, 'released hotfix');
     git(repo, 'tag', '-a', 'v3.0.1', hotfix, '-m', 'hotfix release');
     git(repo, 'push', 'origin', 'main', '--tags');
-    git(repo, 'merge', '--no-ff', 'develop', '-m', 'stale promotion');
+    git(repo, 'merge', '--no-ff', '-X', 'ours', 'develop', '-m', 'stale promotion');
     const promotion = git(repo, 'rev-parse', 'HEAD');
     git(repo, 'push', 'origin', 'main');
     configureGitFlow(repo);
