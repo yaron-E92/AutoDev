@@ -252,18 +252,29 @@ def acquire_claim(
                 )
             raise ClaimError(_stalled_detail(existing, snapshot, policy=claim_policy))
 
+        # The owner keeps its liveness history even if the lease timestamp has
+        # expired between scheduler ticks. Exact-ref CAS still decides whether it
+        # may publish the next state; expiry must not grant a fresh no-progress
+        # budget to the same unchanged run.
+        if existing.worker_id == worker_id:
+            renewed = _renew_for_scheduler_tick(
+                repo,
+                existing,
+                snapshot,
+                policy=claim_policy,
+                runner=runner,
+                now=current,
+            )
+            if renewed is not None:
+                return ClaimAttempt("OWNED", claim=renewed, owner=renewed)
+            winner = get_claim(repo, issue_number, runner=runner)
+            return ClaimAttempt(
+                "BUSY",
+                owner=winner,
+                detail="same-worker claim renewal race was won by another worker",
+            )
+
         if not claim_expired(existing, now=current):
-            if existing.worker_id == worker_id:
-                renewed = _renew_for_scheduler_tick(
-                    repo,
-                    existing,
-                    snapshot,
-                    policy=claim_policy,
-                    runner=runner,
-                    now=current,
-                )
-                if renewed is not None:
-                    return ClaimAttempt("OWNED", claim=renewed, owner=renewed)
             return ClaimAttempt(
                 "BUSY",
                 owner=existing,
