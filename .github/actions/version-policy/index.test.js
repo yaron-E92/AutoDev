@@ -33,6 +33,42 @@ function commit(repo, message) {
   return git(repo, 'rev-parse', 'HEAD');
 }
 
+function configureGitFlow(repo) {
+  const configDir = path.join(repo, '.autodev');
+  fs.mkdirSync(configDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(configDir, 'repo.json'),
+    JSON.stringify({
+      version: 1,
+      development: {
+        strategy: 'git-flow',
+        integration_branch: 'develop',
+        release_branch: 'main',
+      },
+    }),
+    'utf8',
+  );
+}
+
+function mockAssociatedPulls(mapping) {
+  return async url => {
+    const parts = String(url).split('/');
+    const commitSha = parts[parts.indexOf('commits') + 1];
+    const payload = mapping.get(commitSha) || [];
+    return new Response(JSON.stringify(payload), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+}
+
+function mergedPr(number, body, base, head) {
+  return {
+    number,
+    body,
+    merged_at: '2026-09-05T00:00:00Z',
+    base: { ref: base },
+    head: { ref: head },
+  };
+}
+
 test('exact intent accepts one directive and rejects missing/duplicates/conflicts', () => {
   assert.equal(policy.parseExactIntent('text\n+semver: minor\n'), 'minor');
   assert.throws(() => policy.parseExactIntent('no directive'), /exactly one version intent/);
@@ -78,16 +114,10 @@ test('resolve-main selects highest associated PR intent and none never tags', as
     git(repo, 'push', 'origin', 'main', '--tags');
 
     const bodies = new Map([
-      [patchSha, { number: 11, body: '+semver: patch' }],
-      [minorSha, { number: 12, body: '+semver: minor' }],
+      [patchSha, [mergedPr(11, '+semver: patch', 'main', 'feature-11')]],
+      [minorSha, [mergedPr(12, '+semver: minor', 'main', 'feature-12')]],
     ]);
-    global.fetch = async url => {
-      const parts = String(url).split('/');
-      const commitSha = parts[parts.indexOf('commits') + 1];
-      const item = bodies.get(commitSha);
-      const payload = item ? [{ ...item, merged_at: '2026-08-19T00:00:00Z', base: { ref: 'main' } }] : [];
-      return new Response(JSON.stringify(payload), { status: 200, headers: { 'content-type': 'application/json' } });
-    };
+    global.fetch = mockAssociatedPulls(bodies);
 
     const result = await policy.resolveMain({ repository: 'owner/repo', head: minorSha, branch: 'main', token: 'test', cwd: repo });
     assert.deepEqual(result.intents, ['patch', 'minor']);
@@ -146,6 +176,139 @@ test('superseded main candidate is not eligible for a tag', async () => {
     const result = await policy.resolveMain({ repository: 'owner/repo', head: oldSha, branch: 'main', token: 'test', cwd: repo });
     assert.equal(result.superseded, true);
     assert.equal(result.tag_required, false);
+  } finally {
+    global.fetch = originalFetch;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('development policy defaults to trunk and validates git-flow branch roles', () => {
+  const { root, repo } = setupRepo();
+  try {
+    assert.deepEqual(policy.loadDevelopmentPolicy(repo), {
+      strategy: 'trunk',
+      integration_branch: 'main',
+      release_branch: 'main',
+      source: 'built-in trunk default',
+    });
+    configureGitFlow(repo);
+    const configured = policy.loadDevelopmentPolicy(repo);
+    assert.equal(configured.strategy, 'git-flow');
+    assert.equal(configured.integration_branch, 'develop');
+    assert.equal(configured.release_branch, 'main');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('git-flow integration history aggregates one release bump at promotion', async () => {
+  const { root, repo } = setupRepo();
+  const originalFetch = global.fetch;
+  try {
+    const base = commit(repo, 'base');
+    git(repo, 'tag', '-a', 'v1.4.0', base, '-m', 'base');
+    git(repo, 'branch', 'develop');
+    git(repo, 'checkout', 'develop');
+    const patchSha = commit(repo, 'feature patch');
+    const minorSha = commit(repo, 'feature minor');
+    git(repo, 'push', 'origin', 'develop', '--tags');
+    git(repo, 'checkout', 'main');
+    git(repo, 'merge', '--no-ff', 'develop', '-m', 'promote develop');
+    const promotionSha = git(repo, 'rev-parse', 'HEAD');
+    git(repo, 'push', 'origin', 'main');
+    configureGitFlow(repo);
+
+    global.fetch = mockAssociatedPulls(new Map([
+      [patchSha, [mergedPr(101, '+semver: patch', 'develop', 'feature-101')]],
+      [minorSha, [mergedPr(102, '+semver: minor', 'develop', 'feature-102')]],
+      [promotionSha, [mergedPr(200, '', 'main', 'develop')]],
+    ]));
+
+    const result = await policy.resolveTrusted({ repository: 'owner/repo', head: promotionSha, branch: 'main', token: 'test', cwd: repo });
+    assert.equal(result.bump, 'minor');
+    assert.equal(result.version, '1.5.0');
+    assert.deepEqual(result.intents, ['patch', 'minor']);
+    assert.deepEqual(result.contributors, ['#101:patch:develop', '#102:minor:develop']);
+  } finally {
+    global.fetch = originalFetch;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('git-flow develop resolution never creates a public release tag', async () => {
+  const { root, repo } = setupRepo();
+  try {
+    commit(repo, 'base');
+    git(repo, 'branch', 'develop');
+    git(repo, 'checkout', 'develop');
+    const sha = commit(repo, 'integration change');
+    configureGitFlow(repo);
+    const result = await policy.resolveTrusted({ repository: 'owner/repo', head: sha, branch: 'develop', token: 'unused', cwd: repo });
+    assert.equal(result.bump, 'none');
+    assert.equal(result.tag_required, false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('git-flow direct hotfix ignores unrelated unpromoted develop work', async () => {
+  const { root, repo } = setupRepo();
+  const originalFetch = global.fetch;
+  try {
+    const base = commit(repo, 'base');
+    git(repo, 'tag', '-a', 'v2.0.0', base, '-m', 'base');
+    git(repo, 'branch', 'develop');
+    git(repo, 'checkout', 'develop');
+    const unreleased = commit(repo, 'unreleased feature');
+    git(repo, 'push', 'origin', 'develop', '--tags');
+    git(repo, 'checkout', 'main');
+    const hotfix = commit(repo, 'urgent hotfix');
+    git(repo, 'push', 'origin', 'main');
+    configureGitFlow(repo);
+
+    global.fetch = mockAssociatedPulls(new Map([
+      [unreleased, [mergedPr(301, '+semver: minor', 'develop', 'feature-301')]],
+      [hotfix, [mergedPr(302, '+semver: patch', 'main', 'hotfix-302')]],
+    ]));
+
+    const result = await policy.resolveTrusted({ repository: 'owner/repo', head: hotfix, branch: 'main', token: 'test', cwd: repo });
+    assert.equal(result.bump, 'patch');
+    assert.equal(result.version, '2.0.1');
+    assert.deepEqual(result.intents, ['patch']);
+  } finally {
+    global.fetch = originalFetch;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('git-flow promotion refuses stale develop missing current released ancestry', async () => {
+  const { root, repo } = setupRepo();
+  const originalFetch = global.fetch;
+  try {
+    const base = commit(repo, 'base');
+    git(repo, 'tag', '-a', 'v3.0.0', base, '-m', 'base');
+    git(repo, 'branch', 'develop');
+    git(repo, 'checkout', 'develop');
+    const feature = commit(repo, 'feature');
+    git(repo, 'push', 'origin', 'develop');
+    git(repo, 'checkout', 'main');
+    const hotfix = commit(repo, 'released hotfix');
+    git(repo, 'tag', '-a', 'v3.0.1', hotfix, '-m', 'hotfix release');
+    git(repo, 'push', 'origin', 'main', '--tags');
+    git(repo, 'merge', '--no-ff', 'develop', '-m', 'stale promotion');
+    const promotion = git(repo, 'rev-parse', 'HEAD');
+    git(repo, 'push', 'origin', 'main');
+    configureGitFlow(repo);
+
+    global.fetch = mockAssociatedPulls(new Map([
+      [feature, [mergedPr(401, '+semver: minor', 'develop', 'feature-401')]],
+      [promotion, [mergedPr(402, '', 'main', 'develop')]],
+    ]));
+
+    await assert.rejects(
+      policy.resolveTrusted({ repository: 'owner/repo', head: promotion, branch: 'main', token: 'test', cwd: repo }),
+      /does not contain current released history v3\.0\.1/,
+    );
   } finally {
     global.fetch = originalFetch;
     fs.rmSync(root, { recursive: true, force: true });
