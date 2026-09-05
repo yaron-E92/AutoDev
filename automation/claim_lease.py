@@ -28,10 +28,12 @@ from automation.claim_repository import (
     _delete_with_lease,
     _new_claim,
     _push_with_lease,
+    _stable_claim_parent,
     claim_expired,
     get_claim,
     list_claims,
 )
+
 
 def acquire_claim(
     repo: Path,
@@ -113,6 +115,7 @@ def acquire_claim(
         detail="distributed claim race was won by another worker",
     )
 
+
 def renew_claim(
     repo: Path,
     claim: Claim,
@@ -131,7 +134,8 @@ def renew_claim(
         heartbeat_at=_iso(current),
         lease_seconds=claim.lease_seconds,
     )
-    sha = _create_claim_commit(repo, claim.sha, metadata, runner=runner)
+    parent_sha = _stable_claim_parent(repo, claim, runner=runner)
+    sha = _create_claim_commit(repo, parent_sha, metadata, runner=runner)
     if not _push_with_lease(
         repo,
         ref=claim.ref,
@@ -141,6 +145,7 @@ def renew_claim(
     ):
         return None
     return replace(claim, heartbeat_at=_iso(current), sha=sha)
+
 
 def release_claim(
     repo: Path,
@@ -155,6 +160,7 @@ def release_claim(
         return False
     return _delete_with_lease(repo, current, runner=runner)
 
+
 def active_claims(
     repo: Path,
     *,
@@ -166,6 +172,7 @@ def active_claims(
     if include_stale:
         return claims
     return tuple(item for item in claims if not claim_expired(item, now=now))
+
 
 class HeartbeatLease:
     def __init__(
