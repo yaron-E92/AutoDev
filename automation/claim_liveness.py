@@ -220,9 +220,19 @@ def progress_snapshot(
     state = _read_json(current / "state.json")
     manifest = _read_json(current / run_manifest.MANIFEST_NAME)
 
+    state_issue = int(state.get("IssueNumber", 0) or 0)
+    same_state_issue = not state_issue or state_issue == issue_number
+    target = manifest.get("target")
+    target_issue = (
+        int(target.get("issue_number", 0) or 0)
+        if isinstance(target, dict)
+        else 0
+    )
+    same_manifest_issue = not target_issue or target_issue == issue_number
+
     state_progress = _state_progress(state, issue_number)
     manifest_progress = _manifest_progress(manifest, issue_number)
-    branch = str(state.get("BranchName", "") or "")
+    branch = str(state.get("BranchName", "") or "") if same_state_issue else ""
     branch_head = _branch_head(repo, branch, runner=runner)
 
     payload = {
@@ -240,22 +250,29 @@ def progress_snapshot(
     ).encode("utf-8")
     identity = hashlib.sha256(encoded).hexdigest()
 
-    status = str(
-        state.get("Status", "")
-        or state.get("QueueState", "")
-        or manifest.get("current_stage", "")
-        or "none"
-    )
+    if not same_state_issue or not same_manifest_issue:
+        status = "different-issue"
+    else:
+        status = str(
+            state.get("Status", "")
+            or state.get("QueueState", "")
+            or manifest.get("current_stage", "")
+            or "none"
+        )
     completed = manifest_progress.get("completed_stages", [])
     completed_count = len(completed) if isinstance(completed, list) else 0
-    head = branch_head.get("remote") or branch_head.get("local") or str(
-        state.get("LastCommitSha", "") or ""
+    head = branch_head.get("remote") or branch_head.get("local") or (
+        str(state.get("LastCommitSha", "") or "") if same_state_issue else ""
     )
-    pr_number = int(state.get("PrNumber", 0) or 0)
+    pr_number = int(state.get("PrNumber", 0) or 0) if same_state_issue else 0
     summary = (
         f"status={status}; completed={completed_count}; "
         f"head={(head[:12] if head else 'none')}; "
         f"pr={(pr_number if pr_number > 0 else 'none')}; progress={identity[:12]}"
     )
-    terminal = _normalized_state(status) in _TERMINAL_STATES
+    terminal = (
+        same_state_issue
+        and same_manifest_issue
+        and _normalized_state(status) in _TERMINAL_STATES
+    )
     return ProgressSnapshot(identity=identity, summary=summary[:240], terminal=terminal)
