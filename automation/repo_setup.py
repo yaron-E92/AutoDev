@@ -92,14 +92,6 @@ def _json_text(value: object) -> str:
     return json.dumps(value, indent=2, sort_keys=True) + "\n"
 
 
-def _write_if_missing(path: Path, content: str, created: list[str]) -> None:
-    if path.exists():
-        return
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
-    created.append(path.relative_to(path.parents[1]).as_posix() if len(path.parents) > 1 else path.as_posix())
-
-
 def _record_relative(repo: Path, path: Path) -> str:
     try:
         return path.relative_to(repo).as_posix()
