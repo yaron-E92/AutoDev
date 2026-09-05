@@ -151,9 +151,10 @@ def assert_resume_compatible(
     persisted_strategy = str(state.get("DevelopmentStrategy", "") or "").strip()
     persisted_integration = str(state.get("IntegrationBranch", "") or "").strip()
     persisted_release = str(state.get("ReleaseBranch", "") or "").strip()
+    explicit_base = bool(state.get("BaseOverride", False))
 
     mismatches: list[str] = []
-    if persisted_base and persisted_base != policy.normal_work_branch:
+    if persisted_base and not explicit_base and persisted_base != policy.normal_work_branch:
         mismatches.append(
             f"prepared base={persisted_base!r}, effective normal-work branch={policy.normal_work_branch!r}"
         )
