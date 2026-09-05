@@ -64,6 +64,13 @@ def ensure_prepared_issue(
     existing = read_json(current / "state.json")
     current_issue = int(existing.get("IssueNumber", 0) or 0) if isinstance(existing, dict) else 0
     if current.is_dir() and requested_issue and current_issue == requested_issue:
+        try:
+            development_policy.assert_resume_compatible(repo, existing, default_branch="main")
+        except development_policy.DevelopmentPolicyError as exc:
+            raise WorkflowStageError(
+                str(exc),
+                classification="setup/configuration",
+            ) from exc
         return current
     if requested_issue == 0:
         raise WorkflowStageError("no prepared AutoDev issue is available; pass an issue number")
