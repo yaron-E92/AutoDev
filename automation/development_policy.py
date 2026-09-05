@@ -4,6 +4,7 @@ import json
 import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Mapping
 
 
 REPO_CONFIG = Path(".autodev") / "repo.json"
@@ -136,3 +137,49 @@ def normal_work_branch(
     if override:
         return validate_branch_name(override, field="explicit base branch")
     return load_development_policy(repo, default_branch=default_branch).normal_work_branch
+
+
+def assert_resume_compatible(
+    repo: Path,
+    state: Mapping[str, object],
+    *,
+    default_branch: str = "main",
+) -> DevelopmentPolicy:
+    """Refuse to reinterpret an already-prepared run after branch policy changes."""
+    policy = load_development_policy(repo, default_branch=default_branch)
+    persisted_base = str(state.get("Base", "") or "").strip()
+    persisted_strategy = str(state.get("DevelopmentStrategy", "") or "").strip()
+    persisted_integration = str(state.get("IntegrationBranch", "") or "").strip()
+    persisted_release = str(state.get("ReleaseBranch", "") or "").strip()
+
+    mismatches: list[str] = []
+    if persisted_base and persisted_base != policy.normal_work_branch:
+        mismatches.append(
+            f"prepared base={persisted_base!r}, effective normal-work branch={policy.normal_work_branch!r}"
+        )
+    if persisted_strategy and persisted_strategy != policy.strategy:
+        mismatches.append(
+            f"prepared strategy={persisted_strategy!r}, effective strategy={policy.strategy!r}"
+        )
+    if persisted_integration and persisted_integration != policy.integration_branch:
+        mismatches.append(
+            f"prepared integration={persisted_integration!r}, effective integration={policy.integration_branch!r}"
+        )
+    if persisted_release and persisted_release != policy.release_branch:
+        mismatches.append(
+            f"prepared release={persisted_release!r}, effective release={policy.release_branch!r}"
+        )
+    if mismatches:
+        raise DevelopmentPolicyError(
+            "active AutoDev run is incompatible with the current repository development strategy: "
+            + "; ".join(mismatches)
+            + ". Finish/recover the prepared run under its original policy or explicitly restart it after inspecting existing branch/PR state."
+        )
+    return policy
+
+
+def describe(policy: DevelopmentPolicy) -> str:
+    return (
+        f"strategy={policy.strategy} integration={policy.integration_branch} "
+        f"release={policy.release_branch} normal-pr-target={policy.normal_work_branch}"
+    )
