@@ -13,7 +13,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
-from automation import local_verification, ux_role_context
+from automation import local_verification
 from automation.semantic_contract import SemanticVerifierError
 from automation.semantic_invocation import prepare_semantic_repair_prompt
 from automation.semantic_prompts import extract_acceptance_criteria
@@ -32,7 +32,6 @@ from automation.workflow_storage import (
     write_state,
     write_text,
 )
-
 
 def resolve_profiles(
     labels: list[str],
@@ -117,32 +116,23 @@ def resolve_profiles(
         )
     return profiles_csv, local_check, stack_context
 
-
 def render_implementer_prompt(repo: Path, current: Path, state: dict[str, object], autodev_root: Path) -> None:
     plan = read_text(current / "plan.md")
     if not plan.strip():
         raise WorkflowStageError("cannot render implementer prompt because plan.md is missing")
-    issue_text = read_text(current / "issue.md") or str(state.get("IssueText", ""))
     template = read_text(autodev_root / "promptTemplates" / "implementer.md")
     prompt = render_template(
         template,
         {
-            "IssueText": issue_text,
+            "IssueText": read_text(current / "issue.md") or str(state.get("IssueText", "")),
             "Plan": plan,
             "LocalCheck": str(state.get("LocalCheck", "")),
             "StackContext": str(state.get("StackContext", "")),
         },
     )
-    try:
-        ux_prompt, _ = ux_role_context.prepare_role_context(repo, current, "implementer", issue_text)
-    except ux_role_context.UXRoleContextError as exc:
-        raise WorkflowStageError(str(exc), classification="setup/configuration") from exc
-    if ux_prompt:
-        prompt = prompt.rstrip() + ux_prompt + "\n"
     write_text(current / "implementer.md", prompt)
     state["Status"] = "ImplementerPromptRendered"
     write_state(current, state)
-
 
 def render_ci_repair(current: Path, state: dict[str, object], autodev_root: Path) -> None:
     prompt = render_template(
@@ -156,7 +146,6 @@ def render_ci_repair(current: Path, state: dict[str, object], autodev_root: Path
         },
     )
     write_text(current / "ci-repair.md", prompt)
-
 
 def commit_message(current: Path, state: dict[str, object]) -> str:
     lines = read_text(current / "commit-message.txt").splitlines()
