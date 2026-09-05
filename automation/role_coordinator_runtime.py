@@ -38,13 +38,8 @@ from automation.role_coordinator_state import (
 
 def _ux_role_prompt(repo: Path, role: str) -> str:
     current = repo / workflow_stages.CURRENT_DIR
-    state = workflow_stages.read_state(current)
     issue_path = current / "issue.md"
-    issue_text = (
-        issue_path.read_text(encoding="utf-8")
-        if issue_path.is_file()
-        else str(state.get("IssueText", ""))
-    )
+    issue_text = issue_path.read_text(encoding="utf-8") if issue_path.is_file() else ""
     try:
         prompt, _ = ux_role_context.prepare_role_context(
             repo,
