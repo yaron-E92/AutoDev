@@ -55,6 +55,12 @@ def _ux_role_prompt(repo: Path, role: str) -> str:
     return prompt
 
 
+def _with_ux_prompt(prompt: str, ux_prompt: str) -> str:
+    if not ux_prompt:
+        return prompt
+    return prompt.rstrip() + ux_prompt + "\n"
+
+
 def _accept_role(
     repo: Path,
     role: str,
@@ -273,8 +279,7 @@ def run_role(
     if repair_kind:
         prompt += f" The prepared repair kind is {repair_kind}."
     ux_prompt = _ux_role_prompt(repo, role)
-    if ux_prompt:
-        prompt = prompt.rstrip() + ux_prompt + "\n"
+    prompt = _with_ux_prompt(prompt, ux_prompt)
     initial = _invoke(
         runtime,
         repo,
@@ -324,11 +329,15 @@ def run_role(
                 diagnostic_path=last_diagnostic,
             ) from first_error
 
+        correction_prompt = _with_ux_prompt(
+            CORRECTION_PROMPT.format(role=role),
+            ux_prompt,
+        )
         correction_result = _invoke(
             runtime,
             repo,
             role,
-            CORRECTION_PROMPT.format(role=role),
+            correction_prompt,
             phase="correction",
             repair_kind=repair_kind,
             runner=runner,
