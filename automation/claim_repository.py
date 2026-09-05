@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Callable, TextIO
 
 from automation.claim_contract import (
+    CLAIM_LIVENESS_ACTIVE,
+    CLAIM_LIVENESS_STALLED,
     CLAIM_MESSAGE,
     CLAIM_REF_PREFIX,
     CLAIM_SCHEMA,
@@ -61,6 +63,15 @@ def _parse_claim_message(message: str, *, ref: str, sha: str) -> Claim:
         raise ClaimError(f"remote AutoDev claim metadata is invalid JSON: {ref}") from exc
     if not isinstance(raw, dict) or raw.get("schema_version") != CLAIM_SCHEMA:
         raise ClaimError(f"unsupported AutoDev claim schema on {ref}")
+
+    progress_id = str(raw.get("progress_id", "") or "")
+    progress_at = str(raw.get("progress_at", "") or "")
+    progress_summary = str(raw.get("progress_summary", "") or "")[:240]
+    no_progress_attempts = int(raw.get("no_progress_attempts", 0) or 0)
+    liveness_state = str(
+        raw.get("liveness_state", CLAIM_LIVENESS_ACTIVE) or CLAIM_LIVENESS_ACTIVE
+    ).casefold()
+
     claim = Claim(
         repository=str(raw.get("repository", "")),
         issue_number=int(raw.get("issue_number", 0) or 0),
@@ -72,6 +83,11 @@ def _parse_claim_message(message: str, *, ref: str, sha: str) -> Claim:
         lease_seconds=int(raw.get("lease_seconds", 0) or 0),
         ref=ref,
         sha=sha,
+        progress_id=progress_id,
+        progress_at=progress_at,
+        progress_summary=progress_summary,
+        no_progress_attempts=no_progress_attempts,
+        liveness_state=liveness_state,
     )
     if claim.issue_number <= 0 or claim.ref != claim_ref(claim.issue_number):
         raise ClaimError(f"claim issue/ref identity mismatch on {ref}")
@@ -79,8 +95,16 @@ def _parse_claim_message(message: str, *, ref: str, sha: str) -> Claim:
         raise ClaimError(f"claim metadata is incomplete on {ref}")
     if claim.lease_seconds <= 0:
         raise ClaimError(f"claim lease is invalid on {ref}")
+    if claim.progress_id and not re.fullmatch(r"[0-9a-f]{64}", claim.progress_id):
+        raise ClaimError(f"claim durable progress identity is invalid on {ref}")
+    if claim.no_progress_attempts < 0:
+        raise ClaimError(f"claim no-progress attempt count is invalid on {ref}")
+    if claim.liveness_state not in {CLAIM_LIVENESS_ACTIVE, CLAIM_LIVENESS_STALLED}:
+        raise ClaimError(f"claim liveness state is invalid on {ref}")
     _parse_time(claim.acquired_at)
     _parse_time(claim.heartbeat_at)
+    if claim.progress_at:
+        _parse_time(claim.progress_at)
     return claim
 
 
@@ -230,6 +254,11 @@ def _claim_metadata(
     acquired_at: str,
     heartbeat_at: str,
     lease_seconds: int,
+    progress_id: str = "",
+    progress_at: str = "",
+    progress_summary: str = "",
+    no_progress_attempts: int = 0,
+    liveness_state: str = CLAIM_LIVENESS_ACTIVE,
 ) -> dict[str, object]:
     return {
         "schema_version": CLAIM_SCHEMA,
@@ -241,6 +270,11 @@ def _claim_metadata(
         "acquired_at": acquired_at,
         "heartbeat_at": heartbeat_at,
         "lease_seconds": lease_seconds,
+        "progress_id": progress_id,
+        "progress_at": progress_at,
+        "progress_summary": progress_summary[:240],
+        "no_progress_attempts": no_progress_attempts,
+        "liveness_state": liveness_state,
     }
 
 
@@ -299,6 +333,9 @@ def _new_claim(
     lease_minutes: int,
     runner: Callable[..., object],
     now: datetime,
+    progress_id: str = "",
+    progress_at: str = "",
+    progress_summary: str = "",
 ) -> Claim:
     ref = claim_ref(issue_number)
     acquired = _iso(now)
@@ -313,6 +350,11 @@ def _new_claim(
         acquired_at=acquired,
         heartbeat_at=acquired,
         lease_seconds=lease_minutes * 60,
+        progress_id=progress_id,
+        progress_at=progress_at or acquired,
+        progress_summary=progress_summary,
+        no_progress_attempts=0,
+        liveness_state=CLAIM_LIVENESS_ACTIVE,
     )
     parent = _base_commit(repo, base_ref, runner=runner)
     sha = _create_claim_commit(repo, parent, metadata, runner=runner)
@@ -327,4 +369,9 @@ def _new_claim(
         lease_seconds=lease_minutes * 60,
         ref=ref,
         sha=sha,
+        progress_id=progress_id,
+        progress_at=progress_at or acquired,
+        progress_summary=progress_summary[:240],
+        no_progress_attempts=0,
+        liveness_state=CLAIM_LIVENESS_ACTIVE,
     )
