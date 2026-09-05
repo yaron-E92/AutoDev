@@ -12,15 +12,22 @@ from automation.claim_contract import (
     ClaimPolicy,
     DEFAULT_LEASE_MINUTES,
     DEFAULT_MAX_CONCURRENT_ISSUES,
+    DEFAULT_MAX_NO_PROGRESS_ATTEMPTS,
+    DEFAULT_MAX_NO_PROGRESS_MINUTES,
     MAX_CONCURRENT_ISSUES,
     MAX_LEASE_MINUTES,
+    MAX_MAX_NO_PROGRESS_ATTEMPTS,
+    MAX_MAX_NO_PROGRESS_MINUTES,
     MIN_LEASE_MINUTES,
+    MIN_MAX_NO_PROGRESS_ATTEMPTS,
+    MIN_MAX_NO_PROGRESS_MINUTES,
     WORKER_ID_ENV,
     WORKER_SCHEMA,
     WORKER_STATE,
     WorkerIdentity,
     _WORKER_ID,
 )
+
 
 def _validate_worker_id(value: str) -> str:
     worker_id = value.strip()
@@ -30,8 +37,10 @@ def _validate_worker_id(value: str) -> str:
         )
     return worker_id
 
+
 def worker_state_path(*, home: Path | None = None) -> Path:
     return (home or Path.home()).expanduser().resolve() / WORKER_STATE
+
 
 def set_worker_identity(worker_id: str, *, home: Path | None = None) -> WorkerIdentity:
     identity = WorkerIdentity(_validate_worker_id(worker_id))
@@ -44,6 +53,7 @@ def set_worker_identity(worker_id: str, *, home: Path | None = None) -> WorkerId
     )
     temporary.replace(path)
     return identity
+
 
 def worker_identity(*, home: Path | None = None, create: bool = True) -> WorkerIdentity:
     override = os.environ.get(WORKER_ID_ENV, "").strip()
@@ -63,6 +73,24 @@ def worker_identity(*, home: Path | None = None, create: bool = True) -> WorkerI
     generated = f"worker-{uuid.uuid4().hex[:12]}"
     return set_worker_identity(generated, home=home)
 
+
+def _policy_int(
+    raw: dict[str, object],
+    key: str,
+    default: int,
+    minimum: int,
+    maximum: int,
+) -> int:
+    value = raw.get(key, default)
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise ClaimError(f"queue policy {key} must be an integer")
+    if not minimum <= value <= maximum:
+        raise ClaimError(
+            f"queue policy {key} must be between {minimum} and {maximum}"
+        )
+    return value
+
+
 def load_claim_policy(repo: Path) -> ClaimPolicy:
     repo = repo.expanduser().resolve()
     # Keep the queue parser authoritative for core policy validity while allowing
@@ -77,18 +105,38 @@ def load_claim_policy(repo: Path) -> ClaimPolicy:
         raise ClaimError(f"invalid queue policy JSON: {path}") from exc
     if not isinstance(raw, dict):
         raise ClaimError(f"queue policy must be a JSON object: {path}")
-    concurrency = raw.get("max_concurrent_issues", DEFAULT_MAX_CONCURRENT_ISSUES)
-    lease = raw.get("claim_lease_minutes", DEFAULT_LEASE_MINUTES)
-    if not isinstance(concurrency, int) or isinstance(concurrency, bool):
-        raise ClaimError("queue policy max_concurrent_issues must be an integer")
-    if not 1 <= concurrency <= MAX_CONCURRENT_ISSUES:
-        raise ClaimError(
-            f"queue policy max_concurrent_issues must be between 1 and {MAX_CONCURRENT_ISSUES}"
-        )
-    if not isinstance(lease, int) or isinstance(lease, bool):
-        raise ClaimError("queue policy claim_lease_minutes must be an integer")
-    if not MIN_LEASE_MINUTES <= lease <= MAX_LEASE_MINUTES:
-        raise ClaimError(
-            f"queue policy claim_lease_minutes must be between {MIN_LEASE_MINUTES} and {MAX_LEASE_MINUTES}"
-        )
-    return ClaimPolicy(max_concurrent_issues=concurrency, lease_minutes=lease)
+
+    concurrency = _policy_int(
+        raw,
+        "max_concurrent_issues",
+        DEFAULT_MAX_CONCURRENT_ISSUES,
+        1,
+        MAX_CONCURRENT_ISSUES,
+    )
+    lease = _policy_int(
+        raw,
+        "claim_lease_minutes",
+        DEFAULT_LEASE_MINUTES,
+        MIN_LEASE_MINUTES,
+        MAX_LEASE_MINUTES,
+    )
+    no_progress_attempts = _policy_int(
+        raw,
+        "claim_max_no_progress_attempts",
+        DEFAULT_MAX_NO_PROGRESS_ATTEMPTS,
+        MIN_MAX_NO_PROGRESS_ATTEMPTS,
+        MAX_MAX_NO_PROGRESS_ATTEMPTS,
+    )
+    no_progress_minutes = _policy_int(
+        raw,
+        "claim_max_no_progress_minutes",
+        DEFAULT_MAX_NO_PROGRESS_MINUTES,
+        MIN_MAX_NO_PROGRESS_MINUTES,
+        MAX_MAX_NO_PROGRESS_MINUTES,
+    )
+    return ClaimPolicy(
+        max_concurrent_issues=concurrency,
+        lease_minutes=lease,
+        max_no_progress_attempts=no_progress_attempts,
+        max_no_progress_minutes=no_progress_minutes,
+    )
