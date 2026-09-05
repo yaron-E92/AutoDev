@@ -2,18 +2,22 @@ from __future__ import annotations
 
 import subprocess
 import threading
-from dataclasses import asdict, dataclass, replace
-from datetime import datetime, timedelta, timezone
+from dataclasses import replace
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, TextIO
+from typing import Callable
 
+from automation import claim_liveness
 from automation.claim_contract import (
+    CLAIM_LIVENESS_ACTIVE,
+    CLAIM_LIVENESS_STALLED,
     Claim,
     ClaimAttempt,
     ClaimError,
     ClaimPolicy,
     _iso,
     _now,
+    _parse_time,
 )
 from automation.claim_identity import (
     _validate_worker_id,
@@ -35,6 +39,160 @@ from automation.claim_repository import (
 )
 
 
+def _replace_claim_state(
+    repo: Path,
+    claim: Claim,
+    *,
+    heartbeat_at: str,
+    progress_id: str,
+    progress_at: str,
+    progress_summary: str,
+    no_progress_attempts: int,
+    liveness_state: str,
+    runner: Callable[..., object],
+) -> Claim | None:
+    metadata = _claim_metadata(
+        github_repo=claim.repository,
+        issue_number=claim.issue_number,
+        worker_id=claim.worker_id,
+        run_id=claim.run_id,
+        claim_id=claim.claim_id,
+        acquired_at=claim.acquired_at,
+        heartbeat_at=heartbeat_at,
+        lease_seconds=claim.lease_seconds,
+        progress_id=progress_id,
+        progress_at=progress_at,
+        progress_summary=progress_summary,
+        no_progress_attempts=no_progress_attempts,
+        liveness_state=liveness_state,
+    )
+    parent_sha = _stable_claim_parent(repo, claim, runner=runner)
+    sha = _create_claim_commit(repo, parent_sha, metadata, runner=runner)
+    if not _push_with_lease(
+        repo,
+        ref=claim.ref,
+        new_sha=sha,
+        expected_sha=claim.sha,
+        runner=runner,
+    ):
+        return None
+    return replace(
+        claim,
+        heartbeat_at=heartbeat_at,
+        sha=sha,
+        progress_id=progress_id,
+        progress_at=progress_at,
+        progress_summary=progress_summary[:240],
+        no_progress_attempts=no_progress_attempts,
+        liveness_state=liveness_state,
+    )
+
+
+def _stalled_detail(
+    claim: Claim,
+    snapshot: claim_liveness.ProgressSnapshot,
+    *,
+    policy: ClaimPolicy,
+) -> str:
+    progress_at = claim.progress_at or claim.acquired_at
+    return (
+        f"RUN_STALLED issue #{claim.issue_number}; "
+        f"claim owner={claim.worker_id}; claim={claim.claim_id}; run={claim.run_id}; "
+        f"last durable progress={progress_at}; "
+        f"no-progress attempts={claim.no_progress_attempts}/"
+        f"{policy.max_no_progress_attempts}; "
+        f"progress={claim.progress_id[:12] or 'legacy'}; "
+        f"{snapshot.summary}; "
+        f"recovery: inspect the dedicated worker and run `autodev resume` there "
+        f"manually while the stalled claim continues to protect the issue; once "
+        f"durable progress changes, the owning worker may renew it. Do not delete "
+        f"the remote claim ref by hand."
+    )
+
+
+def _stalled_protected_detail(claim: Claim) -> str:
+    return (
+        f"issue #{claim.issue_number} has a stalled distributed claim owned by "
+        f"{claim.worker_id}; claim={claim.claim_id}; run={claim.run_id}; "
+        f"last durable progress={claim.progress_at or claim.acquired_at}; "
+        f"no-progress attempts={claim.no_progress_attempts}; "
+        f"progress={claim.progress_id[:12] or 'legacy'}; "
+        f"the claim remains protected until the owning run advances or reaches a "
+        f"terminal state through supported AutoDev recovery"
+    )
+
+
+def _progress_snapshot(
+    repo: Path,
+    issue_number: int,
+    *,
+    runner: Callable[..., object],
+    progress_inspector: Callable[[Path, int], claim_liveness.ProgressSnapshot] | None,
+) -> claim_liveness.ProgressSnapshot:
+    if progress_inspector is not None:
+        return progress_inspector(repo, issue_number)
+    return claim_liveness.progress_snapshot(repo, issue_number, runner=runner)
+
+
+def _renew_for_scheduler_tick(
+    repo: Path,
+    claim: Claim,
+    snapshot: claim_liveness.ProgressSnapshot,
+    *,
+    policy: ClaimPolicy,
+    runner: Callable[..., object],
+    now: datetime,
+) -> Claim | None:
+    now_text = _iso(now)
+    if not claim.progress_id or claim.progress_id != snapshot.identity:
+        return _replace_claim_state(
+            repo,
+            claim,
+            heartbeat_at=now_text,
+            progress_id=snapshot.identity,
+            progress_at=now_text,
+            progress_summary=snapshot.summary,
+            no_progress_attempts=0,
+            liveness_state=CLAIM_LIVENESS_ACTIVE,
+            runner=runner,
+        )
+
+    progress_at = claim.progress_at or claim.acquired_at
+    elapsed = now - _parse_time(progress_at)
+    attempts = claim.no_progress_attempts + 1
+    elapsed_minutes = max(0.0, elapsed.total_seconds() / 60.0)
+    if (
+        attempts >= policy.max_no_progress_attempts
+        or elapsed_minutes >= policy.max_no_progress_minutes
+    ):
+        stalled = _replace_claim_state(
+            repo,
+            claim,
+            heartbeat_at=claim.heartbeat_at,
+            progress_id=snapshot.identity,
+            progress_at=progress_at,
+            progress_summary=snapshot.summary,
+            no_progress_attempts=attempts,
+            liveness_state=CLAIM_LIVENESS_STALLED,
+            runner=runner,
+        )
+        if stalled is None:
+            return None
+        raise ClaimError(_stalled_detail(stalled, snapshot, policy=policy))
+
+    return _replace_claim_state(
+        repo,
+        claim,
+        heartbeat_at=now_text,
+        progress_id=snapshot.identity,
+        progress_at=progress_at,
+        progress_summary=snapshot.summary,
+        no_progress_attempts=attempts,
+        liveness_state=CLAIM_LIVENESS_ACTIVE,
+        runner=runner,
+    )
+
+
 def acquire_claim(
     repo: Path,
     github_repo: str,
@@ -46,20 +204,64 @@ def acquire_claim(
     runner: Callable[..., object] = subprocess.run,
     now: datetime | None = None,
     evidence_checker: Callable[[Path, str, int], tuple[str, ...]] | None = None,
+    progress_inspector: Callable[[Path, int], claim_liveness.ProgressSnapshot] | None = None,
 ) -> ClaimAttempt:
     repo = repo.expanduser().resolve()
     worker_id = _validate_worker_id(worker_id)
     current = (now or _now()).astimezone(timezone.utc)
     claim_policy = policy or load_claim_policy(repo)
+    snapshot = _progress_snapshot(
+        repo,
+        issue_number,
+        runner=runner,
+        progress_inspector=progress_inspector,
+    )
     existing = get_claim(repo, issue_number, runner=runner)
     if existing is not None:
         if existing.repository != github_repo:
             raise ClaimError(
                 f"claim repository identity mismatch on {existing.ref}: {existing.repository!r}"
             )
+
+        if existing.liveness_state == CLAIM_LIVENESS_STALLED:
+            if existing.worker_id != worker_id:
+                return ClaimAttempt(
+                    "STALE_PROTECTED",
+                    owner=existing,
+                    detail=_stalled_protected_detail(existing),
+                )
+            if existing.progress_id != snapshot.identity:
+                renewed = _replace_claim_state(
+                    repo,
+                    existing,
+                    heartbeat_at=_iso(current),
+                    progress_id=snapshot.identity,
+                    progress_at=_iso(current),
+                    progress_summary=snapshot.summary,
+                    no_progress_attempts=0,
+                    liveness_state=CLAIM_LIVENESS_ACTIVE,
+                    runner=runner,
+                )
+                if renewed is not None:
+                    return ClaimAttempt("OWNED", claim=renewed, owner=renewed)
+                winner = get_claim(repo, issue_number, runner=runner)
+                return ClaimAttempt(
+                    "BUSY",
+                    owner=winner,
+                    detail="stalled-claim recovery race was won by another worker",
+                )
+            raise ClaimError(_stalled_detail(existing, snapshot, policy=claim_policy))
+
         if not claim_expired(existing, now=current):
             if existing.worker_id == worker_id:
-                renewed = renew_claim(repo, existing, runner=runner, now=current)
+                renewed = _renew_for_scheduler_tick(
+                    repo,
+                    existing,
+                    snapshot,
+                    policy=claim_policy,
+                    runner=runner,
+                    now=current,
+                )
                 if renewed is not None:
                     return ClaimAttempt("OWNED", claim=renewed, owner=renewed)
             return ClaimAttempt(
@@ -99,6 +301,9 @@ def acquire_claim(
         lease_minutes=claim_policy.lease_minutes,
         runner=runner,
         now=current,
+        progress_id=snapshot.identity,
+        progress_at=_iso(current),
+        progress_summary=snapshot.summary,
     )
     if _push_with_lease(
         repo,
@@ -122,29 +327,36 @@ def renew_claim(
     *,
     runner: Callable[..., object] = subprocess.run,
     now: datetime | None = None,
+    progress_id: str | None = None,
+    progress_at: str | None = None,
+    progress_summary: str | None = None,
+    no_progress_attempts: int | None = None,
+    liveness_state: str | None = None,
 ) -> Claim | None:
+    target_state = liveness_state or claim.liveness_state
+    if claim.liveness_state == CLAIM_LIVENESS_STALLED and target_state == CLAIM_LIVENESS_STALLED:
+        raise ClaimError(
+            f"refusing to extend heartbeat for stalled claim on issue #{claim.issue_number}; "
+            "advance/recover the durable run first"
+        )
     current = (now or _now()).astimezone(timezone.utc)
-    metadata = _claim_metadata(
-        github_repo=claim.repository,
-        issue_number=claim.issue_number,
-        worker_id=claim.worker_id,
-        run_id=claim.run_id,
-        claim_id=claim.claim_id,
-        acquired_at=claim.acquired_at,
-        heartbeat_at=_iso(current),
-        lease_seconds=claim.lease_seconds,
-    )
-    parent_sha = _stable_claim_parent(repo, claim, runner=runner)
-    sha = _create_claim_commit(repo, parent_sha, metadata, runner=runner)
-    if not _push_with_lease(
+    return _replace_claim_state(
         repo,
-        ref=claim.ref,
-        new_sha=sha,
-        expected_sha=claim.sha,
+        claim,
+        heartbeat_at=_iso(current),
+        progress_id=claim.progress_id if progress_id is None else progress_id,
+        progress_at=claim.progress_at if progress_at is None else progress_at,
+        progress_summary=(
+            claim.progress_summary if progress_summary is None else progress_summary
+        ),
+        no_progress_attempts=(
+            claim.no_progress_attempts
+            if no_progress_attempts is None
+            else no_progress_attempts
+        ),
+        liveness_state=target_state,
         runner=runner,
-    ):
-        return None
-    return replace(claim, heartbeat_at=_iso(current), sha=sha)
+    )
 
 
 def release_claim(
