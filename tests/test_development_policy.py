@@ -102,6 +102,78 @@ class DevelopmentPolicyTests(unittest.TestCase):
                 "release/test",
             )
 
+    def test_resume_accepts_unchanged_git_flow_identity(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            (repo / ".autodev").mkdir()
+            (repo / ".autodev" / "repo.json").write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "development": {
+                            "strategy": "git-flow",
+                            "integration_branch": "develop",
+                            "release_branch": "main",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            policy = development_policy.assert_resume_compatible(
+                repo,
+                {
+                    "DevelopmentStrategy": "git-flow",
+                    "IntegrationBranch": "develop",
+                    "ReleaseBranch": "main",
+                    "Base": "develop",
+                },
+            )
+            self.assertEqual(policy.normal_work_branch, "develop")
+
+    def test_resume_rejects_strategy_or_branch_drift(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            (repo / ".autodev").mkdir()
+            config = repo / ".autodev" / "repo.json"
+            config.write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "development": {
+                            "strategy": "git-flow",
+                            "integration_branch": "develop",
+                            "release_branch": "main",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            prepared = {
+                "DevelopmentStrategy": "git-flow",
+                "IntegrationBranch": "develop",
+                "ReleaseBranch": "main",
+                "Base": "develop",
+            }
+
+            config.write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "development": {
+                            "strategy": "trunk",
+                            "integration_branch": "main",
+                            "release_branch": "main",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                development_policy.DevelopmentPolicyError,
+                "active AutoDev run is incompatible",
+            ):
+                development_policy.assert_resume_compatible(repo, prepared)
+
 
 if __name__ == "__main__":
     unittest.main()
