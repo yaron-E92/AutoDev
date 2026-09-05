@@ -78,7 +78,7 @@ class RuntimeNeutralUXContextTests(unittest.TestCase):
 
             self.assertEqual(len(runtime.invocations), 1)
             invocation = runtime.invocations[0]
-            self.assertEqual(invocation.runtime if hasattr(invocation, "runtime") else runtime.name, runtime.name)
+            self.assertEqual(invocation.role, "planner")
             self.assertIn("# Pinned UX authority", invocation.prompt)
             self.assertIn("navigation: task-first", invocation.prompt)
             prepare_ux.assert_called_once_with(
