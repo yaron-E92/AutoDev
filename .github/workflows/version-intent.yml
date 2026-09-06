@@ -9,10 +9,20 @@ on:
         type: string
         default: ''
       pr_number:
-        description: Pull request number used to fetch the current authoritative body
+        description: Pull request number used to fetch the current authoritative PR metadata
         required: false
         type: number
         default: 0
+      pr_base:
+        description: Compatibility fallback PR base branch when no PR number is available
+        required: false
+        type: string
+        default: ''
+      pr_head:
+        description: Compatibility fallback PR head branch when no PR number is available
+        required: false
+        type: string
+        default: ''
       head:
         description: Exact caller ref/SHA to inspect; defaults to caller workflow SHA
         required: false
@@ -38,6 +48,10 @@ on:
         value: ${{ jobs.version.outputs.source_sha }}
       tag_required:
         value: ${{ jobs.version.outputs.tag_required }}
+      intents:
+        value: ${{ jobs.version.outputs.intents }}
+      contributors:
+        value: ${{ jobs.version.outputs.contributors }}
 
 permissions:
   contents: read
@@ -55,9 +69,11 @@ jobs:
       tag: ${{ steps.version.outputs.tag }}
       source_sha: ${{ steps.version.outputs.source_sha }}
       tag_required: ${{ steps.version.outputs.tag_required }}
+      intents: ${{ steps.version.outputs.intents }}
+      contributors: ${{ steps.version.outputs.contributors }}
 
     steps:
-      - name: Resolve current pull request body
+      - name: Resolve current pull request metadata
         id: pr
         shell: bash
         env:
@@ -65,20 +81,29 @@ jobs:
           GH_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ inputs.pr_number || github.event.pull_request.number || 0 }}
           FALLBACK_BODY: ${{ inputs.pr_body }}
+          FALLBACK_BASE: ${{ inputs.pr_base || github.event.pull_request.base.ref || '' }}
+          FALLBACK_HEAD: ${{ inputs.pr_head || github.event.pull_request.head.ref || '' }}
         run: |
           set -euo pipefail
           body="$FALLBACK_BODY"
+          base_ref="$FALLBACK_BASE"
+          head_ref="$FALLBACK_HEAD"
           if [[ "$PR_NUMBER" != "0" ]]; then
-            if ! body="$(gh api "repos/$GH_REPO/pulls/$PR_NUMBER" --jq '.body // ""')"; then
+            if ! pr_json="$(gh api "repos/$GH_REPO/pulls/$PR_NUMBER")"; then
               echo "::error::Version intent could not read current PR #$PR_NUMBER. Grant pull-requests: read to the caller job."
               exit 1
             fi
+            body="$(jq -r '.body // ""' <<<"$pr_json")"
+            base_ref="$(jq -r '.base.ref // ""' <<<"$pr_json")"
+            head_ref="$(jq -r '.head.ref // ""' <<<"$pr_json")"
           fi
           delimiter="AUTODEV_PR_BODY_$(python -c 'import uuid; print(uuid.uuid4().hex)')"
           {
             echo "body<<$delimiter"
             printf '%s\n' "$body"
             echo "$delimiter"
+            echo "base_ref=$base_ref"
+            echo "head_ref=$head_ref"
           } >> "$GITHUB_OUTPUT"
 
       - name: Check out caller repository with full history
@@ -87,14 +112,18 @@ jobs:
           ref: ${{ inputs.head || github.sha }}
           fetch-depth: 0
 
-      - name: Validate explicit +semver intent
+      - name: Validate release intent
         id: version
-        uses: $/.github/actions/version-policy
+        uses: ./.github/actions/version-policy
         with:
           mode: check-pr
+          repository: ${{ github.repository }}
           pr-body: ${{ steps.pr.outputs.body }}
+          pr-base: ${{ steps.pr.outputs.base_ref }}
+          pr-head: ${{ steps.pr.outputs.head_ref }}
           head: ${{ inputs.head || github.sha }}
           base-version: ${{ inputs.base_version }}
+          github-token: ${{ github.token }}
 
       - name: Summarize candidate version
         shell: bash
@@ -103,14 +132,20 @@ jobs:
           BUMP: ${{ steps.version.outputs.bump }}
           VERSION: ${{ steps.version.outputs.version }}
           TAG: ${{ steps.version.outputs.tag }}
+          PR_BASE: ${{ steps.pr.outputs.base_ref }}
+          PR_HEAD: ${{ steps.pr.outputs.head_ref }}
+          CONTRIBUTORS: ${{ steps.version.outputs.contributors }}
         run: |
           {
             echo "### Version intent"
             echo
+            echo "- PR: \`$PR_HEAD -> $PR_BASE\`"
             echo "- Base tag: \`${BASE_TAG:-'(none)'}\`"
             echo "- Intent: \`$BUMP\`"
             echo "- Candidate version: \`$VERSION\`"
             echo "- Candidate tag: \`$TAG\`"
+            echo "- Contributing intents: \`${CONTRIBUTORS:-'[]'}\`"
             echo
+            echo "Git-Flow develop-to-main promotions derive their intent from promoted integration PRs when available; ordinary PRs and direct release hotfixes still require one explicit +semver directive."
             echo "This workflow is read-only. Version tags advance only after trusted main CI."
           } >> "$GITHUB_STEP_SUMMARY"

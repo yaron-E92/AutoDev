@@ -10,6 +10,14 @@ inputs:
     description: Pull request body used by check-pr mode
     required: false
     default: ''
+  pr-base:
+    description: Pull request base branch used to distinguish Git-Flow promotions from ordinary PRs
+    required: false
+    default: ''
+  pr-head:
+    description: Pull request head branch used to distinguish Git-Flow promotions from ordinary PRs
+    required: false
+    default: ''
   repository:
     description: GitHub repository in owner/name form; defaults to GITHUB_REPOSITORY
     required: false
