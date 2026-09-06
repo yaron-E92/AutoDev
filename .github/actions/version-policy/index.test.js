@@ -221,7 +221,7 @@ test('git-flow integration history aggregates one release bump at promotion', as
     global.fetch = mockAssociatedPulls(new Map([
       [patchSha, [mergedPr(101, '+semver: patch', 'develop', 'feature-101')]],
       [minorSha, [mergedPr(102, '+semver: minor', 'develop', 'feature-102')]],
-      [promotionSha, [mergedPr(200, '', 'main', 'develop')]],
+      [promotionSha, [mergedPr(200, '+semver: none', 'main', 'develop')]],
     ]));
 
     const result = await policy.resolveTrusted({ repository: 'owner/repo', head: promotionSha, branch: 'main', token: 'test', cwd: repo });
@@ -309,6 +309,150 @@ test('git-flow promotion refuses stale develop missing current released ancestry
       policy.resolveTrusted({ repository: 'owner/repo', head: promotion, branch: 'main', token: 'test', cwd: repo }),
       /does not contain current released history v3\.0\.1/,
     );
+  } finally {
+    global.fetch = originalFetch;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('git-flow promotion PR derives intent without requiring its own directive', async () => {
+  const { root, repo } = setupRepo();
+  const originalFetch = global.fetch;
+  try {
+    const base = commit(repo, 'base');
+    git(repo, 'tag', '-a', 'v4.0.0', base, '-m', 'base');
+    git(repo, 'branch', 'develop');
+    git(repo, 'checkout', 'develop');
+    const patchSha = commit(repo, 'patch feature');
+    const minorSha = commit(repo, 'minor feature');
+    configureGitFlow(repo);
+
+    global.fetch = mockAssociatedPulls(new Map([
+      [patchSha, [mergedPr(501, '+semver: patch', 'develop', 'feature-501')]],
+      [minorSha, [mergedPr(502, '+semver: minor', 'develop', 'feature-502')]],
+    ]));
+
+    const result = await policy.resolvePullRequestCandidate({
+      repository: 'owner/repo',
+      head: minorSha,
+      body: '',
+      prBase: 'main',
+      prHead: 'develop',
+      token: 'test',
+      cwd: repo,
+    });
+    assert.equal(result.bump, 'minor');
+    assert.equal(result.version, '4.1.0');
+    assert.deepEqual(result.contributors, ['#501:patch:develop', '#502:minor:develop']);
+  } finally {
+    global.fetch = originalFetch;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('git-flow promotion-level none cannot override derived integration intent', async () => {
+  const { root, repo } = setupRepo();
+  const originalFetch = global.fetch;
+  try {
+    const base = commit(repo, 'base');
+    git(repo, 'tag', '-a', 'v5.0.0', base, '-m', 'base');
+    git(repo, 'branch', 'develop');
+    git(repo, 'checkout', 'develop');
+    const minorSha = commit(repo, 'minor feature');
+    configureGitFlow(repo);
+
+    global.fetch = mockAssociatedPulls(new Map([
+      [minorSha, [mergedPr(601, '+semver: minor', 'develop', 'feature-601')]],
+    ]));
+
+    const result = await policy.resolvePullRequestCandidate({
+      repository: 'owner/repo',
+      head: minorSha,
+      body: '+semver: none',
+      prBase: 'main',
+      prHead: 'develop',
+      token: 'test',
+      cwd: repo,
+    });
+    assert.equal(result.bump, 'minor');
+    assert.equal(result.version, '5.1.0');
+    assert.deepEqual(result.intents, ['minor']);
+  } finally {
+    global.fetch = originalFetch;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('git-flow none-only integration history needs no promotion directive and creates no candidate tag', async () => {
+  const { root, repo } = setupRepo();
+  const originalFetch = global.fetch;
+  try {
+    const base = commit(repo, 'base');
+    git(repo, 'tag', '-a', 'v6.0.0', base, '-m', 'base');
+    git(repo, 'branch', 'develop');
+    git(repo, 'checkout', 'develop');
+    const noneSha = commit(repo, 'no-version feature');
+    configureGitFlow(repo);
+
+    global.fetch = mockAssociatedPulls(new Map([
+      [noneSha, [mergedPr(701, '+semver: none', 'develop', 'feature-701')]],
+    ]));
+
+    const result = await policy.resolvePullRequestCandidate({
+      repository: 'owner/repo',
+      head: noneSha,
+      body: '',
+      prBase: 'main',
+      prHead: 'develop',
+      token: 'test',
+      cwd: repo,
+    });
+    assert.equal(result.bump, 'none');
+    assert.equal(result.version, '6.0.0');
+    assert.equal(result.tag_required, false);
+  } finally {
+    global.fetch = originalFetch;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('git-flow promotion requires explicit fallback only when no integration PR contributes', async () => {
+  const { root, repo } = setupRepo();
+  const originalFetch = global.fetch;
+  try {
+    const base = commit(repo, 'base');
+    git(repo, 'tag', '-a', 'v7.0.0', base, '-m', 'base');
+    git(repo, 'branch', 'develop');
+    git(repo, 'checkout', 'develop');
+    const directSha = commit(repo, 'direct integration commit');
+    configureGitFlow(repo);
+    global.fetch = mockAssociatedPulls(new Map());
+
+    await assert.rejects(
+      policy.resolvePullRequestCandidate({
+        repository: 'owner/repo',
+        head: directSha,
+        body: '',
+        prBase: 'main',
+        prHead: 'develop',
+        token: 'test',
+        cwd: repo,
+      }),
+      /exactly one version intent is required/,
+    );
+
+    const result = await policy.resolvePullRequestCandidate({
+      repository: 'owner/repo',
+      head: directSha,
+      body: '+semver: patch',
+      prBase: 'main',
+      prHead: 'develop',
+      token: 'test',
+      cwd: repo,
+    });
+    assert.equal(result.bump, 'patch');
+    assert.equal(result.version, '7.0.1');
+    assert.deepEqual(result.contributors, ['promotion:patch:main']);
   } finally {
     global.fetch = originalFetch;
     fs.rmSync(root, { recursive: true, force: true });

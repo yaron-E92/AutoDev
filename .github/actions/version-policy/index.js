@@ -158,8 +158,16 @@ function latestReachableTag(head = 'HEAD', cwd = process.cwd(), baseVersion = '0
   return { baseTag: '', baseVersion: parseVersion(baseVersion) };
 }
 
+function commitsSince(baseTag, sourceSha, cwd) {
+  const range = baseTag ? `${baseTag}..${sourceSha}` : sourceSha;
+  return git(['rev-list', '--reverse', range], { cwd }).stdout
+    .split(/\r?\n/)
+    .map(value => value.trim())
+    .filter(Boolean);
+}
+
 async function githubJson(url, token) {
-  if (!token) throw new VersionPolicyError('github-token is required for trusted version resolution');
+  if (!token) throw new VersionPolicyError('github-token is required for GitHub-aware version resolution');
   const response = await fetch(url, {
     headers: {
       Authorization: `Bearer ${token}`,
@@ -205,6 +213,85 @@ function candidateForPr({ body, head = 'HEAD', cwd = process.cwd(), baseVersion 
   return resolutionObject({ ...base, bump: intent, version: bumpVersion(base.baseVersion, intent), sourceSha, intents: [intent] });
 }
 
+async function collectIntegrationPrIntents({ repository, head, integrationBranch, token, cwd = process.cwd(), baseVersion = '0.0.0' }) {
+  const sourceSha = revParse(head, cwd);
+  const base = latestReachableTag(sourceSha, cwd, baseVersion);
+  const intents = [];
+  const contributors = [];
+  const seenPulls = new Set();
+
+  for (const commit of commitsSince(base.baseTag, sourceSha, cwd)) {
+    const pulls = await associatedPulls(repository, commit, token);
+    const merged = pulls.filter(item => item && item.merged_at && item.base && item.base.ref === integrationBranch);
+    for (const pull of merged) {
+      const number = Number(pull.number || 0);
+      if (!number || seenPulls.has(number)) continue;
+      seenPulls.add(number);
+      const values = explicitIntents(pull.body || '');
+      if (values.length !== 1) {
+        throw new VersionPolicyError(`integration PR #${number} must contain exactly one +semver directive`);
+      }
+      intents.push(values[0]);
+      contributors.push(`#${number}:${values[0]}:${integrationBranch}`);
+    }
+  }
+
+  return { base, sourceSha, intents, contributors };
+}
+
+async function promotionCandidate({ repository, head, body, token, cwd = process.cwd(), baseVersion = '0.0.0', policy }) {
+  const collected = await collectIntegrationPrIntents({
+    repository,
+    head,
+    integrationBranch: policy.integration_branch,
+    token,
+    cwd,
+    baseVersion,
+  });
+
+  let intents = collected.intents;
+  let contributors = collected.contributors;
+  let selected;
+
+  if (intents.length > 0) {
+    const promotionValues = explicitIntents(body);
+    if (promotionValues.length > 1) {
+      throw new VersionPolicyError('Git-Flow promotion PR may omit +semver; if present, duplicate/conflicting directives are not allowed');
+    }
+    selected = highestBump(intents);
+  } else {
+    const fallback = parseExactIntent(body);
+    intents = [fallback];
+    contributors = [`promotion:${fallback}:${policy.release_branch}`];
+    selected = fallback;
+  }
+
+  return resolutionObject({
+    ...collected.base,
+    bump: selected,
+    version: bumpVersion(collected.base.baseVersion, selected),
+    sourceSha: collected.sourceSha,
+    intents,
+    contributors,
+  });
+}
+
+async function resolvePullRequestCandidate({ repository, head, body, prBase = '', prHead = '', token = '', cwd = process.cwd(), baseVersion = '0.0.0' }) {
+  const defaultBranch = prBase || 'main';
+  const policy = loadDevelopmentPolicy(cwd, defaultBranch);
+  const isPromotion = (
+    policy.strategy === 'git-flow' &&
+    prBase === policy.release_branch &&
+    prHead === policy.integration_branch
+  );
+
+  if (!isPromotion) return candidateForPr({ body, head, cwd, baseVersion });
+  if (!repository || !repository.includes('/')) {
+    throw new VersionPolicyError('repository must be supplied as owner/name to validate a Git-Flow promotion');
+  }
+  return promotionCandidate({ repository, head, body, token, cwd, baseVersion, policy });
+}
+
 async function resolveMain({ repository, head, branch = 'main', token, cwd = process.cwd(), baseVersion = '0.0.0' }) {
   git(['fetch', 'origin', branch, '--tags', '--force'], { cwd });
   const remoteHead = revParse(`origin/${branch}`, cwd);
@@ -214,13 +301,11 @@ async function resolveMain({ repository, head, branch = 'main', token, cwd = pro
     return resolutionObject({ ...base, bump: 'none', version: base.baseVersion, sourceSha, intents: [], superseded: true });
   }
 
-  const range = base.baseTag ? `${base.baseTag}..${sourceSha}` : sourceSha;
-  const commits = git(['rev-list', '--reverse', range], { cwd }).stdout.split(/\r?\n/).map(v => v.trim()).filter(Boolean);
   const intents = [];
   const contributors = [];
   const seenPulls = new Set();
 
-  for (const commit of commits) {
+  for (const commit of commitsSince(base.baseTag, sourceSha, cwd)) {
     const pulls = await associatedPulls(repository, commit, token);
     const merged = pulls.filter(item => item && item.merged_at && item.base && item.base.ref === branch);
     if (merged.length > 0) {
@@ -282,14 +367,14 @@ async function resolveGitFlowRelease({ repository, head, branch, token, cwd = pr
     return resolutionObject({ ...base, bump: 'none', version: base.baseVersion, sourceSha, intents: [], contributors: [], superseded: true });
   }
 
-  const range = base.baseTag ? `${base.baseTag}..${sourceSha}` : sourceSha;
-  const commits = git(['rev-list', '--reverse', range], { cwd }).stdout.split(/\r?\n/).map(v => v.trim()).filter(Boolean);
   const intents = [];
   const contributors = [];
   const seenPulls = new Set();
+  const promotionBodies = [];
   let promotionObserved = false;
+  let integrationIntentCount = 0;
 
-  for (const commit of commits) {
+  for (const commit of commitsSince(base.baseTag, sourceSha, cwd)) {
     const pulls = await associatedPulls(repository, commit, token);
     const relevant = pulls.filter(item => item && item.merged_at && item.base && [integrationBranch, releaseBranch].includes(item.base.ref));
     let consumedPr = false;
@@ -300,22 +385,28 @@ async function resolveGitFlowRelease({ repository, head, branch, token, cwd = pr
       consumedPr = true;
       const baseRef = String(pull.base && pull.base.ref || '');
       const headRef = String(pull.head && pull.head.ref || '');
-      const values = explicitIntents(pull.body || '');
-      if (values.length > 1) throw new VersionPolicyError(`merged PR #${number} contains duplicate/conflicting +semver directives`);
 
       if (baseRef === integrationBranch) {
+        const values = explicitIntents(pull.body || '');
         if (values.length !== 1) throw new VersionPolicyError(`integration PR #${number} must contain exactly one +semver directive`);
         intents.push(values[0]);
         contributors.push(`#${number}:${values[0]}:${integrationBranch}`);
+        integrationIntentCount += 1;
         continue;
       }
 
       if (baseRef === releaseBranch && headRef === integrationBranch) {
+        const values = explicitIntents(pull.body || '');
+        if (values.length > 1) {
+          throw new VersionPolicyError(`Git-Flow promotion PR #${number} contains duplicate/conflicting +semver directives`);
+        }
         promotionObserved = true;
+        promotionBodies.push({ number, body: pull.body || '' });
         continue;
       }
 
       if (baseRef === releaseBranch) {
+        const values = explicitIntents(pull.body || '');
         if (values.length !== 1) throw new VersionPolicyError(`direct release/hotfix PR #${number} must contain exactly one +semver directive`);
         intents.push(values[0]);
         contributors.push(`#${number}:${values[0]}:${releaseBranch}`);
@@ -333,7 +424,18 @@ async function resolveGitFlowRelease({ repository, head, branch, token, cwd = pr
     }
   }
 
-  if (promotionObserved) assertIntegrationContainsReleasedBase(policy, base.baseTag, cwd);
+  if (promotionObserved) {
+    assertIntegrationContainsReleasedBase(policy, base.baseTag, cwd);
+    if (integrationIntentCount === 0) {
+      if (promotionBodies.length !== 1) {
+        throw new VersionPolicyError('Git-Flow promotion with no contributing integration PRs requires exactly one promotion PR with an explicit +semver directive');
+      }
+      const fallback = parseExactIntent(promotionBodies[0].body);
+      intents.push(fallback);
+      contributors.push(`#${promotionBodies[0].number}:${fallback}:promotion-fallback`);
+    }
+  }
+
   const selected = highestBump(intents);
   return resolutionObject({ ...base, bump: selected, version: bumpVersion(base.baseVersion, selected), sourceSha, intents, contributors });
 }
@@ -405,7 +507,17 @@ async function main() {
   let resolution;
 
   if (mode === 'check-pr') {
-    resolution = candidateForPr({ body: input('pr-body'), head, cwd, baseVersion });
+    const repository = input('repository', process.env.GITHUB_REPOSITORY || '').trim();
+    resolution = await resolvePullRequestCandidate({
+      repository,
+      head,
+      body: input('pr-body'),
+      prBase: input('pr-base').trim(),
+      prHead: input('pr-head').trim(),
+      token: input('github-token', process.env.GITHUB_TOKEN || ''),
+      cwd,
+      baseVersion,
+    });
   } else if (mode === 'resolve-main') {
     const repository = input('repository', process.env.GITHUB_REPOSITORY || '').trim();
     if (!repository || !repository.includes('/')) throw new VersionPolicyError('repository must be supplied as owner/name (or GITHUB_REPOSITORY must be set)');
@@ -448,6 +560,9 @@ module.exports = {
   loadDevelopmentPolicy,
   latestReachableTag,
   candidateForPr,
+  collectIntegrationPrIntents,
+  promotionCandidate,
+  resolvePullRequestCandidate,
   resolveMain,
   resolveGitFlowRelease,
   resolveTrusted,
