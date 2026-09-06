@@ -8,9 +8,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class GitFlowWorkflowWiringTests(unittest.TestCase):
-    def test_develop_ci_calls_shared_ci_without_release_tagging(self):
+    def test_develop_ci_calls_shared_ci_only_for_pull_requests(self):
         text = (ROOT / ".github" / "workflows" / "ci-develop.yml").read_text(encoding="utf-8")
+        self.assertIn("pull_request:", text)
         self.assertIn("- develop", text)
+        self.assertNotIn("\n  push:", text)
         self.assertIn("uses: ./.github/workflows/ci.yml", text)
         self.assertNotIn("version-tag.yml", text)
         self.assertNotIn("- edited", text)
