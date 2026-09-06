@@ -26,19 +26,40 @@ MAX_LEASE_MINUTES = 24 * 60
 
 MAX_CONCURRENT_ISSUES = 16
 
+DEFAULT_MAX_NO_PROGRESS_ATTEMPTS = 6
+
+MIN_MAX_NO_PROGRESS_ATTEMPTS = 1
+
+MAX_MAX_NO_PROGRESS_ATTEMPTS = 100
+
+DEFAULT_MAX_NO_PROGRESS_MINUTES = 6 * 60
+
+MIN_MAX_NO_PROGRESS_MINUTES = 30
+
+MAX_MAX_NO_PROGRESS_MINUTES = 7 * 24 * 60
+
+CLAIM_LIVENESS_ACTIVE = "active"
+
+CLAIM_LIVENESS_STALLED = "stalled"
+
 WORKER_ID_ENV = "AUTODEV_WORKER_ID"
 
 _WORKER_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 
 _ZERO_SHA = "0" * 40
 
+
 class ClaimError(RuntimeError):
     pass
+
 
 @dataclass(frozen=True)
 class ClaimPolicy:
     max_concurrent_issues: int = DEFAULT_MAX_CONCURRENT_ISSUES
     lease_minutes: int = DEFAULT_LEASE_MINUTES
+    max_no_progress_attempts: int = DEFAULT_MAX_NO_PROGRESS_ATTEMPTS
+    max_no_progress_minutes: int = DEFAULT_MAX_NO_PROGRESS_MINUTES
+
 
 @dataclass(frozen=True)
 class Claim:
@@ -52,9 +73,15 @@ class Claim:
     lease_seconds: int
     ref: str
     sha: str
+    progress_id: str = ""
+    progress_at: str = ""
+    progress_summary: str = ""
+    no_progress_attempts: int = 0
+    liveness_state: str = CLAIM_LIVENESS_ACTIVE
 
     def to_json(self) -> dict[str, object]:
         return asdict(self)
+
 
 @dataclass(frozen=True)
 class ClaimAttempt:
@@ -63,11 +90,13 @@ class ClaimAttempt:
     owner: Claim | None = None
     detail: str = ""
 
+
 @dataclass(frozen=True)
 class RecoveryResult:
     recovered: tuple[int, ...] = ()
     protected: tuple[int, ...] = ()
     raced: tuple[int, ...] = ()
+
 
 @dataclass(frozen=True)
 class WorkerIdentity:
@@ -76,11 +105,14 @@ class WorkerIdentity:
     def to_json(self) -> dict[str, object]:
         return {"schema_version": WORKER_SCHEMA, "worker_id": self.worker_id}
 
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
+
 def _iso(value: datetime) -> str:
     return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
 
 def _parse_time(value: str) -> datetime:
     text = value.strip()
@@ -93,6 +125,7 @@ def _parse_time(value: str) -> datetime:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
+
 
 def claim_ref(issue_number: int) -> str:
     if issue_number <= 0:

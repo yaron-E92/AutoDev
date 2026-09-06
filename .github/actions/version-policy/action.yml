@@ -1,5 +1,5 @@
 name: AutoDev Version Policy
-description: Resolve explicit +semver change intent and allocate trusted annotated version tags without publishing releases.
+description: Resolve explicit +semver change intent and allocate trusted annotated version tags for trunk or Git-Flow repositories without publishing releases.
 author: AutoDev
 
 inputs:
@@ -19,7 +19,7 @@ inputs:
     required: false
     default: ''
   branch:
-    description: Trusted default branch for resolve-main
+    description: Trusted branch being resolved; repository development policy determines trunk/release semantics
     required: false
     default: main
   github-token:
@@ -27,7 +27,7 @@ inputs:
     required: false
     default: ''
   create-tag:
-    description: Whether resolve-main should create/push the annotated tag
+    description: Whether trusted resolution should create/push the annotated tag
     required: false
     default: 'false'
   base-version:
@@ -51,11 +51,13 @@ outputs:
   tag_required:
     description: Whether a new version tag is required
   superseded:
-    description: Whether the candidate stopped being current main before allocation
+    description: Whether the candidate stopped being current trusted release head before allocation
   tag_status:
     description: created, already-exists, concurrent-identical, no-tag, superseded, or not-requested
   intents:
-    description: JSON array of explicit intents contributing to the main resolution
+    description: JSON array of explicit intents contributing to the trusted resolution
+  contributors:
+    description: JSON array identifying PRs/commits whose intents contributed to the release decision
 
 runs:
   using: node24

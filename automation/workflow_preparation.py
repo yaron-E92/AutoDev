@@ -13,7 +13,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
-from automation import repository_identity, semver_intent, ux_resolver, ux_workflow
+from automation import development_policy, repository_identity, semver_intent, ux_resolver, ux_workflow
 from automation.semantic_contract import SemanticVerifierError
 from automation.semantic_invocation import prepare_semantic_repair_prompt
 from automation.semantic_prompts import extract_acceptance_criteria
@@ -49,6 +49,7 @@ from automation.workflow_workspace import (
     write_workspace_snapshot,
 )
 
+
 def ensure_prepared_issue(
     repo: Path,
     arguments: str,
@@ -63,6 +64,13 @@ def ensure_prepared_issue(
     existing = read_json(current / "state.json")
     current_issue = int(existing.get("IssueNumber", 0) or 0) if isinstance(existing, dict) else 0
     if current.is_dir() and requested_issue and current_issue == requested_issue:
+        try:
+            development_policy.assert_resume_compatible(repo, existing, default_branch="main")
+        except development_policy.DevelopmentPolicyError as exc:
+            raise WorkflowStageError(
+                str(exc),
+                classification="setup/configuration",
+            ) from exc
         return current
     if requested_issue == 0:
         raise WorkflowStageError("no prepared AutoDev issue is available; pass an issue number")
@@ -93,7 +101,19 @@ def ensure_prepared_issue(
         repository_default=semver_intent.repository_default(repo),
     )
 
-    base = os.environ.get("BASE_BRANCH", "main").strip() or "main"
+    base_override = os.environ.get("BASE_BRANCH", "").strip()
+    try:
+        policy = development_policy.load_development_policy(repo, default_branch="main")
+        base = development_policy.normal_work_branch(
+            repo,
+            default_branch="main",
+            explicit=base_override,
+        )
+    except development_policy.DevelopmentPolicyError as exc:
+        raise WorkflowStageError(
+            f"invalid repository development strategy: {exc}",
+            classification="setup/configuration",
+        ) from exc
     remote = os.environ.get("REMOTE_NAME", "origin").strip() or "origin"
     base_ref = gh_json(repo, ["api", f"repos/{repo_full}/git/ref/heads/{base}"], runner=runner)
     base_object = base_ref.get("object", {})
@@ -169,7 +189,11 @@ def ensure_prepared_issue(
         "Labels": labels,
         "SemVerIntent": resolved_semver.intent,
         "SemVerIntentSource": resolved_semver.source,
+        "DevelopmentStrategy": policy.strategy,
+        "IntegrationBranch": policy.integration_branch,
+        "ReleaseBranch": policy.release_branch,
         "Base": base,
+        "BaseOverride": bool(base_override),
         "Remote": remote,
         "BranchName": branch_name,
         "BaseSha": base_sha,

@@ -16,6 +16,7 @@ from automation import (
     role_resume,
     role_runtime,
     role_runtime_diagnostics,
+    ux_role_context,
     workflow_stages,
 )
 from automation.planner_output import PlannerOutputError
@@ -33,6 +34,32 @@ from automation.role_coordinator_state import (
     _role_output_path,
     role_acceptance,
 )
+
+
+def _ux_role_prompt(repo: Path, role: str) -> str:
+    current = repo / workflow_stages.CURRENT_DIR
+    issue_path = current / "issue.md"
+    issue_text = issue_path.read_text(encoding="utf-8") if issue_path.is_file() else ""
+    try:
+        prompt, _ = ux_role_context.prepare_role_context(
+            repo,
+            current,
+            role,
+            issue_text,
+        )
+    except ux_role_context.UXRoleContextError as exc:
+        raise RoleCoordinatorError(
+            str(exc),
+            classification="setup/configuration",
+        ) from exc
+    return prompt
+
+
+def _with_ux_prompt(prompt: str, ux_prompt: str) -> str:
+    if not ux_prompt:
+        return prompt
+    return prompt.rstrip() + ux_prompt + "\n"
+
 
 def _accept_role(
     repo: Path,
@@ -251,6 +278,8 @@ def run_role(
     prompt = ROLE_PROMPT.format(role=role)
     if repair_kind:
         prompt += f" The prepared repair kind is {repair_kind}."
+    ux_prompt = _ux_role_prompt(repo, role)
+    prompt = _with_ux_prompt(prompt, ux_prompt)
     initial = _invoke(
         runtime,
         repo,
@@ -300,11 +329,15 @@ def run_role(
                 diagnostic_path=last_diagnostic,
             ) from first_error
 
+        correction_prompt = _with_ux_prompt(
+            CORRECTION_PROMPT.format(role=role),
+            ux_prompt,
+        )
         correction_result = _invoke(
             runtime,
             repo,
             role,
-            CORRECTION_PROMPT.format(role=role),
+            correction_prompt,
             phase="correction",
             repair_kind=repair_kind,
             runner=runner,

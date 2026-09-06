@@ -1,14 +1,15 @@
 from __future__ import annotations
 
-from automation import queue_contract
+from automation import claim_liveness, queue_contract
 
 import json
 import subprocess
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, TextIO
+from typing import Callable
 
 from automation.claim_contract import (
+    CLAIM_LIVENESS_STALLED,
     ClaimError,
     RecoveryResult,
     _now,
@@ -24,6 +25,7 @@ from automation.claim_repository import (
     claim_expired,
     list_claims,
 )
+
 
 def recovery_evidence(
     repo: Path,
@@ -68,6 +70,7 @@ def recovery_evidence(
         evidence.append("open AutoDev PR exists")
     return tuple(evidence)
 
+
 def _set_running_label(
     repo: Path,
     github_repo: str,
@@ -89,6 +92,7 @@ def _set_running_label(
     ]
     result = _run(repo, argv, runner=runner)
     return _returncode(result) == 0
+
 
 def reconcile_stale_claims(
     repo: Path,
@@ -115,6 +119,26 @@ def reconcile_stale_claims(
             raise ClaimError(
                 f"claim repository identity mismatch on {claim.ref}: {claim.repository!r}"
             )
+
+        if claim.liveness_state == CLAIM_LIVENESS_STALLED:
+            try:
+                snapshot = claim_liveness.progress_snapshot(
+                    repo,
+                    claim.issue_number,
+                    runner=runner,
+                )
+            except Exception:
+                protected.append(claim.issue_number)
+                continue
+            if not snapshot.terminal:
+                protected.append(claim.issue_number)
+                continue
+            if _delete_with_lease(repo, claim, runner=runner):
+                recovered.append(claim.issue_number)
+            else:
+                raced.append(claim.issue_number)
+            continue
+
         if not claim_expired(claim, now=current):
             continue
         evidence = checker(repo, github_repo, claim.issue_number)
