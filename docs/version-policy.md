@@ -67,9 +67,11 @@ autodev/issue-101 --patch--> develop
                          one version tag
 ```
 
-The `develop -> main` promotion PR does not need to restate a bump. The shared resolver inspects the promoted commits and their GitHub-associated PRs, collects the explicit intents from PRs that actually merged into the configured integration branch, and reports the contributing PRs in release diagnostics.
+The `develop -> main` promotion PR does not need to restate a bump when one or more contributing integration PRs exist since the latest canonical release tag. The shared resolver inspects the promoted commits and their GitHub-associated PRs, collects the explicit intents from PRs that actually merged into the configured integration branch, and reports the contributing PRs in release diagnostics.
 
-A promotion containing only `+semver: none` work creates no tag.
+When contributing integration PRs exist, their highest intent is authoritative. A promotion-level directive is optional and non-authoritative; in particular, `+semver: none` on the promotion cannot suppress a derived `patch`, `minor`, or `major` bump. If no integration PR contributes an intent in the release window, the promotion PR must contain exactly one explicit `+semver` directive as the deliberate fallback release decision.
+
+A promotion containing only integration PRs with `+semver: none` creates no tag and does not require a promotion-level directive.
 
 ## Lifecycle boundary
 
@@ -95,15 +97,16 @@ ordinary pull requests -> develop
   -> merge without public version tag
 
 intentional promotion develop -> main
+  -> derive highest promoted integration intent
+  -> require explicit promotion intent only when no integration PR contributes
   -> release CI succeeds
-  -> resolve highest promoted integration intent
   -> create at most one annotated vMAJOR.MINOR.PATCH tag
   -> stop
 ```
 
 ## AutoDev-created pull requests
 
-The validator remains strict: a PR must contain exactly one explicit directive. AutoDev satisfies that contract by construction rather than weakening the validator.
+The validator remains strict for ordinary trunk/integration PRs and direct release-branch hotfixes: each must contain exactly one explicit directive. Git-Flow integration-to-release promotions are the deliberate exception because their release intent is normally derived from the contributing integration PRs rather than restated manually.
 
 For a newly prepared AutoDev run, the resolved intent is persisted in durable state and used for later PR/CI repair cycles. Precedence is:
 
@@ -112,9 +115,9 @@ For a newly prepared AutoDev run, the resolved intent is persisted in durable st
 3. repository `.autodev/repo.json` `default_semver_intent`;
 4. built-in `patch`.
 
-The generated PR body removes directive lines from the embedded issue copy and appends one canonical resolved directive. Duplicate/conflicting issue directives and contradictory issue/CLI intent fail closed before role work begins.
+The generated ordinary PR body removes directive lines from the embedded issue copy and appends one canonical resolved directive. Duplicate/conflicting issue directives and contradictory issue/CLI intent fail closed before role work begins.
 
-Manual/non-AutoDev PRs continue to own their explicit version intent themselves.
+Manual/non-AutoDev ordinary PRs and direct hotfix PRs continue to own their explicit version intent themselves. A manual Git-Flow promotion uses the same derived-or-fallback promotion contract described above.
 
 ## Direct release-branch hotfixes in Git Flow
 
@@ -140,7 +143,8 @@ Promoting `develop` before that synchronization is rejected.
 
 The dependency-free JavaScript Action owns deterministic version semantics:
 
-- exact `+semver:` parsing;
+- exact `+semver:` parsing for PR roles that require explicit intent;
+- Git-Flow promotion-role classification and derived/fallback intent selection;
 - canonical `vMAJOR.MINOR.PATCH` history;
 - repository `trunk` / `git-flow` policy parsing;
 - highest explicit bump resolution;
@@ -171,9 +175,9 @@ It exposes:
 
 `.github/workflows/version-intent.yml`
 
-This workflow is read-only. It checks out the caller repository with full history, resolves the pull request's current body through the GitHub API when a PR number is available, executes the Action in `check-pr` mode, and exposes the candidate version outputs.
+This workflow is read-only. When a PR number is available it resolves the current authoritative PR body, base branch, and head branch through the GitHub API, checks out the caller repository with full history, executes the Action in `check-pr` mode, and exposes the candidate version and contributing-intent outputs.
 
-A metadata-only rerun therefore validates the current PR body rather than relying on stale event text.
+A metadata-only rerun therefore validates the current PR metadata rather than relying on stale event text. This branch-role context is what lets the shared policy distinguish an ordinary integration PR, a Git-Flow `develop -> main` promotion, and a direct release-branch hotfix.
 
 ## Reusable trusted-tag workflow
 
@@ -213,12 +217,14 @@ Trusted tag allocation must run only for the configured release/trunk branch aft
 
 ## Recovering a failed PR intent check
 
-The exact-one-directive rule remains strict. Recovery does not require a dummy source commit:
+For ordinary trunk/integration PRs and direct release-branch hotfixes, the exact-one-directive rule remains strict. Recovery does not require a dummy source commit:
 
 1. edit the pull request body so it contains exactly one valid `+semver: major|minor|patch|none` line; or
 2. after correcting the body, use GitHub's normal **Re-run failed jobs** action.
 
-The reusable workflow fetches the current PR body before validation. Duplicate/conflicting directives still fail.
+For a Git-Flow integration-to-release promotion, first inspect the version-intent summary. If contributing integration PRs are present, no promotion-level directive is required and the highest contributing intent is authoritative. If no integration PR contributes, add exactly one explicit promotion-level directive as the fallback decision.
+
+The reusable workflow fetches the current PR metadata before validation. Duplicate/conflicting directives still fail where a directive is used.
 
 ## Migration from trunk to Git Flow
 
@@ -237,7 +243,7 @@ Use an explicit cutover rather than silently changing branch meaning underneath 
 10. promote develop -> main only when intentionally cutting a release
 ```
 
-After a direct main hotfix, synchronize that released history back into `develop` before the next promotion.
+After a direct main hotfix or normal release promotion, synchronize the current released `main` ancestry back into `develop` before the next promotion if it is not already present.
 
 ## Product-specific metadata
 
