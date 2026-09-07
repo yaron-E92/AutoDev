@@ -93,7 +93,8 @@ class StructuredPlanningAcceptanceTests(unittest.TestCase):
 
             outputs = opencode_adapter_roles._accept_role_once("synthesizer", current, target)
 
-            self.assertEqual(outputs, [target])
+            self.assertEqual(len(outputs), 1)
+            self.assertTrue(outputs[0].samefile(target))
 
 
 if __name__ == "__main__":
