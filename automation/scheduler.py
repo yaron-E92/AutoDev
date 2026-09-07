@@ -98,11 +98,16 @@ def _prepare_worker(
     fetch = ["fetch", "--prune", "origin"]
     _git(worker, fetch, runner=runner)
     existing = queue_selection.inspect_existing_run(worker)
-    scheduler_runtime_worker.provision_worker(worker, runner=runner)
     if existing.state != "NONE":
+        # Durable work must preserve its checkout, but refresh the registered
+        # runtime before resume so execution-significant runtime drift is seen.
+        scheduler_runtime_worker.provision_worker(worker, runner=runner)
         return existing
     dirty = _git_status(worker, runner=runner)
     if dirty:
+        # Do not let runtime provisioning touch a worker that already contains
+        # unexplained local changes. The no-run path has no durable ownership
+        # proof that would make those changes safe to preserve or reinterpret.
         raise SchedulerError(
             f"dedicated worker contains unexpected local changes: {worker}; refusing to reset or delete them"
         )
