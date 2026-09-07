@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autodev.local/schemas/ux-multimodal-verifier-v1.json",
+  "title": "AutoDev multimodal UX verifier output v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["verdict", "comparisons", "ux_findings", "repair_brief"],
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "enum": ["pass", "repair", "unverifiable"]
+    },
+    "comparisons": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "target_id",
+          "source_kind",
+          "source_id",
+          "reference_sha256",
+          "implementation_sha256",
+          "status"
+        ],
+        "properties": {
+          "target_id": {"type": "string", "minLength": 1, "maxLength": 260},
+          "source_kind": {"type": "string", "enum": ["screen", "state", "journey"]},
+          "source_id": {"type": "string", "minLength": 1, "maxLength": 128},
+          "reference_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "implementation_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "status": {"type": "string", "enum": ["satisfied", "violated", "unverifiable"]}
+        }
+      }
+    },
+    "ux_findings": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "source_kind",
+          "source_id",
+          "status",
+          "evidence",
+          "required_change",
+          "category"
+        ],
+        "properties": {
+          "source_kind": {
+            "type": "string",
+            "enum": ["journey", "screen", "state", "contract", "principle"]
+          },
+          "source_id": {"type": "string", "minLength": 1, "maxLength": 128},
+          "status": {
+            "type": "string",
+            "enum": ["satisfied", "violated", "unverifiable"]
+          },
+          "evidence": {"type": "string", "maxLength": 4000},
+          "required_change": {"type": "string", "maxLength": 4000},
+          "category": {"type": "string", "enum": ["visual", "interaction-state", "mixed"]}
+        }
+      }
+    },
+    "repair_brief": {"type": "string", "maxLength": 12000}
+  }
+}
