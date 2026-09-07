@@ -14,6 +14,38 @@ from automation import (
 )
 
 
+def _normalize_structured_reader_ux(current: Path) -> None:
+    """Normalize optional Reader UX fields without weakening schema/authority checks."""
+
+    path = current / "structured-ux-reader.json"
+    if not path.is_file():
+        return
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        # Preserve malformed evidence for the ordinary validator to reject.
+        return
+    if not isinstance(value, dict):
+        return
+    allowed = {"constraints_addressed", "open_questions"}
+    if set(value) - allowed:
+        return
+    constraints = value.get("constraints_addressed", [])
+    questions = value.get("open_questions", [])
+    if not isinstance(constraints, list) or not isinstance(questions, list):
+        return
+    normalized = {
+        "constraints_addressed": constraints,
+        "open_questions": questions,
+    }
+    if value == normalized:
+        return
+    path.write_text(
+        json.dumps(normalized, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
+
 def install() -> None:
     """Install Reader prompt/advisory hooks without making advice authoritative."""
     current_prepare = opencode_adapter_handoff._prepare_reader  # type: ignore[attr-defined]
@@ -44,10 +76,10 @@ def install() -> None:
             return outputs
 
         # Native Reader output may carry generic UX references in an AutoDev-owned
-        # sidecar. Validate those references only after the ordinary factual handoff
-        # parser has accepted reader-brief.md, so a bad reference is a Reader
-        # protocol rejection/correction rather than a runtime failure. This remains
-        # completely separate from execution classification authority.
+        # sidecar. Optional fields are normalized here so weak/local models do not
+        # need to serialize placeholder arrays when there is no UX evidence. Any
+        # supplied references are still checked against the AutoDev-owned context.
+        _normalize_structured_reader_ux(current)
         try:
             role_output_contract.validate_materialized_ux_sidecar(current, "reader")
         except role_output_contract.RoleOutputContractError as exc:
