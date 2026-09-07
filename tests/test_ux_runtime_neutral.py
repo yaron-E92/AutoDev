@@ -87,6 +87,7 @@ class RuntimeNeutralUXContextTests(unittest.TestCase):
             self.assertEqual(invocation.role, "planner")
             self.assertIn("# Pinned UX authority", invocation.prompt)
             self.assertIn("navigation: task-first", invocation.prompt)
+            self.assertEqual(invocation.ux_context_fingerprint, "abc")
             prepare_ux.assert_called_once_with(
                 repo,
                 repo / workflow_stages.CURRENT_DIR,
@@ -146,6 +147,7 @@ class RuntimeNeutralUXContextTests(unittest.TestCase):
             for invocation in runtime.invocations:
                 self.assertIn("# Pinned UX authority", invocation.prompt)
                 self.assertIn("navigation: task-first", invocation.prompt)
+                self.assertEqual(invocation.ux_context_fingerprint, "abc")
 
     def test_ux_context_failure_is_runtime_neutral_setup_error(self):
         with tempfile.TemporaryDirectory() as temp_dir:

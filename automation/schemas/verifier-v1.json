@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autodev.local/schemas/verifier-v1.json",
+  "title": "AutoDev semantic verifier output v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "verdict",
+    "requirements",
+    "findings",
+    "repair_brief"
+  ],
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "enum": ["pass", "repair", "blocked"]
+    },
+    "requirements": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["criterion", "status", "evidence"],
+        "properties": {
+          "criterion": {
+            "type": "string",
+            "minLength": 1
+          },
+          "status": {
+            "type": "string",
+            "enum": ["met", "missing", "uncertain"]
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["severity", "message"],
+        "properties": {
+          "severity": {
+            "type": "string",
+            "enum": ["blocking", "warning"]
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1
+          },
+          "path": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "repair_brief": {
+      "type": "string"
+    },
+    "ux_findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "source_kind",
+          "source_id",
+          "status",
+          "evidence",
+          "required_change"
+        ],
+        "properties": {
+          "source_kind": {
+            "type": "string",
+            "enum": ["journey", "screen", "state", "contract", "principle"]
+          },
+          "source_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "status": {
+            "type": "string",
+            "enum": ["satisfied", "violated", "unverifiable"]
+          },
+          "evidence": {
+            "type": "string"
+          },
+          "required_change": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

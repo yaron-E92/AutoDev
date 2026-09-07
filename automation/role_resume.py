@@ -12,7 +12,14 @@ import subprocess
 from pathlib import Path
 from typing import Callable
 
-from automation import repair_lineage, run_manifest, workflow_stages, ux_resolver, ux_workflow
+from automation import (
+    repair_lineage,
+    role_output_contract,
+    run_manifest,
+    workflow_stages,
+    ux_resolver,
+    ux_workflow,
+)
 
 
 class RoleResumeError(ValueError):
@@ -93,11 +100,13 @@ def reconcile_snapshots(
     *,
     invalidated_roles: set[str] | None = None,
 ) -> dict[str, list[str]]:
+    repo = repo.expanduser().resolve()
     path = manifest_path(repo)
     if not path.is_file():
         raise RoleResumeError(
             ".autodev-run/current/run-manifest.json is missing; this run cannot be resumed"
         )
+    role_output_contract.bind_snapshot_set_to_existing_contexts(repo, snapshots)
     try:
         return run_manifest.reconcile_role_snapshots(
             path,
@@ -259,6 +268,9 @@ def checkpoint_role(
             )
             return
         if role == "verifier":
+            # Verifier output is consumed by the semantic stage, but snapshot
+            # reconciliation above has already bound that stage to this contract
+            # version and effective AutoDev-owned UX context fingerprint.
             return
     except (run_manifest.ManifestError, workflow_stages.WorkflowStageError) as exc:
         raise RoleResumeError(str(exc)) from exc
@@ -292,6 +304,7 @@ def resume(
         raise RoleResumeError(
             ".autodev-run/current/run-manifest.json is missing; this run cannot be resumed"
         )
+    role_output_contract.bind_snapshot_set_to_existing_contexts(repo, snapshots)
     try:
         manifest = run_manifest.load_manifest(path)
         try:
