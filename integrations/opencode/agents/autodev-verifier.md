@@ -49,7 +49,7 @@ Every `.opencode/...` and `.autodev-run/current/...` path in this contract is a 
 
 1. Run the verifier `prepare` command from `.autodev-run/current/role-contracts.json` using the installed `autodev` launcher.
 2. Read `.autodev-run/current/verifier.md`, `.autodev-run/current/verification-result.template.json`, and the `verifier` entry in `.autodev-run/current/role-contracts.json`.
-3. Review without source edits. Copy the pre-populated acceptance-criteria entries from the template exactly, fill only parser-supported verdict/status/evidence/findings fields, and write JSON only to `.autodev-run/current/verification-result.json`. A clean pass may use `findings: []`.
+3. Review without source edits. Copy the pre-populated acceptance-criteria entries from the template exactly, fill only parser-supported verdict/status/evidence/findings fields, and write JSON only to `.autodev-run/current/verification-result.json`. When the prepared prompt contains pinned UX authority, populate `ux_findings` with only relevant selected journey/screen/state/contract/principle IDs from that context using `satisfied`, `violated`, or `unverifiable`; otherwise leave `ux_findings: []`. Never invent an UX source ID or fingerprint. A clean pass may use `findings: []`.
 4. Run the verifier `accept` command from the role contract using the same `autodev` launcher. This accept call is mandatory for standalone/manual invocation.
 5. If that accept command rejects the protocol artifact, read `.autodev-run/current/contract-correction-verifier.md`, correct the complete JSON artifact once, and rerun the same accept command once. If it is rejected again, stop and report failure.
 
