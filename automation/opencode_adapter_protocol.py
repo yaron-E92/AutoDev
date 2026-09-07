@@ -70,9 +70,12 @@ def _write_role_contracts(current: Path) -> None:
     )
 
 def _clear_structured_role_sidecars(current: Path, role: str) -> None:
-    """Remove structured UX evidence that must not cross a physical role attempt."""
+    """Remove structured evidence that must never cross a physical role attempt."""
 
     (current / f"structured-ux-{role}.json").unlink(missing_ok=True)
+    (current / f"structured-completion-{role}.json").unlink(missing_ok=True)
+    if role == "reader":
+        (current / "structured-reader-evidence.json").unlink(missing_ok=True)
 
 def _begin_role_invocation(current: Path, role: str) -> None:
     if role not in ROLE_NAMES:
@@ -92,6 +95,10 @@ def _begin_role_invocation(current: Path, role: str) -> None:
         used[role] = False
     _write_diagnostics(current, diagnostics)
     (current / f"contract-correction-{role}.md").unlink(missing_ok=True)
+
+    # Structured-output sidecars are per-attempt evidence. Never allow a native
+    # result from an older attempt/run to be consumed by a later text fallback
+    # or freshly prepared role invocation.
     _clear_structured_role_sidecars(current, role)
 
 def _mark_role_accepted(current: Path, role: str, outputs: list[Path]) -> None:
