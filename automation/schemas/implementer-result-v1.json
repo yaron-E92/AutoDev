@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autodev.local/schemas/implementer-result-v1.json",
+  "title": "AutoDev implementer completion output v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["commit_message", "completion_summary", "validation_notes"],
+  "properties": {
+    "commit_message": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "^[^\\r\\n]+$"
+    },
+    "completion_summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 8000
+    },
+    "validation_notes": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {"type": "string", "minLength": 1, "maxLength": 2000}
+    }
+  }
+}
