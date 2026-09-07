@@ -43,6 +43,57 @@ class RoleOutputContractTests(unittest.TestCase):
             )
             self.assertEqual(json.loads(target.read_text(encoding="utf-8")), payload)
 
+    def test_role_snapshot_binding_is_idempotent_and_ux_sensitive(self):
+        original = {
+            "fingerprint": "a" * 64,
+            "safe_metadata": {"runtime": "fake", "model": "fake/model"},
+        }
+        first = role_output_contract.bind_role_snapshot(
+            original,
+            "verifier",
+            ux_context_fingerprint="ux-a",
+        )
+        again = role_output_contract.bind_role_snapshot(
+            first,
+            "verifier",
+            ux_context_fingerprint="ux-a",
+        )
+        changed = role_output_contract.bind_role_snapshot(
+            again,
+            "verifier",
+            ux_context_fingerprint="ux-b",
+        )
+        self.assertEqual(first, again)
+        self.assertNotEqual(first["fingerprint"], original["fingerprint"])
+        self.assertNotEqual(changed["fingerprint"], first["fingerprint"])
+        safe = changed["safe_metadata"]
+        self.assertEqual(safe["role_output_base_fingerprint"], original["fingerprint"])
+        binding = safe["role_output_binding"]
+        self.assertEqual(binding["ux_context_fingerprint"], "ux-b")
+        self.assertEqual(binding["contract"]["identity"], "autodev.semantic-verifier/v1")
+
+    def test_existing_ux_context_reproduces_same_snapshot_binding_on_resume(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            current = repo / ".autodev-run" / "current"
+            current.mkdir(parents=True)
+            (current / "ux-context-verifier.json").write_text(
+                json.dumps({"ux_context_fingerprint": "resume-ux"}),
+                encoding="utf-8",
+            )
+            snapshots = {
+                "verifier": {
+                    "fingerprint": "b" * 64,
+                    "safe_metadata": {"runtime": "fake"},
+                }
+            }
+            role_output_contract.bind_snapshot_set_to_existing_contexts(repo, snapshots)
+            once = json.loads(json.dumps(snapshots))
+            role_output_contract.bind_snapshot_set_to_existing_contexts(repo, snapshots)
+            self.assertEqual(snapshots, once)
+            binding = snapshots["verifier"]["safe_metadata"]["role_output_binding"]
+            self.assertEqual(binding["ux_context_fingerprint"], "resume-ux")
+
     def test_ux_references_must_belong_to_effective_selected_context(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             current = Path(temp_dir)
