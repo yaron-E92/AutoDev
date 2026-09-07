@@ -88,6 +88,14 @@ def _begin_role_invocation(current: Path, role: str) -> None:
     _write_diagnostics(current, diagnostics)
     (current / f"contract-correction-{role}.md").unlink(missing_ok=True)
 
+    # Structured-output sidecars are per-invocation evidence. Never allow a
+    # native result from an older attempt/run to be consumed by a later text
+    # fallback or freshly prepared role invocation.
+    (current / f"structured-ux-{role}.json").unlink(missing_ok=True)
+    (current / f"structured-completion-{role}.json").unlink(missing_ok=True)
+    if role == "reader":
+        (current / "structured-reader-evidence.json").unlink(missing_ok=True)
+
 def _mark_role_accepted(current: Path, role: str, outputs: list[Path]) -> None:
     state_value = _read_json(current / "state.json")
     if not isinstance(state_value, dict) or not state_value:
