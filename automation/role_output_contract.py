@@ -19,6 +19,7 @@ CAPABILITIES = {
 
 SCHEMA_ROOT = Path(__file__).with_name("schemas")
 MAX_UX_FINDINGS = 128
+MAX_READER_EVIDENCE = 128
 
 
 class RoleOutputContractError(ValueError):
@@ -78,6 +79,16 @@ class RoleOutputContract:
 
 
 _CONTRACTS = {
+    "reader": RoleOutputContract(
+        role="reader",
+        name="autodev.reader",
+        version=1,
+        schema_file="reader-v1.json",
+        output_artifact="reader-brief.md",
+        semantic_validator="automation.opencode_adapter_handoff._bounded_result",
+        fallback_parser="automation.opencode_adapter_handoff._bounded_result",
+        native_retry_count=2,
+    ),
     "verifier": RoleOutputContract(
         role="verifier",
         name="autodev.semantic-verifier",
@@ -149,6 +160,22 @@ def materialize_structured_output(
     current = repo / ".autodev-run" / "current"
     current.mkdir(parents=True, exist_ok=True)
 
+    if contract.role == "reader":
+        allowed = {"handoff_markdown", "repository_evidence", "ux"}
+        unknown = sorted(set(payload) - allowed)
+        if unknown:
+            raise RoleOutputContractError(
+                "structured Reader output contains unsupported control-plane field(s): "
+                + ", ".join(unknown)
+            )
+        handoff = str(payload.get("handoff_markdown", "") or "").strip()
+        if not handoff:
+            raise RoleOutputContractError("structured Reader handoff is empty")
+        target = current / contract.output_artifact
+        target.write_text(handoff + "\n", encoding="utf-8")
+        _write_reader_evidence_sidecar(current, payload)
+        _write_ux_sidecar(current, contract.role, payload)
+        return target
     if contract.role == "verifier":
         target = current / contract.output_artifact
         target.write_text(
@@ -386,6 +413,27 @@ def _ux_references(payload: dict[str, object]) -> list[object]:
     elif ux not in (None, ""):
         raise RoleOutputContractError("ux must be a JSON object")
     return references
+
+
+def _write_reader_evidence_sidecar(current: Path, payload: dict[str, object]) -> None:
+    evidence = payload.get("repository_evidence", [])
+    if not isinstance(evidence, list) or len(evidence) > MAX_READER_EVIDENCE:
+        raise RoleOutputContractError("structured Reader repository_evidence must be a bounded array")
+    normalized: list[dict[str, str]] = []
+    for index, item in enumerate(evidence):
+        if not isinstance(item, dict):
+            raise RoleOutputContractError(f"Reader repository evidence {index} must be an object")
+        path = str(item.get("path", "") or "").strip()
+        observation = str(item.get("observation", "") or "").strip()
+        if not path or not observation:
+            raise RoleOutputContractError(
+                f"Reader repository evidence {index} requires non-empty path and observation"
+            )
+        normalized.append({"path": path, "observation": observation})
+    (current / "structured-reader-evidence.json").write_text(
+        json.dumps(normalized, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
 
 
 def _write_ux_sidecar(current: Path, role: str, payload: dict[str, object]) -> None:
