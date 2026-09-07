@@ -9,7 +9,8 @@
     "commit_message": {
       "type": "string",
       "minLength": 1,
-      "maxLength": 200
+      "maxLength": 200,
+      "pattern": "^[^\\r\\n]+$"
     },
     "completion_summary": {
       "type": "string",
