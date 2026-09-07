@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autodev.local/schemas/planner-v1.json",
+  "title": "AutoDev planner output v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["plan", "ux"],
+  "properties": {
+    "plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "where_to_look",
+        "files_areas_likely_to_touch",
+        "assumptions",
+        "implementation_plan",
+        "risks_gotchas",
+        "recommended_implementation_approach"
+      ],
+      "properties": {
+        "where_to_look": {"type": "string", "minLength": 1, "maxLength": 12000},
+        "files_areas_likely_to_touch": {"type": "string", "minLength": 1, "maxLength": 12000},
+        "assumptions": {"type": "string", "maxLength": 12000},
+        "implementation_plan": {"type": "string", "minLength": 1, "maxLength": 24000},
+        "risks_gotchas": {"type": "string", "maxLength": 12000},
+        "recommended_implementation_approach": {"type": "string", "minLength": 1, "maxLength": 12000}
+      }
+    },
+    "ux": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["constraints_addressed", "open_questions"],
+      "properties": {
+        "constraints_addressed": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["source_kind", "source_id", "impact"],
+            "properties": {
+              "source_kind": {
+                "type": "string",
+                "enum": ["journey", "screen", "state", "contract", "principle"]
+              },
+              "source_id": {"type": "string", "minLength": 1, "maxLength": 512},
+              "impact": {"type": "string", "minLength": 1, "maxLength": 4000}
+            }
+          }
+        },
+        "open_questions": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {"type": "string", "minLength": 1, "maxLength": 4000}
+        }
+      }
+    }
+  }
+}

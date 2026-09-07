@@ -3,6 +3,7 @@ from __future__ import annotations
 from automation import opencode_adapter_handoff
 from automation import opencode_resume_checkpoint
 from automation import opencode_resume_contract
+from automation import role_output_contract
 
 import json
 from pathlib import Path
@@ -42,6 +43,7 @@ from automation.opencode_adapter_models import (
 )
 from automation.opencode_adapter_protocol import (
     _begin_role_invocation,
+    _clear_structured_role_sidecars,
     _contract_output_path,
     _ensure_opencode_protocol,
     _mark_role_accepted,
@@ -182,6 +184,13 @@ def accept_role(role: str, repo: Path, input_path: Path | None = None) -> list[P
     return outputs
 
 
+def _validate_structured_ux_sidecar(current: Path, role: str) -> None:
+    try:
+        role_output_contract.validate_materialized_ux_sidecar(current, role)
+    except role_output_contract.RoleOutputContractError as exc:
+        raise OpenCodeAdapterError(str(exc)) from exc
+
+
 def _accept_role_once(role: str, current: Path, input_path: Path | None) -> list[Path]:
     if role == "reader":
         source = input_path or current / "reader-brief.md"
@@ -194,6 +203,7 @@ def _accept_role_once(role: str, current: Path, input_path: Path | None) -> list
     if role == "synthesizer":
         source = input_path or current / "synthesized-handoff.md"
         text = _bounded_result(source)
+        _validate_structured_ux_sidecar(current, "synthesizer")
         handoff_path = current / "synthesized-handoff.md"
         _write_text(handoff_path, text + "\n")
         return [handoff_path]
@@ -202,6 +212,7 @@ def _accept_role_once(role: str, current: Path, input_path: Path | None) -> list
         output = _bounded_result(source)
         target = current / "plan.md"
         handle_planner_output(output, target)
+        _validate_structured_ux_sidecar(current, "planner")
         return [target]
     if role == "implementer":
         target = current / "commit-message.txt"
@@ -299,6 +310,8 @@ def _raise_contract_rejection(
             + ("Bounded previous output:\n\n```text\n" + previous + "\n```\n\n" if previous else "")
             + f"Correct the designated output artifact once, then rerun exactly:\n\n`{contract.get('accept', '')}`\n"
         )
+
+    _clear_structured_role_sidecars(current, role)
     _write_text(correction, correction_body)
     raise OpenCodeAdapterError(
         f"{role} protocol artifact rejected; one correction is allowed using {correction}; "

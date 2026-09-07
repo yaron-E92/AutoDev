@@ -88,6 +88,26 @@ _CONTRACTS = {
         fallback_parser="automation.semantic_schema.parse_semantic_output",
         native_retry_count=2,
     ),
+    "planner": RoleOutputContract(
+        role="planner",
+        name="autodev.planner",
+        version=1,
+        schema_file="planner-v1.json",
+        output_artifact="plan.md",
+        semantic_validator="automation.planner_output.sanitize_planner_output",
+        fallback_parser="automation.planner_output.sanitize_planner_output",
+        native_retry_count=2,
+    ),
+    "synthesizer": RoleOutputContract(
+        role="synthesizer",
+        name="autodev.synthesizer",
+        version=1,
+        schema_file="synthesizer-v1.json",
+        output_artifact="synthesized-handoff.md",
+        semantic_validator="automation.opencode_adapter_handoff._bounded_result",
+        fallback_parser="automation.opencode_adapter_handoff._bounded_result",
+        native_retry_count=2,
+    ),
 }
 
 
@@ -135,6 +155,43 @@ def materialize_structured_output(
             json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
             encoding="utf-8",
         )
+        return target
+    if contract.role == "planner":
+        plan = payload.get("plan", {})
+        if not isinstance(plan, dict):
+            raise RoleOutputContractError("structured planner output is missing plan object")
+        sections = (
+            ("1) Where to look", "where_to_look"),
+            ("2) Files / areas likely to touch", "files_areas_likely_to_touch"),
+            ("3) Assumptions", "assumptions"),
+            ("4) Plan", "implementation_plan"),
+            ("5) Risks / gotchas", "risks_gotchas"),
+            ("6) Recommended implementation approach", "recommended_implementation_approach"),
+        )
+        rendered: list[str] = []
+        for heading, key in sections:
+            value = str(plan.get(key, "") or "").strip()
+            if key in {
+                "where_to_look",
+                "files_areas_likely_to_touch",
+                "implementation_plan",
+                "recommended_implementation_approach",
+            } and not value:
+                raise RoleOutputContractError(
+                    f"structured planner output section {key} is empty"
+                )
+            rendered.extend((heading, value or "None identified.", ""))
+        target = current / contract.output_artifact
+        target.write_text("\n".join(rendered).rstrip() + "\n", encoding="utf-8")
+        _write_ux_sidecar(current, contract.role, payload)
+        return target
+    if contract.role == "synthesizer":
+        handoff = str(payload.get("handoff_markdown", "") or "").strip()
+        if not handoff:
+            raise RoleOutputContractError("structured synthesizer handoff is empty")
+        target = current / contract.output_artifact
+        target.write_text(handoff + "\n", encoding="utf-8")
+        _write_ux_sidecar(current, contract.role, payload)
         return target
     raise RoleOutputContractError(
         f"structured output materialization is not implemented for role {contract.role}"
@@ -257,22 +314,34 @@ def invocation_binding(repo: Path, role: str) -> dict[str, object]:
     return dict(value) if isinstance(value, dict) else {}
 
 
+def validate_materialized_ux_sidecar(current: Path, role: str) -> None:
+    """Validate native-only UX references at the same role-acceptance boundary as text output."""
+
+    path = current / f"structured-ux-{role}.json"
+    if not path.is_file():
+        return
+    ux = _read_json(path)
+    if not ux:
+        raise RoleOutputContractError(f"structured UX sidecar for {role} is malformed")
+    validate_ux_references(current, role, {"ux": ux})
+
+
 def validate_ux_references(
     current: Path,
     role: str,
     payload: dict[str, object],
 ) -> None:
-    findings = payload.get("ux_findings", [])
-    if findings in (None, []):
+    references = _ux_references(payload)
+    if not references:
         return
-    if not isinstance(findings, list) or len(findings) > MAX_UX_FINDINGS:
-        raise RoleOutputContractError("ux_findings must be a bounded JSON array")
+    if len(references) > MAX_UX_FINDINGS:
+        raise RoleOutputContractError("structured UX references exceed the bounded protocol limit")
 
     context_path = current / f"ux-context-{role}.json"
     context = _read_json(context_path)
     if not context:
         raise RoleOutputContractError(
-            "structured output contains UX findings but no effective AutoDev UX context is active"
+            "structured output contains UX references but no effective AutoDev UX context is active"
         )
     ux = context.get("ux_context", {})
     if not isinstance(ux, dict):
@@ -285,19 +354,49 @@ def validate_ux_references(
         "contract": _path_aliases(ux.get("contract", "")),
         "principle": _path_aliases(ux.get("principles", "")),
     }
-    for index, finding in enumerate(findings):
+    for index, finding in enumerate(references):
         if not isinstance(finding, dict):
-            raise RoleOutputContractError(f"ux finding {index} must be an object")
+            raise RoleOutputContractError(f"ux reference {index} must be an object")
         kind = str(finding.get("source_kind", "") or "")
         source_id = str(finding.get("source_id", "") or "").strip()
         if kind not in allowed or not source_id:
             raise RoleOutputContractError(
-                f"ux finding {index} has an invalid source_kind/source_id"
+                f"ux reference {index} has an invalid source_kind/source_id"
             )
         if source_id not in allowed[kind]:
             raise RoleOutputContractError(
-                f"ux finding {index} references {kind} {source_id!r} outside the effective selected UX context"
+                f"ux reference {index} references {kind} {source_id!r} outside the effective selected UX context"
             )
+
+
+def _ux_references(payload: dict[str, object]) -> list[object]:
+    references: list[object] = []
+    findings = payload.get("ux_findings", [])
+    if isinstance(findings, list):
+        references.extend(findings)
+    elif findings not in (None, ""):
+        raise RoleOutputContractError("ux_findings must be a JSON array")
+    ux = payload.get("ux", {})
+    if isinstance(ux, dict):
+        constraints = ux.get("constraints_addressed", [])
+        if isinstance(constraints, list):
+            references.extend(constraints)
+        elif constraints not in (None, ""):
+            raise RoleOutputContractError("ux.constraints_addressed must be a JSON array")
+    elif ux not in (None, ""):
+        raise RoleOutputContractError("ux must be a JSON object")
+    return references
+
+
+def _write_ux_sidecar(current: Path, role: str, payload: dict[str, object]) -> None:
+    ux = payload.get("ux", {})
+    if not isinstance(ux, dict):
+        return
+    path = current / f"structured-ux-{role}.json"
+    path.write_text(
+        json.dumps(ux, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
 
 
 def _read_json(path: Path) -> dict[str, object]:
