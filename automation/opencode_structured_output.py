@@ -4,12 +4,13 @@ import base64
 import json
 import socket
 import subprocess
+import tempfile
 import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Callable, TextIO
 
 from automation import role_output_contract
 
@@ -71,9 +72,18 @@ def invoke(
     port = _ephemeral_port()
     base_url = f"http://127.0.0.1:{port}"
     process = None
+    stderr_stream: TextIO | None = None
     session_id = ""
     started = monotonic()
     try:
+        # A pipe can deadlock a long-running server if it fills while the model is
+        # working. A temporary file keeps bounded-memory behavior while preserving
+        # startup diagnostics for unsupported older OpenCode installations.
+        stderr_stream = tempfile.TemporaryFile(
+            mode="w+t",
+            encoding="utf-8",
+            errors="replace",
+        )
         try:
             process = popen(
                 [
@@ -91,7 +101,7 @@ def invoke(
                 errors="replace",
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
+                stderr=stderr_stream,
             )
         except OSError as exc:
             raise StructuredOutputTransportError(
@@ -100,6 +110,7 @@ def invoke(
 
         _wait_for_health(
             process,
+            stderr_stream,
             base_url,
             environment,
             urlopen=urlopen,
@@ -169,6 +180,8 @@ def invoke(
             except OpenCodeStructuredOutputError:
                 pass
         _stop_process(process)
+        if stderr_stream is not None:
+            stderr_stream.close()
 
 
 def parse_prompt_response(value: object) -> NativeStructuredOutput:
@@ -260,6 +273,7 @@ def _request_json(
 
 def _wait_for_health(
     process: object,
+    stderr_stream: TextIO,
     base_url: str,
     environment: dict[str, str],
     *,
@@ -271,7 +285,7 @@ def _wait_for_health(
     while monotonic() < deadline:
         poll = getattr(process, "poll", None)
         if callable(poll) and poll() is not None:
-            stderr = _process_stderr(process)
+            stderr = _read_stderr(stderr_stream)
             if _looks_like_unknown_serve(stderr):
                 raise StructuredOutputUnavailable(
                     "installed OpenCode CLI does not support `opencode serve`"
@@ -355,11 +369,10 @@ def _stop_process(process: object | None) -> None:
             pass
 
 
-def _process_stderr(process: object) -> str:
-    stream = getattr(process, "stderr", None)
-    if stream is None:
-        return ""
+def _read_stderr(stream: TextIO) -> str:
     try:
+        stream.flush()
+        stream.seek(0)
         return str(stream.read() or "")
     except (OSError, ValueError):
         return ""
