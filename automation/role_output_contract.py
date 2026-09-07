@@ -141,6 +141,69 @@ def materialize_structured_output(
     )
 
 
+def bind_role_snapshot(
+    snapshot: dict[str, object],
+    role: str,
+    *,
+    ux_context_fingerprint: str = "",
+) -> dict[str, object]:
+    """Bind durable role identity to AutoDev-owned contract/UX identity idempotently."""
+
+    contract = contract_for_role(role)
+    ux_fingerprint = str(ux_context_fingerprint or "")
+    if contract is None and not ux_fingerprint:
+        return snapshot
+
+    safe = snapshot.get("safe_metadata", {})
+    safe = dict(safe) if isinstance(safe, dict) else {}
+    existing_base = str(safe.get("role_output_base_fingerprint", "") or "")
+    base_fingerprint = existing_base or str(snapshot.get("fingerprint", "") or "")
+    binding: dict[str, object] = {
+        "contract": contract.safe_metadata() if contract is not None else {},
+        "ux_context_active": bool(ux_fingerprint),
+        "ux_context_fingerprint": ux_fingerprint,
+    }
+    if safe.get("role_output_binding") == binding and existing_base:
+        return snapshot
+
+    canonical = json.dumps(
+        {
+            "base_fingerprint": base_fingerprint,
+            "binding": binding,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    rebound = dict(snapshot)
+    rebound["fingerprint"] = hashlib.sha256(canonical).hexdigest()
+    safe["role_output_base_fingerprint"] = base_fingerprint
+    safe["role_output_binding"] = binding
+    rebound["safe_metadata"] = safe
+    return rebound
+
+
+def bind_snapshot_set_to_existing_contexts(
+    repo: Path,
+    snapshots: dict[str, object],
+) -> dict[str, object]:
+    """Reproduce contract/UX bindings before resume reconciliation."""
+
+    current = repo.expanduser().resolve() / ".autodev-run" / "current"
+    for role in list(snapshots):
+        snapshot = snapshots.get(role)
+        if not isinstance(snapshot, dict):
+            continue
+        context = _read_json(current / f"ux-context-{role}.json")
+        fingerprint = str(context.get("ux_context_fingerprint", "") or "")
+        snapshots[role] = bind_role_snapshot(
+            snapshot,
+            role,
+            ux_context_fingerprint=fingerprint,
+        )
+    return snapshots
+
+
 def persist_invocation_binding(
     repo: Path,
     role: str,
