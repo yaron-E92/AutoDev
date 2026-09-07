@@ -10,6 +10,11 @@ from automation.semantic_contract import (
     SemanticVerifierError,
 )
 
+
+ALLOWED_UX_SOURCE_KINDS = {"journey", "screen", "state", "contract", "principle"}
+ALLOWED_UX_FINDING_STATUSES = {"satisfied", "violated", "unverifiable"}
+
+
 def semantic_result_template(expected_criteria: list[str] | None = None) -> dict[str, object]:
     """Return a parser-compatible, fail-safe semantic result skeleton.
 
@@ -30,6 +35,7 @@ def semantic_result_template(expected_criteria: list[str] | None = None) -> dict
         "repair_brief": "",
     }
 
+
 def parse_semantic_output(
     output: str,
     *,
@@ -42,6 +48,15 @@ def parse_semantic_output(
         value = json.loads(cleaned)
     except json.JSONDecodeError as exc:
         raise _malformed("semantic verifier output was not valid JSON") from exc
+    return parse_semantic_value(value, expected_criteria=expected_criteria)
+
+
+def parse_semantic_value(
+    value: object,
+    *,
+    expected_criteria: list[str] | None = None,
+) -> dict[str, object]:
+    """Validate a decoded verifier result without granting it workflow authority."""
 
     schema_errors = _semantic_schema_errors(value)
     if schema_errors:
@@ -54,6 +69,7 @@ def parse_semantic_output(
     requirements = _parse_requirements(value["requirements"])
     findings = _parse_findings(value["findings"])
     repair_brief = str(value.get("repair_brief", ""))
+    ux_findings = _parse_ux_findings(value.get("ux_findings", []))
 
     if expected_criteria:
         reported = {str(item["criterion"]).strip().casefold() for item in requirements}
@@ -70,9 +86,10 @@ def parse_semantic_output(
 
     blocking = [item for item in findings if item["severity"] == "blocking"]
     incomplete = [item for item in requirements if item["status"] != "met"]
-    if verdict == "pass" and (blocking or incomplete):
+    violated_ux = [item for item in ux_findings if item["status"] == "violated"]
+    if verdict == "pass" and (blocking or incomplete or violated_ux):
         raise SemanticVerifierError(
-            "semantic verifier returned pass with blocking or unmet requirements",
+            "semantic verifier returned pass with blocking, unmet, or violated UX requirements",
             classification="inconsistent_semantic_verdict",
         )
     if verdict == "repair" and not repair_brief.strip():
@@ -81,12 +98,16 @@ def parse_semantic_output(
             classification="inconsistent_semantic_verdict",
         )
 
-    return {
+    result: dict[str, object] = {
         "verdict": verdict,
         "requirements": requirements,
         "findings": findings,
         "repair_brief": repair_brief.strip(),
     }
+    if "ux_findings" in value:
+        result["ux_findings"] = ux_findings
+    return result
+
 
 def _semantic_schema_errors(value: object) -> list[str]:
     if not isinstance(value, dict):
@@ -140,7 +161,36 @@ def _semantic_schema_errors(value: object) -> list[str]:
     repair_brief = value.get("repair_brief", "")
     if not isinstance(repair_brief, str):
         errors.append("repair_brief must be text")
+
+    ux_findings = value.get("ux_findings", [])
+    if not isinstance(ux_findings, list):
+        errors.append("ux_findings must be an array")
+    else:
+        for index, item in enumerate(ux_findings):
+            if not isinstance(item, dict):
+                errors.append(f"ux finding {index} must be an object")
+                continue
+            kind = item.get("source_kind")
+            source_id = item.get("source_id")
+            status = item.get("status")
+            evidence = item.get("evidence")
+            required_change = item.get("required_change")
+            if kind not in ALLOWED_UX_SOURCE_KINDS:
+                errors.append(
+                    f"ux finding {index} source_kind must be journey, screen, state, contract, or principle"
+                )
+            if not isinstance(source_id, str) or not source_id.strip():
+                errors.append(f"ux finding {index} source_id must be non-empty text")
+            if status not in ALLOWED_UX_FINDING_STATUSES:
+                errors.append(
+                    f"ux finding {index} status must be satisfied, violated, or unverifiable"
+                )
+            if not isinstance(evidence, str):
+                errors.append(f"ux finding {index} evidence must be text")
+            if not isinstance(required_change, str):
+                errors.append(f"ux finding {index} required_change must be text")
     return errors
+
 
 def _parse_requirements(value: object) -> list[dict[str, object]]:
     if not isinstance(value, list):
@@ -168,12 +218,11 @@ def _parse_requirements(value: object) -> list[dict[str, object]]:
             {
                 "criterion": criterion.strip(),
                 "status": status,
-                "evidence": [
-                    entry.strip() for entry in evidence if entry.strip()
-                ],
+                "evidence": [entry.strip() for entry in evidence if entry.strip()],
             }
         )
     return requirements
+
 
 def _parse_findings(value: object) -> list[dict[str, str]]:
     if not isinstance(value, list):
@@ -199,6 +248,41 @@ def _parse_findings(value: object) -> list[dict[str, str]]:
             }
         )
     return findings
+
+
+def _parse_ux_findings(value: object) -> list[dict[str, str]]:
+    if not isinstance(value, list):
+        raise _malformed("semantic verifier ux_findings must be an array")
+    results: list[dict[str, str]] = []
+    for index, item in enumerate(value):
+        if not isinstance(item, dict):
+            raise _malformed(f"semantic verifier ux finding {index} must be an object")
+        kind = item.get("source_kind")
+        source_id = item.get("source_id")
+        status = item.get("status")
+        evidence = item.get("evidence")
+        required_change = item.get("required_change")
+        if kind not in ALLOWED_UX_SOURCE_KINDS:
+            raise _malformed(f"semantic verifier ux finding {index} has invalid source_kind")
+        if not isinstance(source_id, str) or not source_id.strip():
+            raise _malformed(f"semantic verifier ux finding {index} has no source_id")
+        if status not in ALLOWED_UX_FINDING_STATUSES:
+            raise _malformed(f"semantic verifier ux finding {index} has invalid status")
+        if not isinstance(evidence, str) or not isinstance(required_change, str):
+            raise _malformed(
+                f"semantic verifier ux finding {index} evidence/required_change must be text"
+            )
+        results.append(
+            {
+                "source_kind": str(kind),
+                "source_id": source_id.strip(),
+                "status": str(status),
+                "evidence": evidence.strip(),
+                "required_change": required_change.strip(),
+            }
+        )
+    return results
+
 
 def _malformed(message: str) -> SemanticVerifierError:
     return SemanticVerifierError(
