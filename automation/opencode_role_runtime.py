@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from automation import opencode_adapter_assets, opencode_adapter_models
-
 from automation import opencode_adapter_contract
 
 import json
@@ -15,8 +14,10 @@ from typing import Callable
 from automation import (
     opencode_cli,
     opencode_privacy_adapter,
+    opencode_structured_output,
     privacy,
     privacy_authorization,
+    role_output_contract,
     role_runtime,
     run_manifest,
 )
@@ -60,26 +61,52 @@ class OpenCodeRoleRuntime:
             model = str(mapping.get("model", ""))
             provider = model.split("/", 1)[0] if "/" in model else ""
             agent = str(mapping.get("agent", f"autodev-{role}"))
+            contract = role_output_contract.contract_for_role(role)
 
-            # Keep the pre-#160 OpenCode fingerprint shape exactly. Runtime
-            # identity already participated as transport=opencode, so adding a
-            # second runtime field would falsely invalidate in-progress runs.
-            configured = {
+            # Keep the pre-#160 OpenCode fingerprint shape for roles that have no
+            # structured contract. A versioned output contract intentionally joins
+            # the fingerprint once that role migrates because its durable output
+            # meaning/resume compatibility has changed.
+            configured: dict[str, object] = {
                 "transport": self.name,
                 "agent": agent,
                 "model": model,
                 "source": str(mapping.get("source", "inherited")),
                 "inherits_from": str(mapping.get("inherits_from", "")),
             }
-            safe = {
+            safe: dict[str, object] = {
                 "transport": self.name,
                 "provider": provider,
                 "profile_name": str(mapping.get("source", "inherited")),
                 "model": model,
                 "agent": agent,
             }
+            if contract is not None:
+                metadata = contract.safe_metadata()
+                configured["output_contract"] = metadata
+                safe["output_contract"] = metadata
             snapshots[role] = run_manifest.build_role_snapshot(configured, safe)
         return snapshots
+
+    def structured_output_capability(
+        self,
+        context: role_runtime.RoleInvocationContext,
+        *,
+        runner: Callable[..., object] = subprocess.run,
+        which=None,
+    ) -> str:
+        contract = context.output_contract
+        if contract is None:
+            return role_output_contract.CAPABILITY_UNSUPPORTED
+        mappings = self._resolve_mappings(context.repo, runner=runner, which=which)
+        model = str(mappings.get(context.role, {}).get("model", "")).strip()
+        if not model or "/" not in model:
+            return role_output_contract.CAPABILITY_UNSUPPORTED
+        # OpenCode's session API owns schema validation/retries. Whether an older
+        # installed OpenCode actually exposes that API is probed during invocation;
+        # unsupported versions fall back to the existing CLI/text protocol.
+        contract.schema()
+        return role_output_contract.CAPABILITY_NATIVE_VALIDATED
 
     def provision_scheduler_worker(
         self,
@@ -280,6 +307,124 @@ class OpenCodeRoleRuntime:
                 classification=exc.classification,
             ) from exc
 
+        contract = context.output_contract
+        fallback_state = ""
+        if contract is not None:
+            capability = self.structured_output_capability(
+                context,
+                runner=runner,
+                which=which,
+            )
+            if capability in {
+                role_output_contract.CAPABILITY_NATIVE_STRICT,
+                role_output_contract.CAPABILITY_NATIVE_VALIDATED,
+            }:
+                started = time.monotonic()
+                try:
+                    native = opencode_structured_output.invoke(
+                        executable=executable,
+                        repo=repo,
+                        role=context.role,
+                        model=model,
+                        prompt=context.prompt,
+                        contract=contract,
+                        environment=environment,
+                        timeout_seconds=context.timeout_seconds,
+                    )
+                    role_output_contract.materialize_structured_output(
+                        repo,
+                        contract,
+                        native.value,
+                    )
+                except opencode_structured_output.StructuredOutputUnavailable:
+                    # Backward compatibility: an older installed OpenCode may still
+                    # be a perfectly valid CLI/text runtime. Native capability is
+                    # opportunistic and never mandatory for an otherwise supported
+                    # runtime.
+                    fallback_state = "native-unavailable"
+                except opencode_structured_output.StructuredOutputExhausted as exc:
+                    return self._structured_result(
+                        context,
+                        model=model,
+                        elapsed_ms=int((time.monotonic() - started) * 1000),
+                        termination="structured-output-exhausted",
+                        state="schema-exhausted",
+                        retry_count=exc.retries,
+                        stderr=str(exc),
+                    )
+                except (
+                    opencode_structured_output.StructuredOutputTransportError,
+                    role_output_contract.RoleOutputContractError,
+                ) as exc:
+                    return self._structured_result(
+                        context,
+                        model=model,
+                        elapsed_ms=int((time.monotonic() - started) * 1000),
+                        termination="structured-output-runtime-failed",
+                        state="runtime-failed",
+                        stderr=str(exc),
+                    )
+                else:
+                    return self._structured_result(
+                        context,
+                        model=model,
+                        elapsed_ms=int((time.monotonic() - started) * 1000),
+                        termination="completed",
+                        state="schema-validated",
+                        retry_count=native.retries,
+                        returncode=0,
+                    )
+
+        return self._invoke_cli(
+            context,
+            executable=executable,
+            repo=repo,
+            model=model,
+            environment=environment,
+            runner=runner,
+            fallback_state=fallback_state,
+        )
+
+    def _structured_result(
+        self,
+        context: role_runtime.RoleInvocationContext,
+        *,
+        model: str,
+        elapsed_ms: int,
+        termination: str,
+        state: str,
+        retry_count: int = 0,
+        returncode: int | None = None,
+        stderr: str = "",
+    ) -> role_runtime.RoleInvocationResult:
+        contract = context.output_contract
+        return role_runtime.RoleInvocationResult(
+            runtime=self.name,
+            role=context.role,
+            phase=context.phase,
+            returncode=returncode,
+            elapsed_ms=elapsed_ms,
+            stderr=stderr,
+            termination=termination,
+            model=model,
+            structured_output_mode=role_output_contract.CAPABILITY_NATIVE_VALIDATED,
+            structured_output_state=state,
+            contract_name=contract.name if contract is not None else "",
+            contract_version=contract.version if contract is not None else 0,
+            schema_retry_count=max(0, int(retry_count)),
+        )
+
+    def _invoke_cli(
+        self,
+        context: role_runtime.RoleInvocationContext,
+        *,
+        executable: str,
+        repo: Path,
+        model: str,
+        environment: dict[str, str],
+        runner: Callable[..., object],
+        fallback_state: str,
+    ) -> role_runtime.RoleInvocationResult:
         command = [
             executable,
             "run",
@@ -296,6 +441,14 @@ class OpenCodeRoleRuntime:
             context.prompt,
         ])
         started = time.monotonic()
+        contract = context.output_contract
+        metadata = {
+            "structured_output_mode": "fallback-text",
+            "structured_output_state": fallback_state or ("fallback" if contract else ""),
+            "contract_name": contract.name if contract is not None else "",
+            "contract_version": contract.version if contract is not None else 0,
+            "schema_retry_count": 0,
+        }
         try:
             completed = runner(
                 command,
@@ -323,6 +476,7 @@ class OpenCodeRoleRuntime:
                 stderr=_text(getattr(exc, "stderr", "")),
                 termination="runtime-timeout",
                 model=model,
+                **metadata,
             )
         except OSError as exc:
             return role_runtime.RoleInvocationResult(
@@ -334,6 +488,7 @@ class OpenCodeRoleRuntime:
                 stderr=str(exc),
                 termination="runtime-launch-failed",
                 model=model,
+                **metadata,
             )
 
         returncode = int(getattr(completed, "returncode", 1))
@@ -347,6 +502,7 @@ class OpenCodeRoleRuntime:
             stderr=_text(getattr(completed, "stderr", "")),
             termination="completed" if returncode == 0 else "runtime-nonzero",
             model=model,
+            **metadata,
         )
 
 

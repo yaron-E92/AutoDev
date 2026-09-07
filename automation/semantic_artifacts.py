@@ -3,18 +3,30 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from automation import role_output_contract
+from automation.semantic_contract import SemanticVerifierError
+
 
 def semantic_artifact_path(out_dir: Path, attempt: int) -> Path:
     return out_dir / "verification" / f"semantic-attempt-{attempt}.json"
+
 
 def write_semantic_result(
     out_dir: Path,
     attempt: int,
     result: dict[str, object],
 ) -> Path:
+    try:
+        role_output_contract.validate_ux_references(out_dir, "verifier", result)
+    except role_output_contract.RoleOutputContractError as exc:
+        raise SemanticVerifierError(
+            str(exc),
+            classification="ux_reference_outside_effective_context",
+        ) from exc
     path = semantic_artifact_path(out_dir, attempt)
     _write_result_pair(path, result, f"Semantic Verification Attempt {attempt}")
     return path
+
 
 def write_final_verdict(
     out_dir: Path,
@@ -23,6 +35,7 @@ def write_final_verdict(
     path = out_dir / "verification" / "final-verdict.json"
     _write_result_pair(path, result, "Final Semantic Verdict")
     return path
+
 
 def render_semantic_summary(
     result: dict[str, object],
@@ -57,9 +70,28 @@ def render_semantic_summary(
             f"- **{finding.get('severity', 'unknown')}** — "
             f"{finding.get('message', '')}{path}"
         )
+
+    ux_findings = result.get("ux_findings", [])
+    if ux_findings:
+        lines.extend(["", "## UX Findings", ""])
+        for finding in ux_findings:
+            if not isinstance(finding, dict):
+                continue
+            lines.append(
+                f"- **{finding.get('status', 'unknown')}** — "
+                f"{finding.get('source_kind', '')}:{finding.get('source_id', '')}"
+            )
+            evidence = str(finding.get("evidence", "") or "").strip()
+            required_change = str(finding.get("required_change", "") or "").strip()
+            if evidence:
+                lines.append(f"  - Evidence: {evidence}")
+            if required_change:
+                lines.append(f"  - Required change: {required_change}")
+
     repair_brief = str(result.get("repair_brief", "")).strip()
     lines.extend(["", "## Repair Brief", "", repair_brief or "None.", ""])
     return "\n".join(lines)
+
 
 def _write_result_pair(
     json_path: Path,

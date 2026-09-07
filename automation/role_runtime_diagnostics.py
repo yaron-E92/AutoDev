@@ -118,6 +118,12 @@ def record_attempt(
     failure_reason: str = "",
     termination: str = "completed",
     model: str = "",
+    structured_output_mode: str = "",
+    structured_output_state: str = "",
+    contract_name: str = "",
+    contract_version: int = 0,
+    schema_retry_count: int = 0,
+    ux_context_fingerprint: str = "",
     external_error: external_error_sanitizer.SafeExternalError | None = None,
 ) -> str:
     repo = repo.expanduser().resolve()
@@ -160,6 +166,15 @@ def record_attempt(
         "termination": termination,
         "returncode": returncode,
         "elapsed_ms": max(0, int(elapsed_ms)),
+        "structured_output_mode": str(structured_output_mode or ""),
+        "structured_output_state": str(structured_output_state or ""),
+        "role_output_contract": {
+            "name": str(contract_name or ""),
+            "version": max(0, int(contract_version or 0)),
+        },
+        "schema_retry_count": max(0, int(schema_retry_count or 0)),
+        "ux_context_active": bool(ux_context_fingerprint),
+        "ux_context_fingerprint": str(ux_context_fingerprint or ""),
         **artifact,
         "accepted": bool(accepted),
         "validation_error": runtime_excerpt(validation_error),
@@ -180,6 +195,16 @@ def record_attempt(
     relative = f".autodev-run/current/{ROLE_ATTEMPT_DIR}/{filename}"
     diagnostics["last_role_attempt"] = relative
     diagnostics["last_role_attempt_state"] = str(record.get("artifact_state", ""))
+    diagnostics["last_structured_output"] = {
+        "role": role,
+        "mode": str(structured_output_mode or ""),
+        "state": str(structured_output_state or ""),
+        "contract_name": str(contract_name or ""),
+        "contract_version": max(0, int(contract_version or 0)),
+        "schema_retry_count": max(0, int(schema_retry_count or 0)),
+        "ux_context_active": bool(ux_context_fingerprint),
+        "ux_context_fingerprint": str(ux_context_fingerprint or ""),
+    }
     _write_json_atomic(diagnostics_path, diagnostics)
 
     last_failure_path = current / LAST_FAILURE_FILE
@@ -207,6 +232,13 @@ def record_attempt(
             "reason": runtime_excerpt(failure_reason or validation_error),
             "stdout_excerpt": str(record.get("stdout_excerpt", "")),
             "stderr_excerpt": str(record.get("stderr_excerpt", "")),
+            "structured_output_mode": str(structured_output_mode or ""),
+            "structured_output_state": str(structured_output_state or ""),
+            "contract_name": str(contract_name or ""),
+            "contract_version": max(0, int(contract_version or 0)),
+            "schema_retry_count": max(0, int(schema_retry_count or 0)),
+            "ux_context_active": bool(ux_context_fingerprint),
+            "ux_context_fingerprint": str(ux_context_fingerprint or ""),
         }
         if external_error is not None:
             failure["external_error"] = external_error.to_json()

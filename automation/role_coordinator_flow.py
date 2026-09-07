@@ -6,6 +6,7 @@ from typing import Callable, Mapping
 from automation import (
     external_error_sanitizer,
     opencode_runtime,
+    role_output_contract,
     role_resume,
     role_runtime,
     role_runtime_diagnostics,
@@ -28,6 +29,11 @@ from automation.role_coordinator_stages import (
     run_stage,
     terminal_payload,
 )
+
+
+def _bind_structured_resume_identity(repo: Path, snapshots: dict[str, object]) -> None:
+    role_output_contract.bind_snapshot_set_to_existing_contexts(repo, snapshots)
+
 
 def coordinate(
     repo: Path,
@@ -69,6 +75,7 @@ def coordinate(
 
     if resume:
         try:
+            _bind_structured_resume_identity(repo, snapshots)
             cursor = _resume_payload(
                 repo,
                 snapshots,
@@ -146,6 +153,7 @@ def coordinate(
             source=runtime_source,
             force_manifest=True,
         )
+        _bind_structured_resume_identity(repo, snapshots)
         cursor = _resume_payload(repo, snapshots, runner=runner)
 
     for _ in range(MAX_TRANSITIONS):
@@ -278,6 +286,7 @@ def coordinate(
             )
 
         try:
+            _bind_structured_resume_identity(repo, snapshots)
             cursor = _resume_payload(repo, snapshots, runner=runner)
         except role_resume.RoleResumeError as exc:
             return terminal_payload(
