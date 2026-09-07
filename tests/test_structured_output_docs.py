@@ -12,7 +12,8 @@ class StructuredOutputDocsTests(unittest.TestCase):
             / "structured-output-contracts.md"
         ).read_text(encoding="utf-8")
         self.assertIn("schema-valid value is only a transport/protocol success", text)
-        self.assertIn("does not consume AutoDev's one protocol-correction attempt", text)
+        self.assertIn("schema retries occur inside the runtime boundary", text)
+        self.assertIn("protocol-correction attempt", text)
         self.assertIn("must not contain issue text", text)
         self.assertIn("cannot assert, replace, or prove that fingerprint", text)
         self.assertIn("opencode run --format json", text)
