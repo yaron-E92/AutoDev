@@ -69,6 +69,13 @@ def _write_role_contracts(current: Path) -> None:
         },
     )
 
+def _clear_structured_role_sidecars(current: Path, role: str) -> None:
+    """Remove structured evidence that must not cross a physical role attempt."""
+
+    (current / f"structured-ux-{role}.json").unlink(missing_ok=True)
+    if role == "reader":
+        (current / "structured-reader-evidence.json").unlink(missing_ok=True)
+
 def _begin_role_invocation(current: Path, role: str) -> None:
     if role not in ROLE_NAMES:
         raise OpenCodeAdapterError(f"unsupported OpenCode role: {role}")
@@ -87,6 +94,7 @@ def _begin_role_invocation(current: Path, role: str) -> None:
         used[role] = False
     _write_diagnostics(current, diagnostics)
     (current / f"contract-correction-{role}.md").unlink(missing_ok=True)
+    _clear_structured_role_sidecars(current, role)
 
 def _mark_role_accepted(current: Path, role: str, outputs: list[Path]) -> None:
     state_value = _read_json(current / "state.json")
