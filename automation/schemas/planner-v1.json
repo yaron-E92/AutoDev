@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autodev.local/schemas/planner-v1.json",
+  "title": "AutoDev planner output v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["plan", "ux"],
+  "properties": {
+    "plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "where_to_look",
+        "files_areas_likely_to_touch",
+        "assumptions",
+        "implementation_plan",
+        "risks_gotchas",
+        "recommended_implementation_approach"
+      ],
+      "properties": {
+        "where_to_look": {"type": "string", "minLength": 1},
+        "files_areas_likely_to_touch": {"type": "string", "minLength": 1},
+        "assumptions": {"type": "string"},
+        "implementation_plan": {"type": "string", "minLength": 1},
+        "risks_gotchas": {"type": "string"},
+        "recommended_implementation_approach": {"type": "string", "minLength": 1}
+      }
+    },
+    "ux": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["constraints_addressed", "open_questions"],
+      "properties": {
+        "constraints_addressed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["source_kind", "source_id", "impact"],
+            "properties": {
+              "source_kind": {
+                "type": "string",
+                "enum": ["journey", "screen", "state", "contract", "principle"]
+              },
+              "source_id": {"type": "string", "minLength": 1},
+              "impact": {"type": "string", "minLength": 1}
+            }
+          }
+        },
+        "open_questions": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  }
+}
