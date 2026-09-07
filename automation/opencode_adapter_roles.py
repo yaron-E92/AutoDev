@@ -43,6 +43,7 @@ from automation.opencode_adapter_models import (
 )
 from automation.opencode_adapter_protocol import (
     _begin_role_invocation,
+    _clear_structured_role_sidecars,
     _contract_output_path,
     _ensure_opencode_protocol,
     _mark_role_accepted,
@@ -309,6 +310,11 @@ def _raise_contract_rejection(
             + ("Bounded previous output:\n\n```text\n" + previous + "\n```\n\n" if previous else "")
             + f"Correct the designated output artifact once, then rerun exactly:\n\n`{contract.get('accept', '')}`\n"
         )
+
+    # A protocol correction is a new physical model attempt. The previous
+    # native attempt's sidecars must not leak into a correction that uses the
+    # text/fallback path; a new native correction will materialize fresh ones.
+    _clear_structured_role_sidecars(current, role)
     _write_text(correction, correction_body)
     raise OpenCodeAdapterError(
         f"{role} protocol artifact rejected; one correction is allowed using {correction}; "
