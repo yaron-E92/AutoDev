@@ -311,6 +311,9 @@ def _raise_contract_rejection(
             + f"Correct the designated output artifact once, then rerun exactly:\n\n`{contract.get('accept', '')}`\n"
         )
 
+    # A protocol correction is a new physical model attempt. The previous
+    # native attempt's sidecars must not leak into a correction that uses the
+    # text/fallback path; a new native correction will materialize fresh ones.
     _clear_structured_role_sidecars(current, role)
     _write_text(correction, correction_body)
     raise OpenCodeAdapterError(

@@ -119,6 +119,26 @@ _CONTRACTS = {
         fallback_parser="automation.opencode_adapter_handoff._bounded_result",
         native_retry_count=2,
     ),
+    "implementer": RoleOutputContract(
+        role="implementer",
+        name="autodev.implementer-result",
+        version=1,
+        schema_file="implementer-result-v1.json",
+        output_artifact="commit-message.txt",
+        semantic_validator="single-line commit message plus deterministic source identity",
+        fallback_parser="existing commit-message.txt acceptance",
+        native_retry_count=2,
+    ),
+    "fixer": RoleOutputContract(
+        role="fixer",
+        name="autodev.fixer-result",
+        version=1,
+        schema_file="fixer-result-v1.json",
+        output_artifact="structured-completion-fixer.json",
+        semantic_validator="deterministic source identity and repair-stage verification",
+        fallback_parser="existing source-edit acceptance",
+        native_retry_count=2,
+    ),
 }
 
 
@@ -220,6 +240,24 @@ def materialize_structured_output(
         target.write_text(handoff + "\n", encoding="utf-8")
         _write_ux_sidecar(current, contract.role, payload)
         return target
+    if contract.role == "implementer":
+        message = str(payload.get("commit_message", "") or "").strip()
+        if not message or len(message) > 200 or len(message.splitlines()) != 1:
+            raise RoleOutputContractError(
+                "structured Implementer commit_message must be one non-empty line of at most 200 characters"
+            )
+        target = current / contract.output_artifact
+        target.write_text(message + "\n", encoding="utf-8")
+        _write_completion_report(current, contract.role, payload)
+        return target
+    if contract.role == "fixer":
+        summary = str(payload.get("completion_summary", "") or "").strip()
+        notes = payload.get("validation_notes", [])
+        if not summary:
+            raise RoleOutputContractError("structured Fixer completion_summary is empty")
+        if not isinstance(notes, list) or any(not isinstance(item, str) for item in notes):
+            raise RoleOutputContractError("structured Fixer validation_notes must be a string array")
+        return _write_completion_report(current, contract.role, payload)
     raise RoleOutputContractError(
         f"structured output materialization is not implemented for role {contract.role}"
     )
@@ -434,6 +472,35 @@ def _write_reader_evidence_sidecar(current: Path, payload: dict[str, object]) ->
         json.dumps(normalized, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
+
+
+def _write_completion_report(
+    current: Path,
+    role: str,
+    payload: dict[str, object],
+) -> Path:
+    summary = str(payload.get("completion_summary", "") or "").strip()
+    notes = payload.get("validation_notes", [])
+    if not summary:
+        raise RoleOutputContractError(f"structured {role} completion_summary is empty")
+    if not isinstance(notes, list) or len(notes) > 32 or any(
+        not isinstance(item, str) or not item.strip() for item in notes
+    ):
+        raise RoleOutputContractError(
+            f"structured {role} validation_notes must be a bounded array of non-empty strings"
+        )
+    safe_payload = {
+        "completion_summary": summary,
+        "validation_notes": [str(item).strip() for item in notes],
+    }
+    if role == "implementer":
+        safe_payload["commit_message"] = str(payload.get("commit_message", "") or "").strip()
+    path = current / f"structured-completion-{role}.json"
+    path.write_text(
+        json.dumps(safe_payload, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    return path
 
 
 def _write_ux_sidecar(current: Path, role: str, payload: dict[str, object]) -> None:
