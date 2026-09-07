@@ -13,6 +13,7 @@ from typing import Callable
 
 from automation import (
     opencode_cli,
+    opencode_cli_text,
     opencode_privacy_adapter,
     opencode_structured_output,
     privacy,
@@ -426,20 +427,35 @@ class OpenCodeRoleRuntime:
             runner=runner,
             fallback_state=READER_SCHEMA_FALLBACK_STATE,
             schema_retry_count=native_error.retries,
+            prompt_override=_reader_fallback_prompt(context.prompt),
         )
         total_elapsed = int((time.monotonic() - native_started) * 1000)
 
         if fallback.termination == "completed" and fallback.returncode == 0:
             try:
-                from automation.opencode_adapter_handoff import _bounded_result
-
-                _bounded_result(reader_path)
+                opencode_cli_text.materialize_reader_fallback(
+                    repo,
+                    context.output_contract,
+                    fallback.stdout,
+                )
+                opencode_cli_text.record_reader_fallback_materialization(
+                    repo,
+                    opencode_cli_text.FALLBACK_MATERIALIZATION_CAPTURED_TEXT,
+                )
             except opencode_adapter_contract.OpenCodeAdapterError as exc:
+                detail = str(exc)
+                try:
+                    opencode_cli_text.record_reader_fallback_materialization(
+                        repo,
+                        opencode_cli_text.FALLBACK_MATERIALIZATION_REJECTED,
+                    )
+                except opencode_adapter_contract.OpenCodeAdapterError as diagnostics_exc:
+                    detail += f"; diagnostic persistence failed: {diagnostics_exc}"
                 return self._reader_schema_fallback_failure(
                     fallback,
                     elapsed_ms=total_elapsed,
                     retries=native_error.retries,
-                    detail=f"fallback-text Reader output rejected: {exc}",
+                    detail=f"fallback-text Reader output rejected: {detail}",
                 )
             return role_runtime.RoleInvocationResult(
                 runtime=fallback.runtime,
@@ -458,6 +474,13 @@ class OpenCodeRoleRuntime:
                 schema_retry_count=max(0, int(native_error.retries)),
             )
 
+        try:
+            opencode_cli_text.record_reader_fallback_materialization(
+                repo,
+                opencode_cli_text.FALLBACK_MATERIALIZATION_INVOCATION_FAILED,
+            )
+        except opencode_adapter_contract.OpenCodeAdapterError:
+            pass
         detail = fallback.stderr or fallback.stdout or "fallback-text Reader invocation failed"
         return self._reader_schema_fallback_failure(
             fallback,
@@ -534,6 +557,7 @@ class OpenCodeRoleRuntime:
         runner: Callable[..., object],
         fallback_state: str,
         schema_retry_count: int = 0,
+        prompt_override: str = "",
     ) -> role_runtime.RoleInvocationResult:
         command = [
             executable,
@@ -548,7 +572,7 @@ class OpenCodeRoleRuntime:
             str(repo),
             "--format",
             "json",
-            context.prompt,
+            prompt_override or context.prompt,
         ])
         started = time.monotonic()
         contract = context.output_contract
@@ -614,6 +638,21 @@ class OpenCodeRoleRuntime:
             model=model,
             **metadata,
         )
+
+
+def _reader_fallback_prompt(prompt: str) -> str:
+    return (
+        prompt.rstrip()
+        + "\n\n# AutoDev Reader schema-exhaustion fallback\n\n"
+        "Native Reader Structured Output has exhausted its bounded schema retries. "
+        "This is the single compatibility fallback-text attempt for the same Reader "
+        "role, model, privacy route, and prepared repository evidence. Do not write or "
+        "edit `.autodev-run/current/reader-brief.md`. Return the complete bounded factual "
+        "Reader handoff as your final textual response; AutoDev Python will capture the "
+        "completed OpenCode text event and materialize the durable Reader artifact. "
+        "Do not return or invent workflow stage, execution classification, queue state, "
+        "manual-attention decisions, external-boundary decisions, or UX fingerprints.\n"
+    )
 
 
 def _text(value: object) -> str:
