@@ -134,30 +134,25 @@ class OpenCodeMultimodalTests(unittest.TestCase):
                 )
 
             with (
-                patch.object(
-                    ux_multimodal_runtime.opencode_cli,
-                    "resolve_opencode_cli",
+                patch(
+                    "automation.opencode_cli.resolve_opencode_cli",
                     return_value="opencode",
                 ),
-                patch.object(
-                    ux_multimodal_runtime.privacy,
-                    "load_policy",
+                patch(
+                    "automation.privacy.load_policy",
                     return_value=SimpleNamespace(enabled=True),
                 ),
                 patch("automation.privacy_consent.ensure_run_consent"),
-                patch.object(
-                    ux_multimodal_runtime.opencode_privacy_adapter,
-                    "evaluate_role",
+                patch(
+                    "automation.opencode_privacy_adapter.evaluate_role",
                     return_value=(SimpleNamespace(), {}),
                 ),
-                patch.object(
-                    ux_multimodal_runtime.privacy_authorization,
-                    "authorize_evaluated",
+                patch(
+                    "automation.privacy_authorization.authorize_evaluated",
                     side_effect=authorize,
                 ),
-                patch.object(
-                    ux_multimodal_runtime.opencode_multimodal,
-                    "invoke",
+                patch(
+                    "automation.opencode_multimodal.invoke",
                     side_effect=invoke,
                 ),
             ):
