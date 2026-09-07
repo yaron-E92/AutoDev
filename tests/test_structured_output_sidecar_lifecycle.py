@@ -5,7 +5,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from automation import opencode_adapter_protocol
+from automation import opencode_adapter_protocol, opencode_adapter_roles
+from automation.opencode_adapter_contract import OpenCodeAdapterError
 
 
 class StructuredOutputSidecarLifecycleTests(unittest.TestCase):
@@ -56,6 +57,43 @@ class StructuredOutputSidecarLifecycleTests(unittest.TestCase):
 
             self.assertFalse(reader_ux.exists())
             self.assertFalse(reader_evidence.exists())
+
+    def test_protocol_correction_clears_native_sidecars_before_next_attempt(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            current = Path(temp_dir) / ".autodev-run" / "current"
+            current.mkdir(parents=True)
+            (current / "run-diagnostics.json").write_text("{}\n", encoding="utf-8")
+
+            plan = current / "plan.md"
+            plan.write_text("invalid plan\n", encoding="utf-8")
+            sidecar = current / "structured-ux-planner.json"
+            sidecar.write_text(
+                json.dumps(
+                    {
+                        "constraints_addressed": [
+                            {
+                                "source_kind": "screen",
+                                "source_id": "invented-screen",
+                                "impact": "must not survive correction",
+                            }
+                        ],
+                        "open_questions": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(OpenCodeAdapterError):
+                opencode_adapter_roles._raise_contract_rejection(
+                    current,
+                    "planner",
+                    plan,
+                    OpenCodeAdapterError("structured UX reference rejected"),
+                )
+
+            self.assertFalse(sidecar.exists())
+            self.assertTrue((current / "contract-correction-planner.md").is_file())
+            self.assertTrue(plan.is_file())
 
 
 if __name__ == "__main__":
