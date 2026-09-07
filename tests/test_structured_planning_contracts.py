@@ -71,7 +71,8 @@ class StructuredPlanningContractTests(unittest.TestCase):
             )
             self.assertEqual(sidecar["constraints_addressed"][0]["source_id"], "create-task")
             accepted = opencode_adapter_roles._accept_role_once("planner", current, target)
-            self.assertEqual(accepted, [target])
+            self.assertEqual(len(accepted), 1)
+            self.assertTrue(accepted[0].samefile(target))
 
     def test_synthesizer_native_payload_preserves_existing_handoff_artifact(self):
         contract = role_output_contract.contract_for_role("synthesizer")
@@ -103,7 +104,8 @@ class StructuredPlanningContractTests(unittest.TestCase):
             )
             self.assertEqual(sidecar["open_questions"], ["Confirm the loading state."])
             accepted = opencode_adapter_roles._accept_role_once("synthesizer", current, target)
-            self.assertEqual(accepted, [target])
+            self.assertEqual(len(accepted), 1)
+            self.assertTrue(accepted[0].samefile(target))
 
     def test_planning_ux_reference_outside_selected_context_fails_at_shared_acceptance(self):
         contract = role_output_contract.contract_for_role("planner")
