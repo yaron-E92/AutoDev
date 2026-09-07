@@ -148,7 +148,6 @@ def materialize_structured_output(
     repo = repo.expanduser().resolve()
     current = repo / ".autodev-run" / "current"
     current.mkdir(parents=True, exist_ok=True)
-    validate_ux_references(current, contract.role, payload)
 
     if contract.role == "verifier":
         target = current / contract.output_artifact
@@ -313,6 +312,18 @@ def invocation_binding(repo: Path, role: str) -> dict[str, object]:
     records = manifest.get("structured_output", {})
     value = records.get(role, {}) if isinstance(records, dict) else {}
     return dict(value) if isinstance(value, dict) else {}
+
+
+def validate_materialized_ux_sidecar(current: Path, role: str) -> None:
+    """Validate native-only UX references at the same role-acceptance boundary as text output."""
+
+    path = current / f"structured-ux-{role}.json"
+    if not path.is_file():
+        return
+    ux = _read_json(path)
+    if not ux:
+        raise RoleOutputContractError(f"structured UX sidecar for {role} is malformed")
+    validate_ux_references(current, role, {"ux": ux})
 
 
 def validate_ux_references(
