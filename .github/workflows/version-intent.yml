@@ -114,7 +114,7 @@ jobs:
 
       - name: Validate release intent
         id: version
-        uses: ./.github/actions/version-policy
+        uses: $/.github/actions/version-policy
         with:
           mode: check-pr
           repository: ${{ github.repository }}

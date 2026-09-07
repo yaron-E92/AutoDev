@@ -19,6 +19,15 @@ class GitFlowPromotionSemVerWiringTests(unittest.TestCase):
         self.assertIn("pr-head: ${{ steps.pr.outputs.head_ref }}", text)
         self.assertIn("github-token: ${{ github.token }}", text)
 
+    def test_reusable_version_intent_loads_policy_from_workflow_repository(self):
+        text = (ROOT / ".github" / "workflows" / "version-intent.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("Check out caller repository with full history", text)
+        self.assertIn("fetch-depth: 0", text)
+        self.assertIn("uses: $/.github/actions/version-policy", text)
+        self.assertNotIn("uses: ./.github/actions/version-policy", text)
+
     def test_version_policy_action_exposes_branch_role_inputs(self):
         text = (ROOT / ".github" / "actions" / "version-policy" / "action.yml").read_text(
             encoding="utf-8"

@@ -177,6 +177,8 @@ It exposes:
 
 This workflow is read-only. When a PR number is available it resolves the current authoritative PR body, base branch, and head branch through the GitHub API, checks out the caller repository with full history, executes the Action in `check-pr` mode, and exposes the candidate version and contributing-intent outputs.
 
+The internal policy Action is referenced with `$/.github/actions/version-policy`, not `./.github/actions/version-policy`. In a cross-repository reusable workflow, `$` resolves against the repository and exact commit containing the running reusable workflow, while `./` resolves against the checked-out workspace. Because `version-intent.yml` deliberately checks out the caller repository at the workspace root, using `$` keeps AutoDev's implementation bound to the same immutable AutoDev commit selected by the consumer while the Action still inspects the caller repository.
+
 A metadata-only rerun therefore validates the current PR metadata rather than relying on stale event text. This branch-role context is what lets the shared policy distinguish an ordinary integration PR, a Git-Flow `develop -> main` promotion, and a direct release-branch hotfix.
 
 ## Reusable trusted-tag workflow
