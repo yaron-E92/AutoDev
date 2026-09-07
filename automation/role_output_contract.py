@@ -141,6 +141,59 @@ def materialize_structured_output(
     )
 
 
+def persist_invocation_binding(
+    repo: Path,
+    role: str,
+    contract: RoleOutputContract | None,
+    *,
+    capability: str,
+    mode: str,
+    state: str,
+    schema_retry_count: int,
+    ux_context_fingerprint: str,
+) -> None:
+    """Persist only AutoDev-owned, content-free structured invocation identity."""
+
+    repo = repo.expanduser().resolve()
+    path = repo / ".autodev-run" / "current" / "run-manifest.json"
+    if not path.is_file():
+        return
+    from automation import run_manifest
+
+    try:
+        manifest = run_manifest.load_manifest(path)
+    except (OSError, ValueError, run_manifest.ManifestError):
+        return
+    records = manifest.setdefault("structured_output", {})
+    if not isinstance(records, dict):
+        raise RoleOutputContractError("run manifest structured_output metadata is malformed")
+    records[role] = {
+        "capability": validate_capability(capability),
+        "mode": str(mode or ""),
+        "state": str(state or ""),
+        "schema_retry_count": max(0, int(schema_retry_count or 0)),
+        "ux_context_active": bool(ux_context_fingerprint),
+        "ux_context_fingerprint": str(ux_context_fingerprint or ""),
+        "contract": contract.safe_metadata() if contract is not None else {},
+    }
+    run_manifest.save_manifest(path, manifest)
+
+
+def invocation_binding(repo: Path, role: str) -> dict[str, object]:
+    path = repo.expanduser().resolve() / ".autodev-run" / "current" / "run-manifest.json"
+    if not path.is_file():
+        return {}
+    from automation import run_manifest
+
+    try:
+        manifest = run_manifest.load_manifest(path)
+    except (OSError, ValueError, run_manifest.ManifestError):
+        return {}
+    records = manifest.get("structured_output", {})
+    value = records.get(role, {}) if isinstance(records, dict) else {}
+    return dict(value) if isinstance(value, dict) else {}
+
+
 def validate_ux_references(
     current: Path,
     role: str,
