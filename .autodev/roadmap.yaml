@@ -1,0 +1,13 @@
+version: 1
+
+priority:
+  - issue: 290
+  - issue: 236
+  - issue: 292
+  - issue: 293
+  - issue: 244
+  - issue: 97
+  - issue: 268
+  - issue: 206
+
+fallback: oldest
