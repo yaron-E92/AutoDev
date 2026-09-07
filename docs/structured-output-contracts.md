@@ -21,7 +21,13 @@ Schemas are static product resources and must not contain issue text, repository
 
 When a role needs to report UX impact, it may return generic references containing a `source_kind` and `source_id`. AutoDev validates those references against the UX context it selected for that role. The effective UX-context fingerprint is AutoDev-owned durable identity; a model cannot assert, replace, or prove that fingerprint in its response.
 
-The native Planner and Synthesizer paths persist their structured UX metadata only as a sidecar to the ordinary `plan.md` or `synthesized-handoff.md` artifact. The sidecar is checked at the shared role-acceptance boundary, so an invented UX reference is a protocol rejection rather than a runtime failure.
+The native Planner, Synthesizer, and Reader paths persist their structured UX metadata only as a sidecar to the ordinary role artifact. The sidecar is checked at the shared role-acceptance boundary, so an invented UX reference is a protocol rejection rather than a runtime failure.
+
+## Reader control-plane boundary
+
+The structured Reader contract contains only a bounded factual handoff, bounded repository observations, and generic UX references. It deliberately has no execution-classification, attention, queue, manual-boundary, or workflow-stage field.
+
+This preserves the execution-classification v2 architecture: AutoDev classifies work deterministically before Reader, and any legacy Reader classification block remains advisory diagnostics only. Native structured Reader output cannot set or override `ExecutionClassification`, create manual-attention state, or claim an external boundary as control-plane truth. Unsupported extra fields are rejected by the static schema and by AutoDev's defensive materializer without mutating classification state.
 
 ## OpenCode
 
