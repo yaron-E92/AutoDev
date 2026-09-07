@@ -8,7 +8,8 @@
   "properties": {
     "handoff_markdown": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "maxLength": 30000
     },
     "ux": {
       "type": "object",
@@ -17,6 +18,7 @@
       "properties": {
         "constraints_addressed": {
           "type": "array",
+          "maxItems": 128,
           "items": {
             "type": "object",
             "additionalProperties": false,
@@ -26,14 +28,15 @@
                 "type": "string",
                 "enum": ["journey", "screen", "state", "contract", "principle"]
               },
-              "source_id": {"type": "string", "minLength": 1},
-              "impact": {"type": "string", "minLength": 1}
+              "source_id": {"type": "string", "minLength": 1, "maxLength": 512},
+              "impact": {"type": "string", "minLength": 1, "maxLength": 4000}
             }
           }
         },
         "open_questions": {
           "type": "array",
-          "items": {"type": "string", "minLength": 1}
+          "maxItems": 64,
+          "items": {"type": "string", "minLength": 1, "maxLength": 4000}
         }
       }
     }
