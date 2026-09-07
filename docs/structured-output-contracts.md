@@ -29,6 +29,16 @@ The structured Reader contract contains only a bounded factual handoff, bounded 
 
 This preserves the execution-classification v2 architecture: AutoDev classifies work deterministically before Reader, and any legacy Reader classification block remains advisory diagnostics only. Native structured Reader output cannot set or override `ExecutionClassification`, create manual-attention state, or claim an external boundary as control-plane truth. Unsupported extra fields are rejected by the static schema and by AutoDev's defensive materializer without mutating classification state.
 
+## Implementer and Fixer completion evidence
+
+Structured Output does not constrain or replace the Implementer/Fixer repository-editing tool loop. It constrains only the small completion report returned after those edits.
+
+The Implementer v1 completion report contains a single-line commit-message suggestion, a bounded completion summary, and bounded validation notes. AutoDev materializes the same existing `commit-message.txt` artifact and independently computes the source identity before any commit or workflow transition.
+
+The Fixer v1 completion report contains only a bounded summary and validation notes. It does not contain repair success, source identity, verification verdict, workflow-stage completion, commit state, or execution classification. AutoDev independently observes the worktree and reruns the appropriate deterministic or semantic verification stage. A schema-valid completion report is therefore evidence, never self-attested proof that implementation or repair succeeded.
+
+The first completion-report contract intentionally does not ask Implementer/Fixer to self-attest UX conformance. Planner/Verifier provide mechanically validated UX references, and later verification remains authoritative. A future additive contract version may record completion-time UX references if AutoDev can validate them without turning self-reporting into proof.
+
 ## OpenCode
 
 For OpenCode, `opencode run --format json` is only a CLI event/output format and is not treated as schema-constrained model output. Native Structured Output uses OpenCode's headless server/session API and sends the AutoDev-owned JSON Schema in the session prompt `format` request. Older OpenCode installations that do not expose that API fall back to the existing CLI/text protocol.
