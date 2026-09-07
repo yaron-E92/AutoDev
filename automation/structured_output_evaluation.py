@@ -8,6 +8,7 @@ from pathlib import Path
 CURRENT_DIR = Path(".autodev-run") / "current"
 ROLE_ATTEMPT_DIR = "role-attempts"
 _NATIVE_MODES = {"native-strict", "native-validated"}
+_UX_EVIDENCE_ROLES = {"reader", "synthesizer", "planner", "verifier"}
 
 
 def evaluate(repo: Path) -> dict[str, object]:
@@ -29,6 +30,7 @@ def evaluate(repo: Path) -> dict[str, object]:
             _accumulate(totals, record)
 
     active_ux_roles: list[str] = []
+    evidence_applicable_roles: list[str] = []
     ux_evidence_roles: list[str] = []
     if current.is_dir():
         for context_path in sorted(current.glob("ux-context-*.json")):
@@ -37,6 +39,9 @@ def evaluate(repo: Path) -> dict[str, object]:
             if not role or not _ux_context_active(context):
                 continue
             active_ux_roles.append(role)
+            if role not in _UX_EVIDENCE_ROLES:
+                continue
+            evidence_applicable_roles.append(role)
             if _has_mechanical_ux_evidence(current, role):
                 ux_evidence_roles.append(role)
 
@@ -46,9 +51,10 @@ def evaluate(repo: Path) -> dict[str, object]:
         "roles": {role: roles[role] for role in sorted(roles)},
         "ux": {
             "active_roles": sorted(set(active_ux_roles)),
+            "evidence_applicable_roles": sorted(set(evidence_applicable_roles)),
             "evidence_roles": sorted(set(ux_evidence_roles)),
             "missing_evidence_roles": sorted(
-                set(active_ux_roles) - set(ux_evidence_roles)
+                set(evidence_applicable_roles) - set(ux_evidence_roles)
             ),
         },
     }
