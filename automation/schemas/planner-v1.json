@@ -18,12 +18,12 @@
         "recommended_implementation_approach"
       ],
       "properties": {
-        "where_to_look": {"type": "string", "minLength": 1},
-        "files_areas_likely_to_touch": {"type": "string", "minLength": 1},
-        "assumptions": {"type": "string"},
-        "implementation_plan": {"type": "string", "minLength": 1},
-        "risks_gotchas": {"type": "string"},
-        "recommended_implementation_approach": {"type": "string", "minLength": 1}
+        "where_to_look": {"type": "string", "minLength": 1, "maxLength": 12000},
+        "files_areas_likely_to_touch": {"type": "string", "minLength": 1, "maxLength": 12000},
+        "assumptions": {"type": "string", "maxLength": 12000},
+        "implementation_plan": {"type": "string", "minLength": 1, "maxLength": 24000},
+        "risks_gotchas": {"type": "string", "maxLength": 12000},
+        "recommended_implementation_approach": {"type": "string", "minLength": 1, "maxLength": 12000}
       }
     },
     "ux": {
@@ -33,6 +33,7 @@
       "properties": {
         "constraints_addressed": {
           "type": "array",
+          "maxItems": 128,
           "items": {
             "type": "object",
             "additionalProperties": false,
@@ -42,14 +43,15 @@
                 "type": "string",
                 "enum": ["journey", "screen", "state", "contract", "principle"]
               },
-              "source_id": {"type": "string", "minLength": 1},
-              "impact": {"type": "string", "minLength": 1}
+              "source_id": {"type": "string", "minLength": 1, "maxLength": 512},
+              "impact": {"type": "string", "minLength": 1, "maxLength": 4000}
             }
           }
         },
         "open_questions": {
           "type": "array",
-          "items": {"type": "string", "minLength": 1}
+          "maxItems": 64,
+          "items": {"type": "string", "minLength": 1, "maxLength": 4000}
         }
       }
     }
