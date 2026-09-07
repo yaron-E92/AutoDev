@@ -39,6 +39,16 @@ The Fixer v1 completion report contains only a bounded summary and validation no
 
 The first completion-report contract intentionally does not ask Implementer/Fixer to self-attest UX conformance. Planner/Verifier provide mechanically validated UX references, and later verification remains authoritative. A future additive contract version may record completion-time UX references if AutoDev can validate them without turning self-reporting into proof.
 
+## Evaluation
+
+Every physical role attempt already records content-free rollout fields under `.autodev-run/current/role-attempts/`: the role, native/fallback mode, schema retry count, whether AutoDev accepted the artifact, failure classification, and whether the attempt was an AutoDev protocol correction. This makes serialization reliability measurable without retaining prompt or model-output content in the evaluation summary.
+
+Run `python -m automation.structured_output_evaluation <repo>` against a completed or interrupted run to aggregate those records by role and by native versus fallback execution. Compare equivalent workloads before and after a role migration using `protocol_correction_attempts`, `protocol_rejections`, and `schema_retry_count`: native schema retries are expected to absorb shape-only failures before they consume AutoDev's single protocol-correction allowance.
+
+The same evaluator reports which UX-bearing Reader/Synthesizer/Planner/Verifier invocations had effective UX context and which produced mechanically inspectable structured UX evidence. Implementer/Fixer are deliberately excluded from UX-evidence completeness in v1 because their completion reports are non-authoritative and intentionally do not self-attest UX conformance. The evaluator returns counts and role names only; it does not copy prompt text, repository evidence, UX identifiers, or model output into its aggregate.
+
+Structured sidecars are scoped to one logical role invocation. Preparing a fresh invocation clears stale `structured-ux-*`, Reader-evidence, and completion-report sidecars so a later fallback path cannot accidentally consume native evidence from an older invocation.
+
 ## OpenCode
 
 For OpenCode, `opencode run --format json` is only a CLI event/output format and is not treated as schema-constrained model output. Native Structured Output uses OpenCode's headless server/session API and sends the AutoDev-owned JSON Schema in the session prompt `format` request. Older OpenCode installations that do not expose that API fall back to the existing CLI/text protocol.
