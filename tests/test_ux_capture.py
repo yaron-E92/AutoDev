@@ -49,7 +49,8 @@ class UXCaptureTests(unittest.TestCase):
             def runner(command, **kwargs):
                 calls.append(list(command))
                 output = Path(kwargs["env"]["AUTODEV_UX_CAPTURE_OUTPUT"])
-                self.assertTrue(str(output).startswith(str(current / "ux-captures")))
+                self.assertTrue(output.parent.samefile(current / "ux-captures"))
+                self.assertEqual(output.name, "home.png")
                 self.assertEqual(kwargs["env"]["AUTODEV_UX_CAPTURE_TARGET"], "screen:home")
                 output.write_bytes(PNG_A)
                 return SimpleNamespace(returncode=0, stdout="", stderr="")
