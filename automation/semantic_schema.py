@@ -34,6 +34,7 @@ def semantic_result_template(expected_criteria: list[str] | None = None) -> dict
         ],
         "findings": [],
         "repair_brief": "",
+        "ux_findings": [],
     }
 
 
