@@ -218,6 +218,8 @@ def _accept_role_once(role: str, current: Path, input_path: Path | None) -> list
         result = parse_semantic_output(
             _read_text(source),
             expected_criteria=extract_acceptance_criteria(issue_text) or None,
+            current=current,
+            role="verifier",
         )
         result_path = current / "verification-result.json"
         _write_text(result_path, json.dumps(result, indent=2, sort_keys=True) + "\n")
