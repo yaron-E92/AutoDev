@@ -10,6 +10,7 @@ from automation.opencode_adapter_contract import MAX_HANDOFF_CHARS, OpenCodeAdap
 
 FALLBACK_MATERIALIZATION_CAPTURED_TEXT = "captured-cli-text"
 FALLBACK_MATERIALIZATION_REJECTED = "captured-cli-text-rejected"
+FALLBACK_MATERIALIZATION_INVOCATION_FAILED = "fallback-invocation-failed"
 
 
 def extract_fallback_handoff(stdout: object) -> str:
@@ -104,3 +105,35 @@ def materialize_reader_fallback(
             "fallback-text Reader handoff did not produce reader-brief.md"
         )
     return target
+
+
+def record_reader_fallback_materialization(repo: Path, state: str) -> None:
+    """Persist content-free recovery evidence alongside normal run diagnostics."""
+
+    current = repo.expanduser().resolve() / ".autodev-run" / "current"
+    path = current / "run-diagnostics.json"
+    diagnostics: dict[str, object] = {}
+    if path.is_file():
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            loaded = {}
+        if isinstance(loaded, dict):
+            diagnostics = loaded
+    diagnostics["reader_fallback_materialization"] = {
+        "source": "captured-cli-text",
+        "state": str(state or ""),
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + ".tmp")
+    try:
+        temporary.write_text(
+            json.dumps(diagnostics, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        temporary.replace(path)
+    except OSError as exc:
+        temporary.unlink(missing_ok=True)
+        raise OpenCodeAdapterError(
+            f"cannot persist Reader fallback materialization diagnostics: {exc}"
+        ) from exc
