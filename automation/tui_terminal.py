@@ -26,16 +26,16 @@ def _clip(value: str, width: int) -> str:
     text = value.replace("\t", " ")
     if len(text) <= width:
         return text
-    if width <= 1:
+    if width <= 3:
         return text[:width]
-    return text[: width - 1] + "…"
+    return text[: width - 3] + "..."
 
 
 def _bar(title: str, width: int) -> str:
     label = f" {title} "
     if len(label) >= width:
         return _clip(label, width)
-    return label + "─" * (width - len(label))
+    return label + "-" * (width - len(label))
 
 
 def _queue_line(snapshot: tui_model.TuiSnapshot) -> str:
@@ -136,7 +136,7 @@ def render(
         selected = snapshot.issues[state.selected_index]
     if state.detail and selected is not None:
         lines.append(_bar(f"Issue #{selected.number} detail", width))
-        lines.append(_clip(f"{selected.title}", width))
+        lines.append(_clip(selected.title, width))
         lines.append(_clip(f"State: {selected.queue_state} | URL: {selected.url}", width))
         if selected.blockers:
             lines.append(_clip("Blockers: " + "; ".join(selected.blockers), width))
@@ -148,7 +148,7 @@ def render(
     else:
         lines.append(
             _clip(
-                "↑/↓ select  Enter detail  r refresh  m manage  c reconcile  n notifications  o open PR  q quit",
+                "Up/Down select  Enter detail  r refresh  m manage  c reconcile  n notifications  o open PR  q quit",
                 width,
             )
         )
@@ -199,7 +199,7 @@ def apply_key(
         state.detail = not state.detail
     elif key in {"r", "R"}:
         remote_refresh = True
-        state.message = "Refreshing repository state…"
+        state.message = "Refreshing repository state..."
     elif key == "m":
         if _selected_issue(snapshot, state):
             state.pending_action = "manage"
@@ -289,7 +289,7 @@ def run_interactive(
     stdout.write("\x1b[?1049h\x1b[?25l")
     stdout.flush()
     try:
-        with TerminalInput():
+        with TerminalInput(sys.stdin) as reader:
             while not state.quit:
                 now = time.monotonic()
                 if now - last_local >= local_refresh_seconds:
@@ -303,12 +303,6 @@ def run_interactive(
                 frame = render(snapshot, state, width=size.columns, height=size.lines)
                 stdout.write("\x1b[H\x1b[2J" + frame)
                 stdout.flush()
-                key = TerminalInput.read if False else ""  # keeps type checkers from treating read as static
-                del key
-                # Use the active context manager instance by reading through stdin
-                # directly; create a tiny wrapper only once per iteration on Windows/POSIX.
-                reader = TerminalInput(sys.stdin)
-                reader._fd = sys.stdin.fileno() if os.name != "nt" else None
                 pressed = reader.read(0.25)
                 if pressed:
                     state, force_remote = apply_key(pressed, snapshot, state)
