@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import json
-from automation.model_output_sanitizer import sanitize_model_output
+from pathlib import Path
 
+from automation.model_output_sanitizer import sanitize_model_output
 from automation.semantic_contract import (
     ALLOWED_FINDING_SEVERITIES,
     ALLOWED_REQUIREMENT_STATUSES,
@@ -40,6 +41,8 @@ def parse_semantic_output(
     output: str,
     *,
     expected_criteria: list[str] | None = None,
+    current: Path | None = None,
+    role: str = "verifier",
 ) -> dict[str, object]:
     cleaned = sanitize_model_output(output).strip()
     if not cleaned:
@@ -48,7 +51,18 @@ def parse_semantic_output(
         value = json.loads(cleaned)
     except json.JSONDecodeError as exc:
         raise _malformed("semantic verifier output was not valid JSON") from exc
-    return parse_semantic_value(value, expected_criteria=expected_criteria)
+    result = parse_semantic_value(value, expected_criteria=expected_criteria)
+    if current is not None:
+        from automation import role_output_contract
+
+        try:
+            role_output_contract.validate_ux_references(current, role, result)
+        except role_output_contract.RoleOutputContractError as exc:
+            raise SemanticVerifierError(
+                str(exc),
+                classification="ux_reference_outside_effective_context",
+            ) from exc
+    return result
 
 
 def parse_semantic_value(
