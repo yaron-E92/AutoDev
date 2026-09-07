@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autodev.local/schemas/synthesizer-v1.json",
+  "title": "AutoDev synthesizer output v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["handoff_markdown", "ux"],
+  "properties": {
+    "handoff_markdown": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 30000
+    },
+    "ux": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["constraints_addressed", "open_questions"],
+      "properties": {
+        "constraints_addressed": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["source_kind", "source_id", "impact"],
+            "properties": {
+              "source_kind": {
+                "type": "string",
+                "enum": ["journey", "screen", "state", "contract", "principle"]
+              },
+              "source_id": {"type": "string", "minLength": 1, "maxLength": 512},
+              "impact": {"type": "string", "minLength": 1, "maxLength": 4000}
+            }
+          }
+        },
+        "open_questions": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {"type": "string", "minLength": 1, "maxLength": 4000}
+        }
+      }
+    }
+  }
+}

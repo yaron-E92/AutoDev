@@ -11,7 +11,7 @@ The stable capability vocabulary is:
 
 ## Authority boundary
 
-A schema-valid value is only a transport/protocol success. AutoDev still materializes the role's established protocol artifact and runs the same deterministic acceptance boundary used by fallback text output. Semantic verifier consistency checks and later workflow stages remain authoritative.
+A schema-valid value is only a transport/protocol success. AutoDev still materializes the role's established protocol artifact and runs the same deterministic acceptance boundary used by fallback text output. Semantic verifier consistency checks, Planner six-section validation, bounded handoff checks, and later workflow stages remain authoritative.
 
 Native schema retry exhaustion is distinct from a runtime/provider transport failure. Both are also distinct from a value that passed native schema validation but is rejected by AutoDev's post-schema role acceptance. Only the latter uses the ordinary single protocol-correction allowance.
 
@@ -19,7 +19,9 @@ Native schema retry exhaustion is distinct from a runtime/provider transport fai
 
 Schemas are static product resources and must not contain issue text, repository content, customer-specific journey/screen/state identifiers, or an AutoDev UX-context fingerprint.
 
-When the Verifier reports UX impact, it may return generic references containing a `source_kind` and `source_id`. AutoDev validates those references against the UX context it selected for the Verifier at the shared acceptance boundary. The effective UX-context fingerprint is AutoDev-owned durable identity; a model cannot assert, replace, or prove that fingerprint in its response.
+When a role needs to report UX impact, it may return generic references containing a `source_kind` and `source_id`. AutoDev validates those references against the UX context it selected for that role. The effective UX-context fingerprint is AutoDev-owned durable identity; a model cannot assert, replace, or prove that fingerprint in its response.
+
+The native Planner and Synthesizer paths persist their structured UX metadata only as a sidecar to the ordinary `plan.md` or `synthesized-handoff.md` artifact. The sidecar is checked at the shared role-acceptance boundary, so an invented UX reference is a protocol rejection rather than a runtime failure.
 
 ## OpenCode
 

@@ -28,13 +28,15 @@ Legacy `mode: subagent` is intentionally not used here: `mode: all` keeps this r
 
 **Python-coordinator mode:** when the invoking prompt explicitly says AutoDev Python already prepared this role and will accept it after the process exits, do not read launcher configuration and do not run any AutoDev `prepare` or `accept` command. Read the already-prepared planner artifacts, perform only the requested repository analysis, write `.autodev-run/current/plan.md`, and return. If the invoking prompt names `contract-correction-planner.md`, apply only that correction and return. This mode overrides the numbered prepare/accept steps below for that invocation.
 
+**Native structured-output override:** when the Python-coordinator prompt additionally says the invocation is bound to an AutoDev structured-output contract and the runtime requests JSON-schema output, do **not** write `.autodev-run/current/plan.md` yourself. Return the complete structured planner result through the runtime mechanism. Populate `ux.constraints_addressed` only with selected journey/screen/state/contract/principle IDs that materially affect the plan, and use `ux.open_questions` for unresolved UX questions. AutoDev Python validates those references, records the UX evidence, renders the existing six-section `plan.md`, and runs the same planner acceptance checks. Do not invent or echo an AutoDev UX-context fingerprint.
+
 For standalone/manual invocation, use the installed `autodev` command as the exact bridge launcher. Never probe or fall back to another Python command. Role-contract commands already use `autodev`; preserve every argument exactly.
 
 Every `.opencode/...` and `.autodev-run/current/...` path in this contract is a literal repository-relative path. Use it exactly as written; never prepend the current working directory or insert another path component. Repository source inspection must remain inside the active worktree.
 
 1. Run the planner `prepare` command from `.autodev-run/current/role-contracts.json` using the installed `autodev` launcher.
 2. Read `.autodev-run/current/planner.md`, `.autodev-run/current/plan.template.md`, and the `planner` entry in `.autodev-run/current/role-contracts.json`.
-3. Follow the generated prompt and write the final six-section plan to `.autodev-run/current/plan.md` using the pre-created section structure exactly.
+3. Follow the generated prompt and write the final six-section plan to `.autodev-run/current/plan.md` using the pre-created section structure exactly. When pinned UX authority is present, address it in the plan; native Structured Output additionally records the selected UX references mechanically.
 4. Run the planner `accept` command from the role contract using the same `autodev` launcher. This accept call is mandatory for standalone/manual invocation.
 5. If that accept command rejects the protocol artifact, read `.autodev-run/current/contract-correction-planner.md`, correct the artifact once, and rerun the same accept command once. If it is rejected again, stop and report failure.
 
