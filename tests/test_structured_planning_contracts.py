@@ -5,7 +5,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from automation import planner_output, role_output_contract
+from automation import (
+    opencode_adapter_contract,
+    opencode_adapter_roles,
+    planner_output,
+    role_output_contract,
+)
 
 
 class StructuredPlanningContractTests(unittest.TestCase):
@@ -65,6 +70,8 @@ class StructuredPlanningContractTests(unittest.TestCase):
                 (current / "structured-ux-planner.json").read_text(encoding="utf-8")
             )
             self.assertEqual(sidecar["constraints_addressed"][0]["source_id"], "create-task")
+            accepted = opencode_adapter_roles._accept_role_once("planner", current, target)
+            self.assertEqual(accepted, [target])
 
     def test_synthesizer_native_payload_preserves_existing_handoff_artifact(self):
         contract = role_output_contract.contract_for_role("synthesizer")
@@ -95,13 +102,15 @@ class StructuredPlanningContractTests(unittest.TestCase):
                 (current / "structured-ux-synthesizer.json").read_text(encoding="utf-8")
             )
             self.assertEqual(sidecar["open_questions"], ["Confirm the loading state."])
+            accepted = opencode_adapter_roles._accept_role_once("synthesizer", current, target)
+            self.assertEqual(accepted, [target])
 
-    def test_planning_ux_reference_outside_selected_context_fails_closed(self):
+    def test_planning_ux_reference_outside_selected_context_fails_at_shared_acceptance(self):
         contract = role_output_contract.contract_for_role("planner")
         assert contract is not None
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
-            self._current_with_ux(repo, "planner")
+            current = self._current_with_ux(repo, "planner")
             payload = {
                 "plan": {
                     "where_to_look": "automation/",
@@ -122,17 +131,51 @@ class StructuredPlanningContractTests(unittest.TestCase):
                     "open_questions": [],
                 },
             }
-            with self.assertRaises(role_output_contract.RoleOutputContractError):
-                role_output_contract.materialize_structured_output(repo, contract, payload)
+            target = role_output_contract.materialize_structured_output(repo, contract, payload)
+            assert target is not None
+            with self.assertRaises(opencode_adapter_contract.OpenCodeAdapterError) as raised:
+                opencode_adapter_roles._accept_role_once("planner", current, target)
+            self.assertIn("outside the effective selected UX context", str(raised.exception))
 
-    def test_planning_contracts_never_embed_customer_specific_ux_ids(self):
+    def test_planning_contracts_are_bounded_and_never_embed_customer_specific_ux_ids(self):
         for role in ("planner", "synthesizer"):
             contract = role_output_contract.contract_for_role(role)
             assert contract is not None
-            schema_text = json.dumps(contract.schema(), sort_keys=True)
+            schema = contract.schema()
+            schema_text = json.dumps(schema, sort_keys=True)
             self.assertIn("source_id", schema_text)
             self.assertNotIn("create-task", schema_text)
             self.assertNotIn("task-editor-empty", schema_text)
+            ux = schema["properties"]["ux"]["properties"]
+            self.assertLessEqual(ux["constraints_addressed"]["maxItems"], 128)
+            self.assertLessEqual(ux["open_questions"]["maxItems"], 64)
+            if role == "synthesizer":
+                self.assertEqual(schema["properties"]["handoff_markdown"]["maxLength"], 30000)
+            else:
+                plan = schema["properties"]["plan"]["properties"]
+                self.assertTrue(all(value.get("maxLength", 0) > 0 for value in plan.values()))
+
+    def test_planning_snapshot_identity_binds_contract_and_effective_ux_context(self):
+        for role in ("planner", "synthesizer"):
+            original = {
+                "fingerprint": "a" * 64,
+                "safe_metadata": {"runtime": "opencode", "model": "provider/model"},
+            }
+            first = role_output_contract.bind_role_snapshot(
+                original,
+                role,
+                ux_context_fingerprint="ux-a",
+            )
+            second = role_output_contract.bind_role_snapshot(
+                first,
+                role,
+                ux_context_fingerprint="ux-b",
+            )
+            self.assertNotEqual(first["fingerprint"], original["fingerprint"])
+            self.assertNotEqual(second["fingerprint"], first["fingerprint"])
+            binding = second["safe_metadata"]["role_output_binding"]
+            self.assertEqual(binding["ux_context_fingerprint"], "ux-b")
+            self.assertEqual(binding["contract"]["identity"], f"autodev.{role}/v1")
 
 
 if __name__ == "__main__":
