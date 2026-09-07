@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Mapping, Protocol
 
-from automation import run_manifest, user_config, workflow_stages
+from automation import role_output_contract, run_manifest, user_config, workflow_stages
 
 
 DEFAULT_RUNTIME = "opencode"
@@ -36,6 +36,8 @@ class RoleInvocationContext:
     phase: str = "work"
     repair_kind: str = ""
     timeout_seconds: int = 900
+    output_contract: role_output_contract.RoleOutputContract | None = None
+    ux_context_fingerprint: str = ""
 
 
 @dataclass(frozen=True)
@@ -49,6 +51,11 @@ class RoleInvocationResult:
     stderr: str = ""
     termination: str = "completed"
     model: str = ""
+    structured_output_mode: str = "fallback-text"
+    structured_output_state: str = ""
+    contract_name: str = ""
+    contract_version: int = 0
+    schema_retry_count: int = 0
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -61,6 +68,11 @@ class RoleInvocationResult:
             "stderr": self.stderr,
             "termination": self.termination,
             "model": self.model,
+            "structured_output_mode": self.structured_output_mode,
+            "structured_output_state": self.structured_output_state,
+            "contract_name": self.contract_name,
+            "contract_version": self.contract_version,
+            "schema_retry_count": self.schema_retry_count,
         }
 
 
@@ -93,6 +105,34 @@ class RoleRuntime(Protocol):
 
 
 RuntimeFactory = Callable[[], RoleRuntime]
+
+
+def structured_output_capability(
+    runtime: RoleRuntime,
+    context: RoleInvocationContext,
+    *,
+    runner: Callable[..., object],
+    which=None,
+) -> str:
+    """Resolve a runtime-owned capability without hard-coding provider checks in roles."""
+
+    if context.output_contract is None:
+        return role_output_contract.CAPABILITY_UNSUPPORTED
+    method = getattr(runtime, "structured_output_capability", None)
+    if not callable(method):
+        return role_output_contract.CAPABILITY_UNSUPPORTED
+    try:
+        value = method(context, runner=runner, which=which)
+    except RoleRuntimeError:
+        raise
+    except Exception as exc:
+        raise RoleRuntimeError(
+            f"could not resolve structured-output capability for runtime {runtime.name}: {exc}"
+        ) from exc
+    try:
+        return role_output_contract.validate_capability(str(value or ""))
+    except role_output_contract.RoleOutputContractError as exc:
+        raise RoleRuntimeError(str(exc)) from exc
 
 
 def provision_scheduler_worker(
