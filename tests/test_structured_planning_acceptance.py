@@ -96,6 +96,43 @@ class StructuredPlanningAcceptanceTests(unittest.TestCase):
             self.assertEqual(len(outputs), 1)
             self.assertTrue(outputs[0].samefile(target))
 
+    def test_protocol_correction_drops_native_ux_sidecar_before_next_attempt(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            current = self._current(repo, "planner")
+            plan = current / "plan.md"
+            plan.write_text("invalid plan\n", encoding="utf-8")
+            sidecar = current / "structured-ux-planner.json"
+            sidecar.write_text(
+                json.dumps(
+                    {
+                        "constraints_addressed": [
+                            {
+                                "source_kind": "screen",
+                                "source_id": "invented-screen",
+                                "impact": "must not survive correction",
+                            }
+                        ],
+                        "open_questions": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(opencode_adapter_contract.OpenCodeAdapterError):
+                opencode_adapter_roles._raise_contract_rejection(
+                    current,
+                    "planner",
+                    plan,
+                    opencode_adapter_contract.OpenCodeAdapterError(
+                        "structured UX reference rejected"
+                    ),
+                )
+
+            self.assertFalse(sidecar.exists())
+            self.assertTrue((current / "contract-correction-planner.md").is_file())
+            self.assertTrue(plan.is_file())
+
 
 if __name__ == "__main__":
     unittest.main()
