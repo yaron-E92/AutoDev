@@ -224,7 +224,7 @@ class PrivacyAuthorizationTests(unittest.TestCase):
                         return_value="",
                     ),
                     mock.patch(
-                        "automation.scheduler_registration.role_runtime.select_runtime",
+                        "automation.scheduler_registration.role_runtime.select_scheduler_runtime",
                         return_value=(runtime, "test"),
                     ),
                     mock.patch(
@@ -289,7 +289,7 @@ class PrivacyAuthorizationTests(unittest.TestCase):
                         return_value="",
                     ),
                     mock.patch(
-                        "automation.scheduler_registration.role_runtime.select_runtime",
+                        "automation.scheduler_registration.role_runtime.select_scheduler_runtime",
                         return_value=(runtime, "test"),
                     ),
                     mock.patch(
