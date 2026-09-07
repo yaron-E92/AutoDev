@@ -5,17 +5,7 @@ import subprocess
 from pathlib import Path
 from typing import Callable
 
-from automation import (
-    opencode_adapter_contract,
-    opencode_adapter_models,
-    opencode_cli,
-    opencode_multimodal,
-    opencode_privacy_adapter,
-    privacy,
-    privacy_authorization,
-    role_runtime,
-    ux_multimodal,
-)
+from automation import ux_multimodal
 
 
 class UXMultimodalRuntimeError(RuntimeError):
@@ -63,6 +53,18 @@ class RuntimeAdapter:
             raise UXMultimodalRuntimeError(
                 f"runtime {self.name!r} has no multimodal UX verifier adapter"
             )
+        # Keep runtime/provider imports behind the adapter boundary. Besides
+        # preserving provider neutrality, this prevents workflow_dispatch from
+        # acquiring the OpenCode/workflow-stages import graph merely by importing
+        # the optional multimodal layer.
+        from automation import (
+            opencode_cli,
+            opencode_multimodal,
+            opencode_privacy_adapter,
+            privacy,
+            privacy_authorization,
+        )
+
         repo = repo.expanduser().resolve()
         try:
             executable = opencode_cli.resolve_opencode_cli(which=which)
@@ -133,6 +135,8 @@ class RuntimeAdapter:
         runner: Callable[..., object],
         which=None,
     ) -> dict[str, dict[str, str]]:
+        from automation import opencode_adapter_contract, opencode_adapter_models
+
         method = getattr(self.runtime, "_resolve_mappings", None)
         try:
             if callable(method):
@@ -176,22 +180,23 @@ def verify_for_semantic_stage(
             runner=runner,
             which=which,
         )
+
+    from automation import role_runtime
+
     try:
         runtime, _source = role_runtime.select_runtime(repo)
-    except role_runtime.RoleRuntimeError as exc:
+    except role_runtime.RoleRuntimeError:
         # Visual authority is active, so inability to resolve the verifier route is
         # itself auditable `unverifiable` evidence rather than a silent downgrade.
         class _UnavailableRuntime:
             name = "unresolved"
 
-        unavailable = RuntimeAdapter(_UnavailableRuntime())
-        result = ux_multimodal.run_verification(
+        return ux_multimodal.run_verification(
             repo,
-            unavailable,
+            RuntimeAdapter(_UnavailableRuntime()),
             runner=runner,
             which=which,
         )
-        return result
     return ux_multimodal.run_verification(
         repo,
         adapt(runtime),
