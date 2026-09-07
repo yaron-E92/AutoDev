@@ -27,7 +27,11 @@ The native Planner, Synthesizer, and Reader paths persist their structured UX me
 
 The structured Reader contract contains only a bounded factual handoff, bounded repository observations, and generic UX references. It deliberately has no execution-classification, attention, queue, manual-boundary, or workflow-stage field.
 
+`handoff_markdown` is the only mandatory Reader field. `repository_evidence` and `ux` are optional so weak/local models do not have to emit irrelevant placeholder structures. AutoDev normalizes omitted repository evidence to an empty list and omitted UX arrays to empty `constraints_addressed` / `open_questions` collections before Reader UX evidence is accepted. Supplied UX references remain semantically checked against the effective AutoDev-owned UX context.
+
 This preserves the execution-classification v2 architecture: AutoDev classifies work deterministically before Reader, and any legacy Reader classification block remains advisory diagnostics only. Native structured Reader output cannot set or override `ExecutionClassification`, create manual-attention state, or claim an external boundary as control-plane truth. Unsupported extra fields are rejected by the static schema and by AutoDev's defensive materializer without mutating classification state.
+
+For OpenCode Reader invocations only, native schema exhaustion gets one bounded compatibility attempt through the existing CLI/text Reader protocol. The transition is recorded as `native-schema-exhausted->fallback-text` together with the consumed native schema retry count. The fallback uses the same logical role/model/UX context and calls the text path directly, so it cannot start a second native schema retry sequence. If the text attempt is empty, invalid, non-zero, or otherwise unusable, AutoDev terminates once as `role-protocol-exhausted`; it does not consume the ordinary protocol-correction allowance for this cross-mode recovery.
 
 ## Implementer and Fixer completion evidence
 
@@ -53,7 +57,7 @@ Structured sidecars are scoped to one logical role invocation. Preparing a fresh
 
 For OpenCode, `opencode run --format json` is only a CLI event/output format and is not treated as schema-constrained model output. Native Structured Output uses OpenCode's headless server/session API and sends the AutoDev-owned JSON Schema in the session prompt `format` request. Older OpenCode installations that do not expose that API fall back to the existing CLI/text protocol.
 
-OpenCode's schema retries occur inside the runtime boundary and do not consume AutoDev's one protocol-correction attempt.
+OpenCode's schema retries occur inside the runtime boundary and do not consume AutoDev's one protocol-correction attempt. Reader additionally has the single bounded cross-mode fallback described above after those native retries are exhausted.
 
 ## Rollout
 

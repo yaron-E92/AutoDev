@@ -4,7 +4,7 @@
   "title": "AutoDev reader output v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["handoff_markdown", "repository_evidence", "ux"],
+  "required": ["handoff_markdown"],
   "properties": {
     "handoff_markdown": {
       "type": "string",
@@ -27,7 +27,6 @@
     "ux": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["constraints_addressed", "open_questions"],
       "properties": {
         "constraints_addressed": {
           "type": "array",

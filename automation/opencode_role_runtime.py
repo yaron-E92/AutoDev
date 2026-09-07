@@ -23,6 +23,9 @@ from automation import (
 )
 
 
+READER_SCHEMA_FALLBACK_STATE = "native-schema-exhausted->fallback-text"
+
+
 class OpenCodeRoleRuntime:
     name = "opencode"
 
@@ -343,6 +346,17 @@ class OpenCodeRoleRuntime:
                     # runtime.
                     fallback_state = "native-unavailable"
                 except opencode_structured_output.StructuredOutputExhausted as exc:
+                    if context.role == "reader":
+                        return self._reader_schema_fallback(
+                            context,
+                            executable=executable,
+                            repo=repo,
+                            model=model,
+                            environment=environment,
+                            runner=runner,
+                            native_started=started,
+                            native_error=exc,
+                        )
                     return self._structured_result(
                         context,
                         model=model,
@@ -385,6 +399,101 @@ class OpenCodeRoleRuntime:
             fallback_state=fallback_state,
         )
 
+    def _reader_schema_fallback(
+        self,
+        context: role_runtime.RoleInvocationContext,
+        *,
+        executable: str,
+        repo: Path,
+        model: str,
+        environment: dict[str, str],
+        runner: Callable[..., object],
+        native_started: float,
+        native_error: opencode_structured_output.StructuredOutputExhausted,
+    ) -> role_runtime.RoleInvocationResult:
+        # The native retry budget has already been consumed. Reader alone gets one
+        # compatibility attempt through the existing CLI/text protocol. Calling
+        # _invoke_cli directly is deliberate: a second native schema sequence must
+        # never start for this logical role invocation.
+        reader_path = repo / ".autodev-run" / "current" / "reader-brief.md"
+        reader_path.unlink(missing_ok=True)
+        fallback = self._invoke_cli(
+            context,
+            executable=executable,
+            repo=repo,
+            model=model,
+            environment=environment,
+            runner=runner,
+            fallback_state=READER_SCHEMA_FALLBACK_STATE,
+            schema_retry_count=native_error.retries,
+        )
+        total_elapsed = int((time.monotonic() - native_started) * 1000)
+
+        if fallback.termination == "completed" and fallback.returncode == 0:
+            try:
+                from automation.opencode_adapter_handoff import _bounded_result
+
+                _bounded_result(reader_path)
+            except opencode_adapter_contract.OpenCodeAdapterError as exc:
+                return self._reader_schema_fallback_failure(
+                    fallback,
+                    elapsed_ms=total_elapsed,
+                    retries=native_error.retries,
+                    detail=f"fallback-text Reader output rejected: {exc}",
+                )
+            return role_runtime.RoleInvocationResult(
+                runtime=fallback.runtime,
+                role=fallback.role,
+                phase=fallback.phase,
+                returncode=fallback.returncode,
+                elapsed_ms=total_elapsed,
+                stdout=fallback.stdout,
+                stderr=fallback.stderr,
+                termination="completed",
+                model=fallback.model,
+                structured_output_mode="fallback-text",
+                structured_output_state=READER_SCHEMA_FALLBACK_STATE,
+                contract_name=fallback.contract_name,
+                contract_version=fallback.contract_version,
+                schema_retry_count=max(0, int(native_error.retries)),
+            )
+
+        detail = fallback.stderr or fallback.stdout or "fallback-text Reader invocation failed"
+        return self._reader_schema_fallback_failure(
+            fallback,
+            elapsed_ms=total_elapsed,
+            retries=native_error.retries,
+            detail=detail,
+        )
+
+    def _reader_schema_fallback_failure(
+        self,
+        fallback: role_runtime.RoleInvocationResult,
+        *,
+        elapsed_ms: int,
+        retries: int,
+        detail: str,
+    ) -> role_runtime.RoleInvocationResult:
+        return role_runtime.RoleInvocationResult(
+            runtime=fallback.runtime,
+            role=fallback.role,
+            phase=fallback.phase,
+            returncode=fallback.returncode,
+            elapsed_ms=elapsed_ms,
+            stdout=fallback.stdout,
+            stderr=(
+                "native Reader schema retries exhausted; one bounded fallback-text "
+                f"attempt also failed: {detail}"
+            ),
+            termination="structured-output-exhausted",
+            model=fallback.model,
+            structured_output_mode="fallback-text",
+            structured_output_state=READER_SCHEMA_FALLBACK_STATE,
+            contract_name=fallback.contract_name,
+            contract_version=fallback.contract_version,
+            schema_retry_count=max(0, int(retries)),
+        )
+
     def _structured_result(
         self,
         context: role_runtime.RoleInvocationContext,
@@ -424,6 +533,7 @@ class OpenCodeRoleRuntime:
         environment: dict[str, str],
         runner: Callable[..., object],
         fallback_state: str,
+        schema_retry_count: int = 0,
     ) -> role_runtime.RoleInvocationResult:
         command = [
             executable,
@@ -447,7 +557,7 @@ class OpenCodeRoleRuntime:
             "structured_output_state": fallback_state or ("fallback" if contract else ""),
             "contract_name": contract.name if contract is not None else "",
             "contract_version": contract.version if contract is not None else 0,
-            "schema_retry_count": 0,
+            "schema_retry_count": max(0, int(schema_retry_count)),
         }
         try:
             completed = runner(
