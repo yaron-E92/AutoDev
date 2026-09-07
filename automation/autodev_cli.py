@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from automation import claim_cli, cli_help, config_cli, manage_cli, notification_cli, privacy_grant_cli, product_runtime, scheduler_health_cli, semver_intent, ux_cli, ux_help
+from automation import claim_cli, cli_help, config_cli, manage_cli, notification_cli, privacy_grant_cli, product_runtime, scheduler_health_cli, semver_intent, tui_cli, ux_cli, ux_help
 
 import os
 import sys
@@ -9,6 +9,7 @@ from automation import opencode_entrypoint, repository_identity, user_install
 
 
 manage_cli.register_help()
+tui_cli.register_help()
 ux_help.register_help()
 
 INTERACTIVE_CONSENT_ARG = "--interactive-consent"
@@ -199,6 +200,8 @@ def _dispatch(values: list[str], *, explicit_interactive: bool) -> int:
         return privacy_grant_cli.run_cli(rest)
     if command == "ux":
         return ux_cli.run_cli(rest)
+    if command == "tui":
+        return tui_cli.run_cli(rest)
 
     _enable_interactive_consent_for_direct_cli(explicit=explicit_interactive)
     if command == "issue-to-pr":
