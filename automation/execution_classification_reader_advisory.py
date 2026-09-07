@@ -6,8 +6,10 @@ from pathlib import Path
 from automation import (
     execution_classification as execution,
     execution_classification_boundary as execution_boundary,
+    opencode_adapter_contract,
     opencode_adapter_handoff,
     opencode_adapter_roles,
+    role_output_contract,
     workflow_stages,
 )
 
@@ -40,6 +42,17 @@ def install() -> None:
         outputs = original_accept(role, current, input_path)
         if role != "reader":
             return outputs
+
+        # Native Reader output may carry generic UX references in an AutoDev-owned
+        # sidecar. Validate those references only after the ordinary factual handoff
+        # parser has accepted reader-brief.md, so a bad reference is a Reader
+        # protocol rejection/correction rather than a runtime failure. This remains
+        # completely separate from execution classification authority.
+        try:
+            role_output_contract.validate_materialized_ux_sidecar(current, "reader")
+        except role_output_contract.RoleOutputContractError as exc:
+            raise opencode_adapter_contract.OpenCodeAdapterError(str(exc)) from exc
+
         try:
             state = workflow_stages.read_state(current)
         except workflow_stages.WorkflowStageError:
