@@ -405,9 +405,9 @@ def refresh_scheduler_worker(
 
 
 def default_registry() -> dict[str, RuntimeFactory]:
-    from automation.opencode_role_runtime import OpenCodeRoleRuntime
+    from automation.opencode_scheduler_runtime import OpenCodeSchedulerRoleRuntime
 
-    return {DEFAULT_RUNTIME: OpenCodeRoleRuntime}
+    return {DEFAULT_RUNTIME: OpenCodeSchedulerRoleRuntime}
 
 
 def resolve_runtime_name(repo: Path, requested: str = "") -> tuple[str, str]:
