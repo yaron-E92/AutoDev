@@ -154,7 +154,10 @@ class UXMultimodalTests(unittest.TestCase):
             ),
             encoding="utf-8",
         )
-        (current / "run-manifest.json").write_text("{}\n", encoding="utf-8")
+        (current / "run-manifest.json").write_text(
+            json.dumps({"ux_artifact": {"immutable_identity": "sha256:pinned"}}) + "\n",
+            encoding="utf-8",
+        )
         (repo / ux_capture.CAPTURE_CONFIG).write_text(
             json.dumps(
                 {
