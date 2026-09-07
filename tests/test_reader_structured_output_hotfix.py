@@ -18,7 +18,6 @@ from automation import (
     role_runtime_diagnostics,
     workflow_stages,
 )
-from automation.opencode_adapter_contract import OpenCodeAdapterError
 from automation.role_coordinator_contract import RoleCoordinatorError
 
 
@@ -56,7 +55,12 @@ class ReaderStructuredOutputHotfixTests(unittest.TestCase):
             output_contract=role_output_contract.contract_for_role(role),
         )
 
-    def _invoke_with_native(self, runtime, context, native_side_effect, runner):
+    def _invoke_with_native(self, runtime, context, native_outcome, runner):
+        native_patch = (
+            {"side_effect": native_outcome}
+            if isinstance(native_outcome, BaseException)
+            else {"return_value": native_outcome}
+        )
         with patch.object(
             opencode_role_runtime.opencode_cli,
             "resolve_opencode_cli",
@@ -68,7 +72,7 @@ class ReaderStructuredOutputHotfixTests(unittest.TestCase):
         ), patch.object(
             opencode_role_runtime.opencode_structured_output,
             "invoke",
-            side_effect=native_side_effect,
+            **native_patch,
         ) as native:
             result = runtime.invoke(
                 context,
