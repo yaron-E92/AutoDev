@@ -37,7 +37,11 @@ class TuiToolkitContractTests(unittest.TestCase):
             for node in ast.walk(tree):
                 if isinstance(node, ast.Import):
                     roots.update(alias.name.split(".", 1)[0] for alias in node.names)
-                elif isinstance(node, ast.ImportFrom) and node.module:
+                elif (
+                    isinstance(node, ast.ImportFrom)
+                    and node.module
+                    and node.module != "__future__"
+                ):
                     roots.add(node.module.split(".", 1)[0])
             self.assertEqual(roots - allowed_roots, set(), msg=f"unexpected TUI dependency in {name}")
 
