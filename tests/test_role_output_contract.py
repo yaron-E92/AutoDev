@@ -37,10 +37,8 @@ class RoleOutputContractTests(unittest.TestCase):
             target = role_output_contract.materialize_structured_output(
                 repo, contract, payload
             )
-            self.assertEqual(
-                target,
-                repo / ".autodev-run" / "current" / "verification-result.json",
-            )
+            expected = repo / ".autodev-run" / "current" / "verification-result.json"
+            self.assertEqual(target.resolve(), expected.resolve())
             self.assertEqual(json.loads(target.read_text(encoding="utf-8")), payload)
 
     def test_role_snapshot_binding_is_idempotent_and_ux_sensitive(self):
