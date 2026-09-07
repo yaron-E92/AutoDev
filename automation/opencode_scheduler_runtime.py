@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Callable
 
 from automation import (
-    opencode_adapter_assets,
     opencode_adapter_contract,
     opencode_cli,
     opencode_role_runtime,
@@ -248,12 +247,14 @@ class OpenCodeSchedulerRoleRuntime(opencode_role_runtime.OpenCodeRoleRuntime):
             result["PATH"] = path_value
         mappings = self._resolve_mappings(repo, runner=runner, which=which)
         overlay = self._generated_provider_overlay(mappings)
-        if overlay:
-            result["OPENCODE_CONFIG_CONTENT"] = json.dumps(
-                overlay,
-                sort_keys=True,
-                separators=(",", ":"),
-            )
+        # Persist even the empty overlay. This intentionally shadows a transient
+        # install-shell OPENCODE_CONFIG_CONTENT value while still allowing tracked
+        # OpenCode config and invocation-time privacy overlays to participate.
+        result["OPENCODE_CONFIG_CONTENT"] = json.dumps(
+            overlay,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
         return result
 
     def _build_process_environment(
@@ -271,6 +272,7 @@ class OpenCodeSchedulerRoleRuntime(opencode_role_runtime.OpenCodeRoleRuntime):
         environment.update(
             self._build_scheduler_environment(repo, runner=runner, which=which)
         )
+        environment["NO_COLOR"] = "1"
         return environment
 
     @staticmethod
