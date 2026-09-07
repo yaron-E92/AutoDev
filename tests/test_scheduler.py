@@ -422,7 +422,7 @@ class SchedulerDispatchTests(unittest.TestCase):
                 )
 
             self.assertEqual(existing.state, "NONE")
-            self.assertEqual(provision_worker.call_count, 2)
+            provision_worker.assert_called_once()
 
     def test_dirty_worker_without_durable_run_fails_without_reset(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -442,10 +442,14 @@ class SchedulerDispatchTests(unittest.TestCase):
                 scheduler.queue_selection,
                 "inspect_existing_run",
                 return_value=queue_selection.ExistingRun("NONE"),
-            ):
+            ), patch.object(
+                scheduler.scheduler_runtime_worker,
+                "provision_worker",
+            ) as provision_worker:
                 with self.assertRaisesRegex(scheduler.SchedulerError, "unexpected local changes"):
                     scheduler._prepare_worker(registration, runner=RecordingRunner())
 
+            provision_worker.assert_not_called()
             flat = " ".join(" ".join(call) for call in git_calls)
             self.assertNotIn("reset", flat)
             self.assertNotIn("clean", flat)
