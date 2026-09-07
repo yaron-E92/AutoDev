@@ -13,6 +13,7 @@ from automation import (
     opencode_privacy_adapter,
     privacy,
     privacy_authorization,
+    role_runtime,
     ux_multimodal,
 )
 
@@ -153,3 +154,47 @@ class RuntimeAdapter:
 
 def adapt(runtime: object) -> RuntimeAdapter:
     return RuntimeAdapter(runtime)
+
+
+def verify_for_semantic_stage(
+    repo: Path,
+    *,
+    runner: Callable[..., object] = subprocess.run,
+    which=None,
+) -> Path:
+    """Run multimodal verification only when selected visual authority exists."""
+
+    repo = repo.expanduser().resolve()
+    current = repo / ".autodev-run" / "current"
+    references = ux_multimodal.selected_reference_images(repo, current)
+    if not references:
+        # Avoid selecting/probing any model runtime for UX-disabled or text-only
+        # work. `run_verification` records an explicit not-applicable result.
+        return ux_multimodal.run_verification(
+            repo,
+            RuntimeAdapter(object()),
+            runner=runner,
+            which=which,
+        )
+    try:
+        runtime, _source = role_runtime.select_runtime(repo)
+    except role_runtime.RoleRuntimeError as exc:
+        # Visual authority is active, so inability to resolve the verifier route is
+        # itself auditable `unverifiable` evidence rather than a silent downgrade.
+        class _UnavailableRuntime:
+            name = "unresolved"
+
+        unavailable = RuntimeAdapter(_UnavailableRuntime())
+        result = ux_multimodal.run_verification(
+            repo,
+            unavailable,
+            runner=runner,
+            which=which,
+        )
+        return result
+    return ux_multimodal.run_verification(
+        repo,
+        adapt(runtime),
+        runner=runner,
+        which=which,
+    )
