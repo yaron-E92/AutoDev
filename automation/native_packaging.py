@@ -16,6 +16,7 @@ from automation.product_runtime import BUILD_INFO_FILE
 PYINSTALLER_VERSION = "6.16.0"
 PAYLOAD_NAME = "autodev"
 DATA_ROOTS = (
+    "automation/schemas",
     "integrations",
     "promptTemplates",
     "agentFiles",
