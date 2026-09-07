@@ -7,7 +7,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-SCHEDULER_SCHEMA = 1
+SCHEDULER_SCHEMA = 2
+SUPPORTED_SCHEDULER_SCHEMAS = {1, SCHEDULER_SCHEMA}
 DEFAULT_CADENCE_MINUTES = 15
 MIN_CADENCE_MINUTES = 1
 MAX_CADENCE_MINUTES = 59
@@ -39,6 +40,8 @@ class SchedulerRegistration:
     launcher: str
     task_id: str
     installed_at: str
+    role_runtime: str = ""
+    runtime_state: dict[str, object] | None = None
     last_run: dict[str, object] | None = None
 
     def to_json(self) -> dict[str, object]:
@@ -58,6 +61,8 @@ class SchedulerStatus:
     worker_repository: str = ""
     worker_exists: bool = False
     cadence_minutes: int = 0
+    role_runtime: str = ""
+    runtime_fingerprint: str = ""
     last_run: dict[str, object] | None = None
 
     def to_json(self) -> dict[str, object]:

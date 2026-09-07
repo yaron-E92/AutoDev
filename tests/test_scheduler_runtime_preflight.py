@@ -150,7 +150,7 @@ class SchedulerRuntimePreflightTests(unittest.TestCase):
                     "automation.scheduler_registration._validate_headless_worker_transport"
                 ),
                 mock.patch(
-                    "automation.scheduler_registration.role_runtime.select_runtime",
+                    "automation.scheduler_registration.role_runtime.select_scheduler_runtime",
                     return_value=(runtime, "test"),
                 ),
                 mock.patch(

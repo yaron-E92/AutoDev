@@ -5,7 +5,6 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 from unittest import mock
 
 from automation import queue_selection, scheduler
@@ -173,7 +172,6 @@ class SchedulerRuntimeDispatchTests(unittest.TestCase):
             _registration_file, registration = self._registration(root)
             worker = Path(registration.worker_repository)
             (worker / ".git").mkdir()
-            runtime = SimpleNamespace(name="fake")
 
             with (
                 mock.patch("automation.scheduler._git"),
@@ -182,12 +180,8 @@ class SchedulerRuntimeDispatchTests(unittest.TestCase):
                     return_value=queue_selection.ExistingRun("RESUME_EXISTING"),
                 ),
                 mock.patch(
-                    "automation.scheduler_runtime_worker.role_runtime.select_runtime",
-                    return_value=(runtime, "test"),
-                ),
-                mock.patch(
-                    "automation.scheduler_runtime_worker.role_runtime.provision_scheduler_worker"
-                ) as prepare_runtime,
+                    "automation.scheduler_runtime_worker.role_runtime.refresh_scheduler_worker"
+                ) as refresh_runtime,
             ):
                 existing = scheduler._prepare_worker(
                     registration,
@@ -195,9 +189,10 @@ class SchedulerRuntimeDispatchTests(unittest.TestCase):
                 )
 
             self.assertEqual(existing.state, "RESUME_EXISTING")
-            prepare_runtime.assert_called_once_with(
-                runtime,
+            refresh_runtime.assert_called_once_with(
                 worker.resolve(),
+                requested="",
+                source="scheduler-registration",
                 runner=mock.ANY,
             )
 

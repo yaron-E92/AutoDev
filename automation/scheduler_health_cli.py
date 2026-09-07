@@ -4,12 +4,20 @@ from automation import queue_contract
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 from typing import Callable, TextIO
-from automation import privacy, queue_selection, scheduler, workflow_stages
+from automation import (
+    privacy,
+    queue_selection,
+    role_runtime,
+    scheduler,
+    scheduler_registration,
+    workflow_stages,
+)
 
 from automation.scheduler_health_contract import (
     NOTIFICATION_NATIVE,
@@ -34,6 +42,7 @@ from automation.scheduler_health_storage import (
     notification_path,
     save_notification_policy,
 )
+
 
 def run_status(
     argv: list[str],
@@ -88,6 +97,7 @@ def run_status(
         )
     return 2 if status.state == "NEEDS_ATTENTION" or snapshot.state == "SCHEDULER_ERROR" else 0
 
+
 def run_health(
     argv: list[str],
     *,
@@ -113,6 +123,7 @@ def run_health(
         return 2
     print(json.dumps(snapshot.to_json(), sort_keys=True) if args.json else render_health(snapshot), file=stdout)
     return 2 if snapshot.state == "SCHEDULER_ERROR" else 0
+
 
 def run_notifications(
     argv: list[str],
@@ -165,6 +176,142 @@ def run_notifications(
         )
     return 0
 
+
+def _runtime_payload(registration) -> dict[str, object]:
+    state = registration.runtime_state if isinstance(registration.runtime_state, dict) else {}
+    return {
+        "runtime": registration.role_runtime,
+        "source": str(state.get("source", "") or "legacy-unpinned"),
+        "fingerprint": str(state.get("fingerprint", "") or ""),
+        "identity": dict(state.get("identity", {})) if isinstance(state.get("identity"), dict) else {},
+        "routes": dict(state.get("routes", {})) if isinstance(state.get("routes"), dict) else {},
+    }
+
+
+def run_runtime(
+    argv: list[str],
+    *,
+    home: Path | None = None,
+    runner: Callable[..., object] = subprocess.run,
+    which: Callable[[str], str | None] = shutil.which,
+    stdout: TextIO = sys.stdout,
+    stderr: TextIO = sys.stderr,
+) -> int:
+    values = list(argv[1:] if argv and argv[0] == "runtime" else argv)
+    action = "status"
+    requested = ""
+    if values and values[0] == "set":
+        action = "set"
+        values = values[1:]
+        if not values or values[0].startswith("-"):
+            print("scheduler runtime set requires a runtime name", file=stderr)
+            return 2
+        requested = values.pop(0)
+    parser = _location_parser(
+        "autodev scheduler runtime set" if action == "set" else "autodev scheduler runtime"
+    )
+    args = parser.parse_args(values)
+    try:
+        registration_file, registration = _resolve_registration(
+            repo=Path(args.repo),
+            github_repo=args.github_repo,
+            registration=args.registration,
+            home=home,
+            runner=runner,
+        )
+        if action == "set":
+            registration = scheduler_registration.switch_scheduler_runtime(
+                registration_file,
+                requested,
+                home=home,
+                runner=runner,
+                which=which,
+            )
+        payload = _runtime_payload(registration)
+    except (SchedulerHealthError, scheduler.SchedulerError, role_runtime.RoleRuntimeError) as exc:
+        print(str(exc), file=stderr)
+        return 2
+
+    if args.json:
+        print(json.dumps(payload, sort_keys=True), file=stdout)
+    else:
+        runtime_name = str(payload.get("runtime", "") or "(legacy/unpinned)")
+        source = str(payload.get("source", "") or "unknown")
+        fingerprint = str(payload.get("fingerprint", "") or "")
+        suffix = f"; fingerprint={fingerprint[:12]}" if fingerprint else ""
+        verb = "Scheduler runtime switched to" if action == "set" else "Scheduler runtime"
+        print(f"{verb}: {runtime_name} (source={source}{suffix})", file=stdout)
+    return 0
+
+
+def _extract_install_runtime(values: list[str]) -> tuple[list[str], str]:
+    stripped: list[str] = []
+    requested = ""
+    index = 0
+    while index < len(values):
+        value = values[index]
+        if value == "--runtime":
+            if requested:
+                raise scheduler.SchedulerError("scheduler install accepts --runtime only once")
+            if index + 1 >= len(values) or values[index + 1].startswith("-"):
+                raise scheduler.SchedulerError("scheduler install --runtime requires a runtime name")
+            requested = values[index + 1]
+            index += 2
+            continue
+        if value.startswith("--runtime="):
+            if requested:
+                raise scheduler.SchedulerError("scheduler install accepts --runtime only once")
+            requested = value.partition("=")[2].strip()
+            if not requested:
+                raise scheduler.SchedulerError("scheduler install --runtime requires a runtime name")
+            index += 1
+            continue
+        stripped.append(value)
+        index += 1
+    return stripped, requested
+
+
+def _run_install_with_runtime(
+    values: list[str],
+    *,
+    home: Path | None,
+    runner: Callable[..., object],
+    which: Callable[[str], str | None],
+    stdout: TextIO,
+    stderr: TextIO,
+) -> int:
+    try:
+        stripped, requested = _extract_install_runtime(values)
+    except scheduler.SchedulerError as exc:
+        print(str(exc), file=stderr)
+        return 2
+    if not requested:
+        return scheduler.run_cli(
+            stripped,
+            home=home,
+            runner=runner,
+            which=which,
+            stdout=stdout,
+            stderr=stderr,
+        )
+    previous = os.environ.get(role_runtime.SCHEDULER_RUNTIME_REQUEST_ENV)
+    os.environ[role_runtime.SCHEDULER_RUNTIME_REQUEST_ENV] = requested
+    try:
+        return scheduler.run_cli(
+            stripped,
+            home=home,
+            runner=runner,
+            which=which,
+            stdout=stdout,
+            stderr=stderr,
+        )
+    finally:
+        if previous is None:
+            os.environ.pop(role_runtime.SCHEDULER_RUNTIME_REQUEST_ENV, None)
+        else:
+            os.environ[role_runtime.SCHEDULER_RUNTIME_REQUEST_ENV] = previous
+
+
 def _cleanup_health_state(argv: list[str], *, home: Path | None, runner: Callable[..., object]) -> None:
     try:
         args, _ = _location_parser("autodev scheduler uninstall").parse_known_args(argv[1:])
@@ -184,6 +331,7 @@ def _cleanup_health_state(argv: list[str], *, home: Path | None, runner: Callabl
             path.unlink(missing_ok=True)
         except OSError:
             pass
+
 
 def run_cli(
     argv: list[str] | None = None,
@@ -206,6 +354,17 @@ def run_cli(
         return run_health(values, home=home, runner=runner, which=which, stdout=stdout, stderr=stderr)
     if command == "notifications":
         return run_notifications(values, home=home, runner=runner, stdout=stdout, stderr=stderr)
+    if command == "runtime":
+        return run_runtime(values, home=home, runner=runner, which=which, stdout=stdout, stderr=stderr)
+    if command == "install":
+        return _run_install_with_runtime(
+            values,
+            home=home,
+            runner=runner,
+            which=which,
+            stdout=stdout,
+            stderr=stderr,
+        )
     if command == "uninstall":
         _cleanup_health_state(values, home=home, runner=runner)
     return scheduler.run_cli(values, home=home, runner=runner, which=which, stdout=stdout, stderr=stderr)
