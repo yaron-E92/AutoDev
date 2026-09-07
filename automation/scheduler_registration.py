@@ -11,10 +11,12 @@ from automation import (
 )
 
 import json
+import os
 import shutil
 import subprocess
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Iterator
 
 from automation import privacy, queue_selection, user_install
 from automation.scheduler_backends import (
@@ -38,6 +40,7 @@ from automation.scheduler_types import (
     MIN_CADENCE_MINUTES,
     SCHEDULER_SCHEMA,
     SUPPORTED_BACKENDS,
+    SUPPORTED_SCHEDULER_SCHEMAS,
     SchedulerError,
     SchedulerRegistration,
     SchedulerStatus,
@@ -131,7 +134,6 @@ def _ensure_worker(
     _require_ok(_run_command(auth_argv, runner=runner), auth_argv)
     origin = f"https://github.com/{github_repo}.git"
     credential_helper = "!" + subprocess.list2cmdline([gh, "auth", "git-credential"])
-    created = False
     if not worker.exists():
         worker.parent.mkdir(parents=True, exist_ok=True)
         argv = [
@@ -141,7 +143,6 @@ def _ensure_worker(
             "clone",
             "--origin",
             "origin",
-            origin,
             str(worker),
         ]
         completed = _run_command(argv, runner=runner)
@@ -151,7 +152,6 @@ def _ensure_worker(
             if worker.exists():
                 shutil.rmtree(worker, ignore_errors=True)
             raise
-        created = True
     if not worker.is_dir() or not (worker / ".git").exists():
         raise SchedulerError(
             f"dedicated worker path exists but is not an AutoDev-managed Git clone: {worker}"
@@ -234,6 +234,7 @@ def _validate_headless_model_policy(
             f"scheduler privacy preflight rejected the configured route: {exc}"
         ) from exc
 
+
 def _load_registration(path: Path) -> SchedulerRegistration | None:
     path = path.expanduser().resolve()
     if not path.is_file():
@@ -242,7 +243,8 @@ def _load_registration(path: Path) -> SchedulerRegistration | None:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise SchedulerError(f"invalid scheduler registration: {path}") from exc
-    if not isinstance(raw, dict) or raw.get("schema_version") != SCHEDULER_SCHEMA:
+    schema = raw.get("schema_version") if isinstance(raw, dict) else None
+    if not isinstance(raw, dict) or schema not in SUPPORTED_SCHEDULER_SCHEMAS:
         raise SchedulerError(f"unsupported scheduler registration schema: {path}")
     github_repo = str(raw.get("github_repository", ""))
     _repo_parts(github_repo)
@@ -252,6 +254,23 @@ def _load_registration(path: Path) -> SchedulerRegistration | None:
     cadence = int(raw.get("cadence_minutes", 0) or 0)
     if not MIN_CADENCE_MINUTES <= cadence <= MAX_CADENCE_MINUTES:
         raise SchedulerError(f"invalid scheduler cadence in {path}: {cadence}")
+
+    runtime_name = str(raw.get("role_runtime", "") or "").strip()
+    runtime_state_raw = raw.get("runtime_state")
+    runtime_state: dict[str, object] | None = None
+    if runtime_state_raw is not None:
+        try:
+            parsed_state = role_runtime.SchedulerRuntimeState.from_json(runtime_state_raw)
+        except role_runtime.RoleRuntimeError as exc:
+            raise SchedulerError(f"invalid scheduler runtime state in {path}: {exc}") from exc
+        if runtime_name and runtime_name != parsed_state.name:
+            raise SchedulerError(
+                f"scheduler registration runtime {runtime_name!r} does not match "
+                f"runtime state {parsed_state.name!r}: {path}"
+            )
+        runtime_name = runtime_name or parsed_state.name
+        runtime_state = parsed_state.to_json()
+
     last_run = raw.get("last_run")
     return SchedulerRegistration(
         github_repository=github_repo,
@@ -263,6 +282,8 @@ def _load_registration(path: Path) -> SchedulerRegistration | None:
         launcher=str(raw.get("launcher", "")),
         task_id=str(raw.get("task_id", "")),
         installed_at=str(raw.get("installed_at", "")),
+        role_runtime=runtime_name,
+        runtime_state=runtime_state,
         last_run=dict(last_run) if isinstance(last_run, dict) else None,
     )
 
@@ -270,10 +291,28 @@ def _load_registration(path: Path) -> SchedulerRegistration | None:
 def _write_registration(path: Path, registration: SchedulerRegistration) -> None:
     path = path.expanduser().resolve()
     path.parent.mkdir(parents=True, exist_ok=True)
+    rendered = registration.to_json()
+
+    # Older scheduler code reconstructs SchedulerRegistration when recording a
+    # tick. Preserve the independently validated runtime identity until every call
+    # site has naturally migrated to the schema-2 fields.
+    if not registration.role_runtime and path.is_file():
+        try:
+            previous = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            previous = {}
+        if isinstance(previous, dict):
+            previous_runtime = previous.get("role_runtime")
+            previous_state = previous.get("runtime_state")
+            if isinstance(previous_runtime, str) and previous_runtime.strip():
+                rendered["role_runtime"] = previous_runtime.strip()
+            if isinstance(previous_state, dict):
+                rendered["runtime_state"] = previous_state
+
     temp = path.with_suffix(path.suffix + ".tmp")
     try:
         temp.write_text(
-            json.dumps(registration.to_json(), indent=2, sort_keys=True) + "\n",
+            json.dumps(rendered, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
         temp.replace(path)
@@ -308,6 +347,77 @@ def _resolve_launcher(
     )
 
 
+@contextmanager
+def _temporary_runtime_environment(environment: dict[str, str]) -> Iterator[None]:
+    previous = {key: os.environ.get(key) for key in environment}
+    for key, value in environment.items():
+        os.environ[key] = value
+    try:
+        yield
+    finally:
+        for key, value in previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+def _prepare_runtime_registration(
+    source: Path,
+    worker: Path,
+    *,
+    requested_runtime: str,
+    runner: Callable[..., object],
+    which: Callable[[str], str | None],
+) -> tuple[object, role_runtime.SchedulerRuntimeState]:
+    try:
+        runtime, source_label = role_runtime.select_scheduler_runtime(
+            source,
+            requested=requested_runtime,
+        )
+        state = role_runtime.prepare_scheduler_worker(
+            runtime,
+            worker,
+            source=source_label,
+            runner=runner,
+            which=which,
+        )
+    except role_runtime.RoleRuntimeError as exc:
+        raise SchedulerError(str(exc)) from exc
+
+    if _git_status(worker, runner=runner):
+        existing_run = queue_selection.inspect_existing_run(worker)
+        if existing_run.state == "NONE":
+            raise SchedulerError(
+                f"dedicated worker contains unexpected local changes after runtime provisioning: "
+                f"{worker}; AutoDev will not reset or delete them"
+            )
+
+    with _temporary_runtime_environment(state.environment):
+        _validate_headless_model_policy(
+            worker,
+            runner=runner,
+            which=which,
+            runtime=runtime,
+        )
+    return runtime, state
+
+
+def _restore_worker_runtime_state(
+    worker: Path,
+    previous: role_runtime.SchedulerRuntimeState | None,
+) -> None:
+    try:
+        if previous is None:
+            role_runtime.clear_scheduler_runtime_state(worker)
+        else:
+            role_runtime.write_scheduler_runtime_state(worker, previous)
+    except role_runtime.RoleRuntimeError:
+        # Preserve the original scheduler/backend exception. The registration is
+        # still restored below and remains authoritative for the next repair run.
+        pass
+
+
 def install_scheduler(
     repo: Path,
     *,
@@ -315,6 +425,7 @@ def install_scheduler(
     backend: str = BACKEND_AUTO,
     cadence_minutes: int | None = None,
     launcher: str = "",
+    runtime_name: str = "",
     home: Path | None = None,
     platform_name: str | None = None,
     runner: Callable[..., object] = subprocess.run,
@@ -355,29 +466,19 @@ def install_scheduler(
         which=which,
     )
     _validate_headless_worker_transport(worker, runner=runner)
-    try:
-        runtime, _ = role_runtime.select_runtime(worker)
-        role_runtime.prepare_scheduler_worker(
-            runtime,
-            worker,
-            runner=runner,
-            which=which,
-        )
-    except role_runtime.RoleRuntimeError as exc:
-        raise SchedulerError(str(exc)) from exc
-    if _git_status(worker, runner=runner):
-        existing_run = queue_selection.inspect_existing_run(worker)
-        if existing_run.state == "NONE":
-            raise SchedulerError(
-                f"dedicated worker contains unexpected local changes after runtime provisioning: "
-                f"{worker}; AutoDev will not reset or delete them"
-            )
-    _validate_headless_model_policy(
+
+    previous_worker_state = role_runtime.scheduler_runtime_state(worker)
+    requested = str(runtime_name or os.environ.get(role_runtime.SCHEDULER_RUNTIME_REQUEST_ENV, "")).strip()
+    if not requested and existing and existing.role_runtime:
+        requested = existing.role_runtime
+    _runtime, runtime_state = _prepare_runtime_registration(
+        source,
         worker,
+        requested_runtime=requested,
         runner=runner,
         which=which,
-        runtime=runtime,
     )
+
     claim_identity.worker_identity(home=home)
     registration = SchedulerRegistration(
         github_repository=resolved,
@@ -389,20 +490,92 @@ def install_scheduler(
         launcher=resolved_launcher,
         task_id=_task_id(resolved),
         installed_at=existing.installed_at if existing and existing.installed_at else _now(),
+        role_runtime=runtime_state.name,
+        runtime_state=runtime_state.to_json(),
         last_run=existing.last_run if existing else None,
     )
-    if existing and existing.backend != selected_backend:
-        _uninstall_backend(existing, home=home, runner=runner)
+
+    role_runtime.write_scheduler_runtime_state(worker, runtime_state)
     _write_registration(path, registration)
+    backend_changed = bool(existing and existing.backend != selected_backend)
     try:
+        if backend_changed and existing is not None:
+            _uninstall_backend(existing, home=home, runner=runner)
         _install_backend(registration, path, home=home, runner=runner)
     except Exception:
+        _restore_worker_runtime_state(worker, previous_worker_state)
         if existing:
             _write_registration(path, existing)
+            try:
+                _install_backend(existing, path, home=home, runner=runner)
+            except Exception:
+                pass
         else:
             path.unlink(missing_ok=True)
         raise
     return registration
+
+
+def switch_scheduler_runtime(
+    registration_file: Path,
+    requested_runtime: str,
+    *,
+    home: Path | None = None,
+    runner: Callable[..., object] = subprocess.run,
+    which: Callable[[str], str | None] = shutil.which,
+) -> SchedulerRegistration:
+    path = registration_file.expanduser().resolve()
+    existing = _load_registration(path)
+    if existing is None:
+        raise SchedulerError(f"scheduler is not installed: {path}")
+    requested = str(requested_runtime or "").strip()
+    if not requested:
+        raise SchedulerError("scheduler runtime set requires a runtime name")
+
+    source = _repo_root(Path(existing.source_repository))
+    worker = Path(existing.worker_repository).expanduser().resolve()
+    if not worker.is_dir() or not (worker / ".git").exists():
+        raise SchedulerError(f"dedicated scheduler worker is missing or invalid: {worker}")
+    _validate_source_policy(source)
+    _validate_worker_policy(source, worker)
+    _validate_headless_worker_transport(worker, runner=runner)
+
+    previous_worker_state = role_runtime.scheduler_runtime_state(worker)
+    _runtime, runtime_state = _prepare_runtime_registration(
+        source,
+        worker,
+        requested_runtime=requested,
+        runner=runner,
+        which=which,
+    )
+    replacement = SchedulerRegistration(
+        github_repository=existing.github_repository,
+        source_repository=existing.source_repository,
+        worker_repository=existing.worker_repository,
+        default_branch=existing.default_branch,
+        backend=existing.backend,
+        cadence_minutes=existing.cadence_minutes,
+        launcher=existing.launcher,
+        task_id=existing.task_id,
+        installed_at=existing.installed_at,
+        role_runtime=runtime_state.name,
+        runtime_state=runtime_state.to_json(),
+        last_run=existing.last_run,
+    )
+
+    role_runtime.write_scheduler_runtime_state(worker, runtime_state)
+    _write_registration(path, replacement)
+    try:
+        _install_backend(replacement, path, home=home, runner=runner)
+    except Exception:
+        _restore_worker_runtime_state(worker, previous_worker_state)
+        _write_registration(path, existing)
+        try:
+            _install_backend(existing, path, home=home, runner=runner)
+        except Exception:
+            pass
+        raise
+    return replacement
 
 
 def scheduler_status(
@@ -429,6 +602,14 @@ def scheduler_status(
         return SchedulerStatus(state="NOT_INSTALLED", github_repository=resolved)
     backend_state = _backend_state(registration, home=home, runner=runner)
     worker = Path(registration.worker_repository).expanduser()
+    fingerprint = ""
+    if isinstance(registration.runtime_state, dict):
+        try:
+            fingerprint = role_runtime.SchedulerRuntimeState.from_json(
+                registration.runtime_state
+            ).fingerprint
+        except role_runtime.RoleRuntimeError:
+            fingerprint = ""
     return SchedulerStatus(
         state="INSTALLED" if backend_state == "active" else "NEEDS_ATTENTION",
         github_repository=registration.github_repository,
@@ -438,6 +619,8 @@ def scheduler_status(
         worker_repository=registration.worker_repository,
         worker_exists=worker.is_dir() and (worker / ".git").exists(),
         cadence_minutes=registration.cadence_minutes,
+        role_runtime=registration.role_runtime,
+        runtime_fingerprint=fingerprint,
         last_run=registration.last_run,
     )
 
@@ -465,7 +648,21 @@ def uninstall_scheduler(
     if registration is None:
         return SchedulerStatus(state="NOT_INSTALLED", github_repository=resolved)
     _uninstall_backend(registration, home=home, runner=runner)
+    worker = Path(registration.worker_repository).expanduser().resolve()
+    if worker.is_dir() and (worker / ".git").exists():
+        try:
+            role_runtime.clear_scheduler_runtime_state(worker)
+        except role_runtime.RoleRuntimeError:
+            pass
     path.unlink(missing_ok=True)
+    fingerprint = ""
+    if isinstance(registration.runtime_state, dict):
+        try:
+            fingerprint = role_runtime.SchedulerRuntimeState.from_json(
+                registration.runtime_state
+            ).fingerprint
+        except role_runtime.RoleRuntimeError:
+            pass
     return SchedulerStatus(
         state="UNINSTALLED",
         github_repository=registration.github_repository,
@@ -475,5 +672,7 @@ def uninstall_scheduler(
         worker_repository=registration.worker_repository,
         worker_exists=Path(registration.worker_repository).is_dir(),
         cadence_minutes=registration.cadence_minutes,
+        role_runtime=registration.role_runtime,
+        runtime_fingerprint=fingerprint,
         last_run=registration.last_run,
     )
