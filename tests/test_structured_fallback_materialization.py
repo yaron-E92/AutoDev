@@ -212,6 +212,60 @@ Materialize captured role text in Python.
             self.assertEqual(materialization["source"], "captured-runtime-output")
             self.assertEqual(materialization["state"], "succeeded")
 
+    def test_correction_after_fallback_does_not_start_second_native_sequence(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            current = repo / ".autodev-run/current"
+            current.mkdir(parents=True)
+            (current / "run-diagnostics.json").write_text(
+                json.dumps(
+                    {
+                        "role_invocations": {"synthesizer": 1},
+                        "last_structured_output": {
+                            "role": "synthesizer",
+                            "mode": "fallback-text",
+                            "state": "native-unavailable",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            runtime = self._runtime()
+            context = self._context(repo, "synthesizer", phase="correction")
+
+            with patch.object(
+                opencode_role_runtime.opencode_cli,
+                "resolve_opencode_cli",
+                return_value="opencode",
+            ), patch.object(
+                opencode_role_runtime.privacy,
+                "load_policy",
+                return_value=SimpleNamespace(enabled=False),
+            ), patch.object(
+                opencode_role_runtime.opencode_structured_output,
+                "invoke",
+            ) as native:
+                result = runtime.invoke(
+                    context,
+                    runner=lambda *a, **k: SimpleNamespace(
+                        returncode=0,
+                        stdout=_events("Corrected captured handoff."),
+                        stderr="",
+                    ),
+                )
+
+            native.assert_not_called()
+            self.assertEqual(result.termination, "completed")
+            self.assertEqual(result.structured_output_mode, "fallback-text")
+            self.assertEqual(
+                result.structured_output_state,
+                opencode_role_runtime.FALLBACK_CORRECTION_STATE,
+            )
+            self.assertEqual(
+                (current / "synthesized-handoff.md").read_text(encoding="utf-8"),
+                "Corrected captured handoff.\n",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
