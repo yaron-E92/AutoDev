@@ -103,7 +103,12 @@ class OpenCodeRoleRuntime:
         contract = context.output_contract
         if contract is None:
             return role_output_contract.CAPABILITY_UNSUPPORTED
-        if context.fallback_text_only or _correction_after_fallback(context.repo, context):
+        if opencode_cli_text.correction_after_fallback(
+            context.repo,
+            role=context.role,
+            phase=context.phase,
+            has_contract=True,
+        ):
             return role_output_contract.CAPABILITY_EMULATED
         mappings = self._resolve_mappings(context.repo, runner=runner, which=which)
         model = str(mappings.get(context.role, {}).get("model", "")).strip()
@@ -315,9 +320,11 @@ class OpenCodeRoleRuntime:
             ) from exc
 
         contract = context.output_contract
-        fallback_only = bool(
-            contract is not None
-            and (context.fallback_text_only or _correction_after_fallback(repo, context))
+        fallback_only = opencode_cli_text.correction_after_fallback(
+            repo,
+            role=context.role,
+            phase=context.phase,
+            has_contract=contract is not None,
         )
         fallback_state = FALLBACK_CORRECTION_STATE if fallback_only else ""
         if contract is not None and not fallback_only:
@@ -664,28 +671,6 @@ class OpenCodeRoleRuntime:
             model=model,
             **metadata,
         )
-
-
-def _correction_after_fallback(
-    repo: Path,
-    context: role_runtime.RoleInvocationContext,
-) -> bool:
-    if context.phase != "correction" or context.output_contract is None:
-        return False
-    path = repo.expanduser().resolve() / ".autodev-run" / "current" / "run-diagnostics.json"
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return False
-    if not isinstance(value, dict):
-        return False
-    previous = value.get("last_structured_output", {})
-    if not isinstance(previous, dict):
-        return False
-    return (
-        str(previous.get("role", "") or "") == context.role
-        and str(previous.get("mode", "") or "") == "fallback-text"
-    )
 
 
 def _reader_fallback_prompt(prompt: str) -> str:
