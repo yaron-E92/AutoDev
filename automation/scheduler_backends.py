@@ -75,6 +75,17 @@ def _dispatch_command(registration: SchedulerRegistration, registration_file: Pa
     ]
 
 
+def _registered_runtime_path(registration: SchedulerRegistration) -> str:
+    state = registration.runtime_state
+    if isinstance(state, dict):
+        environment = state.get("environment", {})
+        if isinstance(environment, dict):
+            value = environment.get("PATH", "")
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return os.environ.get("PATH", "").strip()
+
+
 def _systemd_quote(value: str) -> str:
     escaped = value.replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%")
     return f'"{escaped}"'
@@ -95,7 +106,7 @@ def _install_systemd(
     service, timer = _systemd_paths(registration, home=home)
     service.parent.mkdir(parents=True, exist_ok=True)
     command = " ".join(_systemd_quote(item) for item in _dispatch_command(registration, registration_file))
-    path_value = os.environ.get("PATH", "").strip()
+    path_value = _registered_runtime_path(registration)
     environment = f"Environment={_systemd_quote('PATH=' + path_value)}\n" if path_value else ""
     service.write_text(
         "[Unit]\n"
@@ -164,7 +175,7 @@ def _remove_cron_block(text: str, task_id: str) -> str:
 def _cron_command(registration: SchedulerRegistration, registration_file: Path) -> str:
     command = shlex.join(_dispatch_command(registration, registration_file))
     command = command.replace("%", "\\%")
-    path_value = os.environ.get("PATH", "").strip()
+    path_value = _registered_runtime_path(registration)
     prefix = f"PATH={shlex.quote(path_value)} " if path_value else ""
     log_path = registration_file.parent / LOG_FILE
     return (
@@ -190,6 +201,12 @@ def _install_cron(
 
 def _windows_task_action(registration: SchedulerRegistration, registration_file: Path) -> str:
     inner = subprocess.list2cmdline(_dispatch_command(registration, registration_file))
+    path_value = _registered_runtime_path(registration)
+    if path_value:
+        # The AutoDev launcher is absolute, but the selected role runtime may only
+        # have been discoverable through the install-time PATH. Persist that PATH
+        # into the task action instead of relying on Task Scheduler's environment.
+        inner = f'set "PATH={path_value}" && {inner}'
     return subprocess.list2cmdline(["cmd.exe", "/d", "/s", "/c", inner])
 
 

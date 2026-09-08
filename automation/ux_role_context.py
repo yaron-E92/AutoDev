@@ -6,7 +6,7 @@ import os
 import re
 from pathlib import Path
 
-from automation import ux_resolver, ux_workflow
+from automation import ux_capture, ux_resolver, ux_workflow
 
 
 _TEXT_SUFFIXES = {".md", ".txt", ".yaml", ".yml", ".json", ".html", ".htm", ".css", ".svg"}
@@ -89,6 +89,19 @@ def prepare_role_context(
         if len(text) > len(bounded):
             referenced_paths.append(relative)
 
+    capture_config_sha256 = ""
+    if role == "verifier":
+        capture_config_path = repo / ux_capture.CAPTURE_CONFIG
+        if capture_config_path.is_file():
+            try:
+                capture_config_sha256 = hashlib.sha256(
+                    capture_config_path.read_bytes()
+                ).hexdigest()
+            except OSError as exc:
+                raise UXRoleContextError(
+                    f"UX capture configuration is unreadable while binding verifier context: {capture_config_path}"
+                ) from exc
+
     issue_sha256 = hashlib.sha256(issue_text.encode("utf-8", errors="replace")).hexdigest()
     fingerprint_payload = {
         "immutable_identity": artifact.immutable_identity,
@@ -99,9 +112,25 @@ def prepare_role_context(
         "selected_paths": list(selected),
         "file_sha256": file_hashes,
     }
+    if role == "verifier":
+        fingerprint_payload["capture_config_sha256"] = capture_config_sha256
     fingerprint = hashlib.sha256(
         json.dumps(fingerprint_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
+
+    ux_context: dict[str, object] = {
+        "contract": artifact.manifest.contract,
+        "principles": artifact.manifest.principles,
+        "annexes": list(artifact.manifest.annexes),
+        "journeys": list(journey_ids),
+        "screens": list(screen_ids),
+        "states": list(state_ids),
+        "selected_paths": list(selected),
+        "file_sha256": file_hashes,
+        "non_text_or_truncated_references": sorted(referenced_paths),
+    }
+    if role == "verifier":
+        ux_context["capture_config_sha256"] = capture_config_sha256
 
     evidence: dict[str, object] = {
         "role": role,
@@ -110,17 +139,7 @@ def prepare_role_context(
             "product": artifact.manifest.product,
             "bundle_schema": artifact.manifest.schema,
         },
-        "ux_context": {
-            "contract": artifact.manifest.contract,
-            "principles": artifact.manifest.principles,
-            "annexes": list(artifact.manifest.annexes),
-            "journeys": list(journey_ids),
-            "screens": list(screen_ids),
-            "states": list(state_ids),
-            "selected_paths": list(selected),
-            "file_sha256": file_hashes,
-            "non_text_or_truncated_references": sorted(referenced_paths),
-        },
+        "ux_context": ux_context,
         "selection_basis_sha256": issue_sha256,
         "ux_context_fingerprint": fingerprint,
     }
@@ -143,6 +162,11 @@ def prepare_role_context(
             "in its fingerprint; inspect them when the runtime supports the file type:\n\n"
             + "\n".join(f"- `{item}`" for item in sorted(referenced_paths))
             + "\n"
+        )
+    if role == "verifier" and capture_config_sha256:
+        prompt += (
+            "\nAutoDev has also bound this verifier context to the repository's deterministic "
+            f"UX capture configuration `{capture_config_sha256}`. The model does not own this identity.\n"
         )
     prompt += (
         "\nAutoDev records this role's selected UX inputs in "

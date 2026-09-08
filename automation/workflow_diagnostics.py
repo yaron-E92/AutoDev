@@ -52,6 +52,7 @@ def stage_payload(
     failure_fingerprint: str = "",
     repeated_failure: bool = False,
     repair_attempt: int | None = None,
+    multimodal_ux_status: str = "",
 ) -> dict[str, object]:
     current = repo / CURRENT_DIR
     state_value = read_json(current / "state.json")
@@ -104,6 +105,8 @@ def stage_payload(
         payload["max_repair_attempts"] = max_repair_attempts
     if max_semantic_repair_attempts is not None:
         payload["max_semantic_repair_attempts"] = max_semantic_repair_attempts
+    if multimodal_ux_status:
+        payload["multimodal_ux_status"] = str(multimodal_ux_status)
     if requested_issue:
         payload = operation_attribution.attribute_explicit_new_run(
             repo,

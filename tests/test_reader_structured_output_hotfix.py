@@ -9,7 +9,9 @@ from unittest.mock import patch
 
 from automation import (
     execution_classification_reader_advisory,
+    opencode_adapter_contract,
     opencode_adapter_handoff,
+    opencode_cli_text,
     opencode_role_runtime,
     opencode_structured_output,
     role_coordinator_runtime,
@@ -26,6 +28,29 @@ class _Completed:
         self.returncode = returncode
         self.stdout = stdout
         self.stderr = stderr
+
+
+def _text_event(text: str, *, synthetic: bool = False, metadata: dict | None = None) -> str:
+    part: dict[str, object] = {
+        "id": "prt_reader",
+        "messageID": "msg_reader",
+        "sessionID": "ses_reader",
+        "type": "text",
+        "text": text,
+        "time": {"start": 1, "end": 2},
+    }
+    if synthetic:
+        part["synthetic"] = True
+    if metadata is not None:
+        part["metadata"] = metadata
+    return json.dumps(
+        {
+            "type": "text",
+            "timestamp": 2,
+            "sessionID": "ses_reader",
+            "part": part,
+        }
+    )
 
 
 class ReaderStructuredOutputHotfixTests(unittest.TestCase):
@@ -47,12 +72,19 @@ class ReaderStructuredOutputHotfixTests(unittest.TestCase):
         }
         return runtime
 
-    def _context(self, repo: Path, role: str = "reader") -> role_runtime.RoleInvocationContext:
+    def _context(
+        self,
+        repo: Path,
+        role: str = "reader",
+        *,
+        ux_context_fingerprint: str = "",
+    ) -> role_runtime.RoleInvocationContext:
         return role_runtime.RoleInvocationContext(
             repo=repo,
             role=role,
             prompt=f"run {role}",
             output_contract=role_output_contract.contract_for_role(role),
+            ux_context_fingerprint=ux_context_fingerprint,
         )
 
     def _invoke_with_native(self, runtime, context, native_outcome, runner):
@@ -188,23 +220,34 @@ class ReaderStructuredOutputHotfixTests(unittest.TestCase):
                 ),
             )
 
-    def test_events_182_shape_schema_exhaustion_uses_exactly_one_text_fallback(self):
+    def test_phoodab_72_shape_materializes_captured_text_without_model_file_write(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
             current = repo / workflow_stages.CURRENT_DIR
             current.mkdir(parents=True)
             (current / workflow_stages.DIAGNOSTICS_FILE).write_text("{}\n", encoding="utf-8")
             runtime = self._runtime()
-            context = self._context(repo)
+            context = self._context(
+                repo,
+                ux_context_fingerprint="ux-context-active-for-phoodab-72",
+            )
             commands: list[list[str]] = []
+            reader_path = current / "reader-brief.md"
 
             def runner(command, **kwargs):
                 commands.append(list(command))
-                (current / "reader-brief.md").write_text(
-                    "# Reader handoff\n\nRepository facts from the local model.\n",
-                    encoding="utf-8",
+                self.assertFalse(reader_path.exists())
+                return _Completed(
+                    stdout="\n".join(
+                        [
+                            json.dumps({"type": "step_start", "part": {"type": "step-start"}}),
+                            _text_event(
+                                "# Reader handoff\n\nRepository facts returned by ollama/gpt-oss:20b-autodev."
+                            ),
+                            json.dumps({"type": "step_finish", "part": {"type": "step-finish"}}),
+                        ]
+                    )
                 )
-                return _Completed()
 
             exhausted = opencode_structured_output.StructuredOutputExhausted(
                 "StructuredOutputError",
@@ -219,7 +262,11 @@ class ReaderStructuredOutputHotfixTests(unittest.TestCase):
 
             self.assertEqual(native.call_count, 1)
             self.assertEqual(len(commands), 1)
-            self.assertEqual(commands[0][1], "run")
+            command = commands[0]
+            self.assertEqual(command[1], "run")
+            self.assertEqual(command[command.index("--model") + 1], "ollama/gpt-oss:20b-autodev")
+            self.assertIn("single compatibility fallback-text attempt", command[-1])
+            self.assertIn("Do not write or edit", command[-1])
             self.assertEqual(result.termination, "completed")
             self.assertEqual(result.structured_output_mode, "fallback-text")
             self.assertEqual(
@@ -227,8 +274,33 @@ class ReaderStructuredOutputHotfixTests(unittest.TestCase):
                 opencode_role_runtime.READER_SCHEMA_FALLBACK_STATE,
             )
             self.assertEqual(result.schema_retry_count, 2)
+            self.assertTrue(reader_path.is_file())
+            self.assertIn(
+                "Repository facts returned by ollama/gpt-oss:20b-autodev",
+                reader_path.read_text(encoding="utf-8"),
+            )
+
+            role_coordinator_runtime._record_attempt(
+                repo,
+                "reader",
+                result,
+                reader_path,
+                accepted=True,
+                ux_context_fingerprint=context.ux_context_fingerprint,
+            )
             diagnostics = json.loads(
                 (current / workflow_stages.DIAGNOSTICS_FILE).read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                diagnostics["last_structured_output"]["state"],
+                opencode_role_runtime.READER_SCHEMA_FALLBACK_STATE,
+            )
+            self.assertEqual(
+                diagnostics["reader_fallback_materialization"],
+                {
+                    "source": "captured-cli-text",
+                    "state": opencode_cli_text.FALLBACK_MATERIALIZATION_CAPTURED_TEXT,
+                },
             )
             self.assertEqual(
                 int((diagnostics.get("protocol_correction_attempts", {}) or {}).get("reader", 0)),
@@ -237,11 +309,47 @@ class ReaderStructuredOutputHotfixTests(unittest.TestCase):
 
             synthesis = opencode_adapter_handoff._prepare_synthesizer(
                 current,
-                "Events #182",
+                "PHOODAB #72",
             )
-            self.assertIn("Repository facts from the local model", synthesis)
+            self.assertIn("Repository facts returned by ollama", synthesis)
 
-    def test_failed_text_fallback_terminates_once_as_role_protocol_exhausted(self):
+    def test_fallback_ignores_explicitly_synthetic_text_and_materializes_visible_text(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            current = repo / workflow_stages.CURRENT_DIR
+            current.mkdir(parents=True)
+            runtime = self._runtime()
+            context = self._context(repo)
+            stdout = "\n".join(
+                [
+                    _text_event("internal continuation", synthetic=True),
+                    _text_event(
+                        "synthetic continuation metadata",
+                        metadata={"compaction_continue": True},
+                    ),
+                    _text_event("Visible factual Reader handoff."),
+                ]
+            )
+            exhausted = opencode_structured_output.StructuredOutputExhausted(
+                "StructuredOutputError",
+                retries=1,
+            )
+
+            result, native = self._invoke_with_native(
+                runtime,
+                context,
+                exhausted,
+                lambda command, **kwargs: _Completed(stdout=stdout),
+            )
+
+            self.assertEqual(native.call_count, 1)
+            self.assertEqual(result.termination, "completed")
+            text = (current / "reader-brief.md").read_text(encoding="utf-8")
+            self.assertIn("Visible factual Reader handoff", text)
+            self.assertNotIn("internal continuation", text)
+            self.assertNotIn("synthetic continuation metadata", text)
+
+    def test_empty_text_fallback_terminates_once_as_role_protocol_exhausted(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
             current = repo / workflow_stages.CURRENT_DIR
@@ -253,7 +361,7 @@ class ReaderStructuredOutputHotfixTests(unittest.TestCase):
 
             def runner(command, **kwargs):
                 commands.append(list(command))
-                return _Completed()
+                return _Completed(stdout=json.dumps({"type": "step_finish", "part": {"type": "step-finish"}}))
 
             exhausted = opencode_structured_output.StructuredOutputExhausted(
                 "StructuredOutputError",
@@ -275,7 +383,8 @@ class ReaderStructuredOutputHotfixTests(unittest.TestCase):
                 opencode_role_runtime.READER_SCHEMA_FALLBACK_STATE,
             )
             self.assertEqual(result.schema_retry_count, 2)
-            self.assertIn("fallback-text Reader output rejected", result.stderr)
+            self.assertIn("produced no completed factual text event", result.stderr)
+            self.assertFalse((current / "reader-brief.md").exists())
 
             with self.assertRaises(RoleCoordinatorError) as raised:
                 role_coordinator_runtime._runtime_failure(repo, "reader", result)
@@ -293,8 +402,96 @@ class ReaderStructuredOutputHotfixTests(unittest.TestCase):
             )
             self.assertEqual(diagnostics["last_structured_output"]["schema_retry_count"], 2)
             self.assertEqual(
+                diagnostics["reader_fallback_materialization"]["state"],
+                opencode_cli_text.FALLBACK_MATERIALIZATION_REJECTED,
+            )
+            self.assertEqual(
                 int((diagnostics.get("protocol_correction_attempts", {}) or {}).get("reader", 0)),
                 0,
+            )
+
+    def test_malformed_non_event_fallback_text_is_rejected_deterministically(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            current = repo / workflow_stages.CURRENT_DIR
+            current.mkdir(parents=True)
+            runtime = self._runtime()
+            context = self._context(repo)
+            exhausted = opencode_structured_output.StructuredOutputExhausted(
+                "StructuredOutputError",
+                retries=2,
+            )
+
+            result, native = self._invoke_with_native(
+                runtime,
+                context,
+                exhausted,
+                lambda command, **kwargs: _Completed(
+                    stdout="Repository facts without OpenCode JSON event framing."
+                ),
+            )
+
+            self.assertEqual(native.call_count, 1)
+            self.assertEqual(result.termination, "structured-output-exhausted")
+            self.assertIn("malformed OpenCode JSON", result.stderr)
+            self.assertFalse((current / "reader-brief.md").exists())
+
+    def test_oversized_fallback_handoff_is_rejected_not_truncated(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            current = repo / workflow_stages.CURRENT_DIR
+            current.mkdir(parents=True)
+            runtime = self._runtime()
+            context = self._context(repo)
+            exhausted = opencode_structured_output.StructuredOutputExhausted(
+                "StructuredOutputError",
+                retries=2,
+            )
+            oversized = "x" * (opencode_adapter_contract.MAX_HANDOFF_CHARS + 1)
+
+            result, _native = self._invoke_with_native(
+                runtime,
+                context,
+                exhausted,
+                lambda command, **kwargs: _Completed(stdout=_text_event(oversized)),
+            )
+
+            self.assertEqual(result.termination, "structured-output-exhausted")
+            self.assertIn("exceeds the", result.stderr)
+            self.assertFalse((current / "reader-brief.md").exists())
+
+    def test_nonzero_fallback_records_invocation_failure_without_second_native_sequence(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            current = repo / workflow_stages.CURRENT_DIR
+            current.mkdir(parents=True)
+            runtime = self._runtime()
+            context = self._context(repo)
+            commands: list[list[str]] = []
+            exhausted = opencode_structured_output.StructuredOutputExhausted(
+                "StructuredOutputError",
+                retries=2,
+            )
+
+            result, native = self._invoke_with_native(
+                runtime,
+                context,
+                exhausted,
+                lambda command, **kwargs: (
+                    commands.append(list(command))
+                    or _Completed(returncode=7, stdout="", stderr="runtime failed")
+                ),
+            )
+
+            self.assertEqual(native.call_count, 1)
+            self.assertEqual(len(commands), 1)
+            self.assertEqual(result.termination, "structured-output-exhausted")
+            diagnostics = json.loads(
+                (current / workflow_stages.DIAGNOSTICS_FILE).read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                diagnostics["reader_fallback_materialization"]["state"],
+                opencode_cli_text.FALLBACK_MATERIALIZATION_INVOCATION_FAILED,
             )
 
     def test_non_reader_schema_exhaustion_does_not_gain_reader_fallback(self):
