@@ -54,7 +54,11 @@ def extract_fallback_result(stdout: object, *, role: str) -> str:
     tool/reasoning/step/error/compaction events remain transport diagnostics only.
     """
 
-    raw = stdout.decode("utf-8", errors="replace") if isinstance(stdout, bytes) else str(stdout or "")
+    raw = (
+        stdout.decode("utf-8", errors="replace")
+        if isinstance(stdout, bytes)
+        else str(stdout or "")
+    )
     if not raw.strip():
         raise FallbackTextUnavailable(
             f"fallback-text {role} returned no OpenCode JSON events"
@@ -99,6 +103,10 @@ def extract_fallback_result(stdout: object, *, role: str) -> str:
 
     result = sanitize_model_output("\n\n".join(parts))
     if not result:
+        if role.casefold() == "reader":
+            raise FallbackTextUnavailable(
+                "fallback-text Reader produced no completed factual text event"
+            )
         raise FallbackTextUnavailable(
             f"fallback-text {role} produced no completed role-result text event"
         )
@@ -114,6 +122,28 @@ def extract_fallback_handoff(stdout: object) -> str:
     """Backward-compatible Reader wrapper used by #288 regression coverage."""
 
     return extract_fallback_result(stdout, role="Reader")
+
+
+def correction_after_fallback(
+    repo: Path,
+    *,
+    role: str,
+    phase: str,
+    has_contract: bool,
+) -> bool:
+    """Keep one logical fallback invocation on fallback during correction."""
+
+    if phase != "correction" or not has_contract:
+        return False
+    diagnostics = _read_diagnostics(
+        repo.expanduser().resolve() / ".autodev-run" / "current" / "run-diagnostics.json"
+    )
+    previous = diagnostics.get("last_structured_output", {})
+    return bool(
+        isinstance(previous, dict)
+        and str(previous.get("role", "") or "") == role
+        and str(previous.get("mode", "") or "") == "fallback-text"
+    )
 
 
 def materialize_fallback_result(
@@ -218,7 +248,12 @@ def materialize_reader_fallback(
             "fallback-text Reader handoff could not be materialized: "
             + (outcome.detail or outcome.state)
         )
-    target = repo.expanduser().resolve() / ".autodev-run" / "current" / contract.output_artifact
+    target = (
+        repo.expanduser().resolve()
+        / ".autodev-run"
+        / "current"
+        / contract.output_artifact
+    )
     if not target.is_file():
         raise OpenCodeAdapterError(
             "fallback-text Reader handoff did not produce reader-brief.md"
@@ -239,7 +274,11 @@ def record_fallback_materialization(
     path = current / "run-diagnostics.json"
     diagnostics = _read_diagnostics(path)
     logical_counts = diagnostics.get("role_invocations", {})
-    logical = int(logical_counts.get(role, 0) or 0) if isinstance(logical_counts, dict) else 0
+    logical = (
+        int(logical_counts.get(role, 0) or 0)
+        if isinstance(logical_counts, dict)
+        else 0
+    )
     records = diagnostics.setdefault("fallback_materialization", {})
     if not isinstance(records, dict):
         records = {}
