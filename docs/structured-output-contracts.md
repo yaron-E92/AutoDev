@@ -33,6 +33,26 @@ This preserves the execution-classification v2 architecture: AutoDev classifies 
 
 For OpenCode Reader invocations only, native schema exhaustion gets one bounded compatibility attempt through the existing CLI/text Reader protocol. The transition is recorded as `native-schema-exhausted->fallback-text` together with the consumed native schema retry count. The fallback uses the same logical role/model/UX context and calls the text path directly, so it cannot start a second native schema retry sequence. If the text attempt is empty, invalid, non-zero, or otherwise unusable, AutoDev terminates once as `role-protocol-exhausted`; it does not consume the ordinary protocol-correction allowance for this cross-mode recovery.
 
+## Fallback-text artifact ownership
+
+Fallback transport follows the same ownership principle as native Structured Output for roles whose text result can be parsed without granting new authority. The model/runtime produces bounded role content; AutoDev extracts the completed user-visible result, parses it through the established role contract, materializes the durable artifact, and then runs the ordinary Python acceptance boundary.
+
+The first generalized roles are Reader, Synthesizer, Planner, and semantic Verifier. Implementer and Fixer are deliberately excluded because their fallback contract includes repository-editing/completion behavior that cannot be reconstructed safely from a text result alone.
+
+For OpenCode, only completed non-synthetic `text` parts from `opencode run --format json` are eligible. Tool calls, reasoning parts, step events, errors, compaction-continuation text, and unbounded transcripts are never promoted into protocol artifacts. The captured result is bounded before parsing.
+
+During migration, legacy agents may still write the designated artifact themselves. Resolution is deterministic:
+
+1. a usable captured runtime result is authoritative and AutoDev materializes it;
+2. if captured output is absent or parser-rejected, an already-written artifact may still be accepted through the existing parser/acceptance path;
+3. if both sources are valid and equivalent, the result is accepted deterministically;
+4. if both are valid but disagree, the captured runtime result is explicitly authoritative and replaces the legacy artifact; the duplicate conflict is recorded in content-free diagnostics;
+5. if neither source is usable, the existing single protocol-correction allowance applies; a correction that returns usable text is materialized by the same AutoDev-owned path.
+
+This does not add a native/fallback retry loop. Native schema retries remain inside the runtime boundary; AutoDev protocol correction remains bounded to one physical correction attempt. Reader's special schema-exhaustion cross-mode recovery remains one attempt and does not restart native Structured Output.
+
+Role-attempt diagnostics record `fallback_result_source`, `fallback_materialization`, captured-result state, and duplicate-source state. They do not persist the captured role result itself beyond the normal bounded artifact or copy hidden reasoning into diagnostics.
+
 ## Implementer and Fixer completion evidence
 
 Structured Output does not constrain or replace the Implementer/Fixer repository-editing tool loop. It constrains only the small completion report returned after those edits.
@@ -45,7 +65,7 @@ The first completion-report contract intentionally does not ask Implementer/Fixe
 
 ## Evaluation
 
-Every physical role attempt already records content-free rollout fields under `.autodev-run/current/role-attempts/`: the role, native/fallback mode, schema retry count, whether AutoDev accepted the artifact, failure classification, and whether the attempt was an AutoDev protocol correction. This makes serialization reliability measurable without retaining prompt or model-output content in the evaluation summary.
+Every physical role attempt already records content-free rollout fields under `.autodev-run/current/role-attempts/`: the role, native/fallback mode, schema retry count, whether AutoDev accepted the artifact, failure classification, whether the attempt was an AutoDev protocol correction, and—when fallback text is used—the result/materialization source. This makes serialization reliability measurable without retaining prompt or model-output content in the evaluation summary.
 
 Run `python -m automation.structured_output_evaluation <repo>` against a completed or interrupted run to aggregate those records by role and by native versus fallback execution. Compare equivalent workloads before and after a role migration using `protocol_correction_attempts`, `protocol_rejections`, and `schema_retry_count`: native schema retries are expected to absorb shape-only failures before they consume AutoDev's single protocol-correction allowance.
 
@@ -55,7 +75,7 @@ Structured sidecars are scoped to one logical role invocation. Preparing a fresh
 
 ## OpenCode
 
-For OpenCode, `opencode run --format json` is only a CLI event/output format and is not treated as schema-constrained model output. Native Structured Output uses OpenCode's headless server/session API and sends the AutoDev-owned JSON Schema in the session prompt `format` request. Older OpenCode installations that do not expose that API fall back to the existing CLI/text protocol.
+For OpenCode, `opencode run --format json` is only a CLI event/output format and is not treated as schema-constrained model output. Native Structured Output uses OpenCode's headless server/session API and sends the AutoDev-owned JSON Schema in the session prompt `format` request. Older OpenCode installations that do not expose that API fall back to the CLI/text compatibility path, where AutoDev now owns materialization for safely parseable structured roles.
 
 OpenCode's schema retries occur inside the runtime boundary and do not consume AutoDev's one protocol-correction attempt. Reader additionally has the single bounded cross-mode fallback described above after those native retries are exhausted.
 

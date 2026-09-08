@@ -4,6 +4,8 @@
 
 The first screen combines repository identity, queue counts, the current durable run/resume boundary, branch and PR identity, local/semantic verification indicators, scheduler/backend/runtime state, notification state, privacy policy/grant counts, active running/claim count, and a navigable list of managed/open issues with dependency blockers.
 
+When multimodal UX verification evidence exists, the run section also shows the final visual status, whether that evidence still belongs to the current semantic checkpoint, compared UX target IDs, violation/unverifiable counts, a short evidence-identity prefix, and the effective runtime/model/capability. The same fields are available in `autodev tui --once --json`. The TUI never turns those display fields into a separate authority source.
+
 ## Commands and keys
 
 Start the interactive dashboard with:
@@ -29,7 +31,7 @@ autodev tui --once
 autodev tui --once --json
 ```
 
-`--once` uses the same structured snapshot model but does not enter raw-terminal mode.
+`--once` uses the same structured snapshot model but does not enter raw-terminal mode. The JSON `run` object includes multimodal UX status, checkpoint-validity, evidence identity, compared target IDs, counts, and runtime/model capability metadata when present.
 
 ## Refresh and observation safety
 
@@ -37,7 +39,7 @@ Local state is refreshed frequently from durable AutoDev files and scheduler reg
 
 Observation does not call a model, reconcile labels, advance stages, refresh claims, or write durable run state. A remote-refresh failure leaves the last known remote queue snapshot visible and records the error instead of destroying the local dashboard.
 
-The dashboard does not display prompts, source snippets, model transcripts, credentials, or arbitrary model output. The only bounded model-produced information shown by default is state already normalized into AutoDev's durable status fields. The optional non-success summary is read from AutoDev's existing local `non-success-report.md` artifact and truncated before display.
+The dashboard does not display prompts, source snippets, model transcripts, credentials, arbitrary model output, or screenshot bytes. Multimodal UX inspection exposes only AutoDev-normalized logical target IDs, bounded counts, safe runtime metadata, and hashes/identity prefixes. The optional non-success summary is read from AutoDev's existing local `non-success-report.md` artifact and truncated before display.
 
 ## Toolkit decision
 
@@ -69,7 +71,7 @@ This is not a permanent prohibition on Textual or prompt_toolkit. If later TUI w
 
 ## Architecture
 
-`automation/tui_model.py` owns immutable display models and structured observation. It consumes `repository_identity`, `queue_selection`, `queue_workflow`, `queue_presentation`, `workflow_stages`, scheduler registration/status, notification policy, and privacy grant/policy APIs directly. It never scrapes human-formatted CLI output.
+`automation/tui_model.py` owns immutable display models and structured observation. It consumes `repository_identity`, `queue_selection`, `queue_workflow`, `queue_presentation`, `workflow_stages`, scheduler registration/status, notification policy, privacy grant/policy APIs, and normalized multimodal UX evidence directly. It never scrapes human-formatted CLI output.
 
 `automation/tui_terminal.py` owns presentation, keyboard navigation, confirmation state, and bounded refresh timing. Rendering is a pure function of a `TuiSnapshot` plus `ViewState`; terminal input is isolated behind `TerminalInput`.
 

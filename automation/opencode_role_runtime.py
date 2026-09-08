@@ -25,6 +25,7 @@ from automation import (
 
 
 READER_SCHEMA_FALLBACK_STATE = "native-schema-exhausted->fallback-text"
+FALLBACK_CORRECTION_STATE = "protocol-correction-after-fallback"
 
 
 class OpenCodeRoleRuntime:
@@ -102,6 +103,13 @@ class OpenCodeRoleRuntime:
         contract = context.output_contract
         if contract is None:
             return role_output_contract.CAPABILITY_UNSUPPORTED
+        if opencode_cli_text.correction_after_fallback(
+            context.repo,
+            role=context.role,
+            phase=context.phase,
+            has_contract=True,
+        ):
+            return role_output_contract.CAPABILITY_EMULATED
         mappings = self._resolve_mappings(context.repo, runner=runner, which=which)
         model = str(mappings.get(context.role, {}).get("model", "")).strip()
         if not model or "/" not in model:
@@ -312,8 +320,14 @@ class OpenCodeRoleRuntime:
             ) from exc
 
         contract = context.output_contract
-        fallback_state = ""
-        if contract is not None:
+        fallback_only = opencode_cli_text.correction_after_fallback(
+            repo,
+            role=context.role,
+            phase=context.phase,
+            has_contract=contract is not None,
+        )
+        fallback_state = FALLBACK_CORRECTION_STATE if fallback_only else ""
+        if contract is not None and not fallback_only:
             capability = self.structured_output_capability(
                 context,
                 runner=runner,
@@ -626,14 +640,33 @@ class OpenCodeRoleRuntime:
             )
 
         returncode = int(getattr(completed, "returncode", 1))
+        stdout = _text(getattr(completed, "stdout", ""))
+        stderr = _text(getattr(completed, "stderr", ""))
+        if returncode == 0 and contract is not None:
+            outcome = opencode_cli_text.materialize_fallback_result(
+                repo,
+                contract,
+                stdout,
+            )
+            try:
+                opencode_cli_text.record_fallback_materialization(
+                    repo,
+                    role=context.role,
+                    phase=context.phase,
+                    outcome=outcome,
+                )
+            except opencode_adapter_contract.OpenCodeAdapterError as exc:
+                diagnostic_error = f"fallback materialization diagnostics failed: {exc}"
+                stderr = (stderr.rstrip() + "\n" + diagnostic_error).strip()
+
         return role_runtime.RoleInvocationResult(
             runtime=self.name,
             role=context.role,
             phase=context.phase,
             returncode=returncode,
             elapsed_ms=int((time.monotonic() - started) * 1000),
-            stdout=_text(getattr(completed, "stdout", "")),
-            stderr=_text(getattr(completed, "stderr", "")),
+            stdout=stdout,
+            stderr=stderr,
             termination="completed" if returncode == 0 else "runtime-nonzero",
             model=model,
             **metadata,

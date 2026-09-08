@@ -3,7 +3,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 from typing import Callable
-from automation import run_manifest, workflow_stages
+from automation import run_manifest, ux_multimodal_resume, workflow_stages
 
 from automation.opencode_resume_checkpoint import (
     _stage_attempt,
@@ -19,6 +19,7 @@ from automation.opencode_resume_contract import (
 from automation.opencode_resume_manifest import (
     role_snapshots,
 )
+
 
 def status_text(
     repo: Path,
@@ -45,6 +46,7 @@ def status_text(
     failure = manifest.get("failure", {}) if isinstance(manifest.get("failure", {}), dict) else {}
     changed = _changed_role_consequences(manifest, mappings)
     requested_invalidations = requested_invalidations or []
+    multimodal = ux_multimodal_resume.summary(current)
 
     lines = [
         f"Issue: #{target.get('issue_number', state.get('IssueNumber', 0))}",
@@ -61,6 +63,26 @@ def status_text(
         f"Commit: {state.get('LastCommitSha', '') or '(none)'}",
         f"PR: {state.get('PrUrl', '') or '(none)'}",
     ]
+    if bool(multimodal.get("present")):
+        targets = multimodal.get("targets", [])
+        target_text = ", ".join(str(value) for value in targets) if isinstance(targets, list) else ""
+        evidence = str(multimodal.get("evidence_identity", "") or "")
+        lines.append(
+            "Multimodal UX: "
+            f"{multimodal.get('status', '') or '-'} | "
+            f"checkpoint={'yes' if run_manifest.stage_completed(manifest, 'semantic-verified') else 'no'} | "
+            f"violations={int(multimodal.get('violations', 0) or 0)} | "
+            f"unverifiable={int(multimodal.get('unverifiable', 0) or 0)}"
+        )
+        lines.append(
+            f"Multimodal UX evidence: {evidence[:16] or '-'} | targets={target_text or '-'}"
+        )
+        lines.append(
+            "Multimodal UX route: "
+            f"{multimodal.get('runtime', '') or '-'} "
+            f"{multimodal.get('model', '') or '-'} | "
+            f"capability={multimodal.get('capability', '') or '-'}"
+        )
     if role:
         model = str(mapping.get("model", ""))
         inheritance = str(mapping.get("inherits_from", ""))
@@ -86,6 +108,7 @@ def status_text(
     )
     return "\n".join(lines) + "\n"
 
+
 def resume_action(manifest: dict[str, object], state: dict[str, object]) -> str:
     for stage, kind in REPAIR_STAGE_KIND.items():
         record = _stage_record(manifest, stage)
@@ -103,11 +126,13 @@ def resume_action(manifest: dict[str, object], state: dict[str, object]) -> str:
         return "complete" if str(state.get("Status", "")) == "ReadyForReview" else "ready"
     return NEXT_ACTION.get(stage, stage)
 
+
 def repair_attempts(manifest: dict[str, object]) -> dict[str, int]:
     return {
         kind: _stage_attempt(manifest, stage)
         for stage, kind in REPAIR_STAGE_KIND.items()
     }
+
 
 def _resume_problems(
     repo: Path,
@@ -119,6 +144,19 @@ def _resume_problems(
     validate_remote: bool,
 ) -> list[str]:
     problems = list(run_manifest.validate_artifacts(manifest, current))
+    if (
+        run_manifest.stage_completed(manifest, "semantic-verified")
+        and ux_multimodal_resume.tracked(manifest, current)
+    ):
+        try:
+            stale = ux_multimodal_resume.stale_reasons(repo, current)
+        except Exception as exc:
+            stale = [f"multimodal UX evidence could not be revalidated: {exc}"]
+        problems.extend(
+            f"multimodal UX evidence stale: {reason}; resume requires --invalidate-role verifier"
+            for reason in stale
+        )
+
     target = manifest.get("target", {})
     if not isinstance(target, dict):
         return [*problems, "run manifest target is invalid"]
@@ -180,6 +218,7 @@ def _resume_problems(
             problems.append(str(exc))
     return problems
 
+
 def _changed_role_consequences(
     manifest: dict[str, object],
     mappings: dict[str, dict[str, str]],
@@ -197,6 +236,7 @@ def _changed_role_consequences(
         if previous_fingerprint and latest_fingerprint != previous_fingerprint:
             changed[role] = run_manifest.invalidated_stages_for_role(manifest, role)
     return changed
+
 
 def _role_for_action(action: str) -> str:
     if action.startswith("fixer-"):
