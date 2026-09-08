@@ -143,17 +143,20 @@ def stale_reasons(repo: Path, current: Path) -> list[str]:
         if str(stored.get("path", "") or "") != reference.relative_path:
             reasons.append(f"selected UX reference path changed for {reference.target_id}")
 
-    try:
-        config = ux_capture.load_config(repo)
-    except ux_capture.UXCaptureError as exc:
-        reasons.append(f"UX capture configuration is no longer valid: {_bounded(exc)}")
-        config = None
     stored_config_hash = str(result.get("capture_config_sha256", "") or "")
-    current_config_hash = config.sha256 if config is not None else ""
-    if stored_config_hash != current_config_hash:
-        reasons.append("UX capture configuration changed")
-
     stored_implementation = _indexed(result.get("implementation_evidence", []))
+    capture_relevant = bool(stored_references or stored_implementation or stored_config_hash)
+    config = None
+    current_config_hash = ""
+    if capture_relevant:
+        try:
+            config = ux_capture.load_config(repo)
+        except ux_capture.UXCaptureError as exc:
+            reasons.append(f"UX capture configuration is no longer valid: {_bounded(exc)}")
+        current_config_hash = config.sha256 if config is not None else ""
+        if stored_config_hash != current_config_hash:
+            reasons.append("UX capture configuration changed")
+
     current_implementation: list[dict[str, object]] = []
     for target_id, stored in sorted(stored_implementation.items()):
         logical_id = str(stored.get("logical_id", "") or "")
