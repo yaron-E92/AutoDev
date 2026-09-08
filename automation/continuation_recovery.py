@@ -94,11 +94,27 @@ def _already_adopted(
     *,
     runner: Callable[..., object],
 ) -> bool:
-    state_value = workflow_storage.read_json(_current(repo) / "state.json")
+    current = _current(repo)
+    state_value = workflow_storage.read_json(current / "state.json")
     state = state_value if isinstance(state_value, dict) else {}
+    if (
+        str(state.get("ContinuationResolvedSha", "")).strip() != resolved_sha
+        or _head(repo, runner=runner) != resolved_sha
+    ):
+        return False
+
+    try:
+        manifest = run_manifest.load_manifest(current / run_manifest.MANIFEST_NAME)
+    except run_manifest.ManifestError:
+        return False
+    record = manifest.get("continuation_source", {})
+    target = manifest.get("target", {})
+    if not isinstance(record, dict) or not isinstance(target, dict):
+        return False
     return (
-        str(state.get("ContinuationResolvedSha", "")).strip() == resolved_sha
-        and _head(repo, runner=runner) == resolved_sha
+        str(record.get("resolved_sha", "")).strip() == resolved_sha
+        and str(target.get("branch", "")).strip()
+        == str(state.get("BranchName", "")).strip()
     )
 
 
