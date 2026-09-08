@@ -6,7 +6,7 @@ from automation import windows_verification_hooks
 
 import sys
 
-from automation import ci_outcomes, context_optimization, execution_classification_evidence, execution_classification_hooks, opencode_github_entrypoint, opencode_role_entrypoint, opencode_runtime, pr_head_sync, privacy_consent, role_workflow_hooks, windows_semantic_order
+from automation import ci_outcomes, context_optimization, execution_classification_evidence, execution_classification_hooks, opencode_github_entrypoint, opencode_role_entrypoint, opencode_runtime, pr_head_sync, privacy_consent, revision_hooks, role_workflow_hooks, windows_semantic_order
 
 
 COORDINATE_COMMAND = "coordinate"
@@ -34,6 +34,10 @@ def run(argv: list[str] | None = None) -> int:
     # Re-check only the explicit secret-free completion signal on resume, then
     # return to Reader so the remaining work is classified from fresh evidence.
     execution_classification_evidence.install()
+    # Revision is an operator-authority overlay on the existing coordinator,
+    # role protocol, and status surfaces rather than a second workflow engine.
+    # Install it last so it composes with the final effective wrappers above.
+    revision_hooks.install()
     values = list(sys.argv[1:] if argv is None else argv)
     if values and values[0] == PRIVACY_COMMAND:
         return privacy_grant_cli.run_cli(values[1:])
