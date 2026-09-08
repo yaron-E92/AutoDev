@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 from automation import claim_cli, cli_help, config_cli, continuation, manage_cli, notification_cli, privacy_grant_cli, product_runtime, revision_cli, scheduler_health_cli, semver_intent, tui_cli, ux_cli, ux_help
 
 import os
@@ -9,6 +11,12 @@ from automation import opencode_entrypoint, repository_identity, user_install
 
 
 continuation.register_help()
+_resume_help = cli_help.HELP.get(("resume",))
+if _resume_help is not None:
+    cli_help.HELP[("resume",)] = replace(
+        _resume_help,
+        usage="autodev resume [--repo PATH] [--runtime NAME] [--continue-from REF]",
+    )
 manage_cli.register_help()
 revision_cli.register_help()
 tui_cli.register_help()
