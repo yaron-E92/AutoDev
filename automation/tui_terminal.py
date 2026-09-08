@@ -58,6 +58,19 @@ def _run_lines(snapshot: tui_model.TuiSnapshot) -> list[str]:
         f"Verification: local={'yes' if run.local_check_passed else 'no'} "
         f"semantic={'yes' if run.semantic_verified else 'no'}",
     ]
+    if run.multimodal_status:
+        targets = ",".join(run.multimodal_targets) or "-"
+        evidence = run.multimodal_evidence_identity[:12] or "-"
+        lines.append(
+            f"UX visual: {run.multimodal_status} | checkpoint="
+            f"{'yes' if run.multimodal_checkpoint_valid else 'no'} | "
+            f"violations={run.multimodal_violations} unverifiable={run.multimodal_unverifiable} | "
+            f"evidence={evidence}"
+        )
+        lines.append(
+            f"UX targets: {targets} | route={run.multimodal_runtime or '-'} "
+            f"{run.multimodal_model or '-'} | capability={run.multimodal_capability or '-'}"
+        )
     if run.non_success_summary:
         lines.append(f"Non-success: {run.non_success_summary}")
     return lines

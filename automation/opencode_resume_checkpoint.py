@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from automation import repair_lineage, run_manifest, workflow_stages
+from automation import repair_lineage, run_manifest, ux_multimodal_resume, workflow_stages
 
 from automation.opencode_resume_contract import (
     OpenCodeResumeError,
@@ -185,19 +185,38 @@ def checkpoint_stage(repo: Path, name: str, payload: dict[str, object], attempt:
             return
         if name == "semantic":
             if outcome == "CONTINUE":
+                multimodal = ux_multimodal_resume.summary(current)
+                multimodal_present = bool(multimodal.get("present"))
+                artifacts = _existing(
+                    current,
+                    "verification-result.json",
+                    "verification/final-verdict.json",
+                    "ux-multimodal-verification.json",
+                )
                 run_manifest.complete_stage(
                     path,
                     "semantic-verified",
                     run_root=current,
-                    artifacts=_existing(current, "verification-result.json", "verification/final-verdict.json"),
+                    artifacts=artifacts,
                     inputs={
                         "deterministic_output": _stage_output_hash(run_manifest.load_manifest(path), "deterministic-verified"),
                         "source_identity": str(state.get("SemanticSourceIdentity", "")),
+                        "multimodal_input_identity": str(multimodal.get("input_identity", "") or "")
+                        if multimodal_present
+                        else "",
                     },
                     details={
                         "attempt": attempt,
                         "verdict": str(state.get("LastSemanticVerdict", "")),
                         "source_identity": str(state.get("SemanticSourceIdentity", "")),
+                        "multimodal_status": str(multimodal.get("status", "") or "")
+                        if multimodal_present
+                        else "",
+                        "multimodal_evidence_identity": str(
+                            multimodal.get("evidence_identity", "") or ""
+                        )
+                        if multimodal_present
+                        else "",
                     },
                 )
             else:
