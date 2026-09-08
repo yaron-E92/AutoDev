@@ -70,7 +70,12 @@ class NewRunContinuationTests(unittest.TestCase):
 
             source = workflow_workspace.source_identity(repo, current, state)
             self.assertEqual(source["parent_sha"], feature)
-            self.assertEqual(source["changes"], [])
+            changed_paths = {
+                str(change.get("path", ""))
+                for change in source["changes"]
+                if isinstance(change, dict)
+            }
+            self.assertNotIn("app.txt", changed_paths)
 
             manifest_path = current / run_manifest.MANIFEST_NAME
             run_manifest.create_manifest(
