@@ -155,6 +155,7 @@ def record_attempt(
 
     artifact = inspect_artifact(output_path, validation_error=validation_error, accepted=accepted)
     attempt_kind = "protocol-correction" if phase == "correction" else "initial"
+    fallback = _fallback_metadata(diagnostics, role, phase, logical)
     record = {
         "version": 1,
         "logical_role_invocation": logical,
@@ -175,6 +176,11 @@ def record_attempt(
         "schema_retry_count": max(0, int(schema_retry_count or 0)),
         "ux_context_active": bool(ux_context_fingerprint),
         "ux_context_fingerprint": str(ux_context_fingerprint or ""),
+        "fallback_result_source": str(fallback.get("source", "")),
+        "fallback_materialization": str(fallback.get("state", "")),
+        "fallback_duplicate_state": str(fallback.get("duplicate_state", "")),
+        "fallback_captured_state": str(fallback.get("captured_state", "")),
+        "fallback_materialization_detail": runtime_excerpt(fallback.get("detail", "")),
         **artifact,
         "accepted": bool(accepted),
         "validation_error": runtime_excerpt(validation_error),
@@ -204,6 +210,10 @@ def record_attempt(
         "schema_retry_count": max(0, int(schema_retry_count or 0)),
         "ux_context_active": bool(ux_context_fingerprint),
         "ux_context_fingerprint": str(ux_context_fingerprint or ""),
+        "fallback_result_source": str(fallback.get("source", "")),
+        "fallback_materialization": str(fallback.get("state", "")),
+        "fallback_duplicate_state": str(fallback.get("duplicate_state", "")),
+        "fallback_captured_state": str(fallback.get("captured_state", "")),
     }
     _write_json_atomic(diagnostics_path, diagnostics)
 
@@ -239,12 +249,34 @@ def record_attempt(
             "schema_retry_count": max(0, int(schema_retry_count or 0)),
             "ux_context_active": bool(ux_context_fingerprint),
             "ux_context_fingerprint": str(ux_context_fingerprint or ""),
+            "fallback_result_source": str(fallback.get("source", "")),
+            "fallback_materialization": str(fallback.get("state", "")),
+            "fallback_duplicate_state": str(fallback.get("duplicate_state", "")),
+            "fallback_captured_state": str(fallback.get("captured_state", "")),
         }
         if external_error is not None:
             failure["external_error"] = external_error.to_json()
         _write_json_atomic(last_failure_path, failure)
 
     return relative
+
+
+def _fallback_metadata(
+    diagnostics: dict[str, object],
+    role: str,
+    phase: str,
+    logical: int,
+) -> dict[str, object]:
+    records = diagnostics.get("fallback_materialization", {})
+    if not isinstance(records, dict):
+        return {}
+    value = records.get(f"{role}:{phase}", {})
+    if not isinstance(value, dict):
+        return {}
+    recorded_logical = int(value.get("logical_role_invocation", 0) or 0)
+    if recorded_logical and recorded_logical != logical:
+        return {}
+    return value
 
 
 def _read_json(path: Path) -> dict[str, object]:
