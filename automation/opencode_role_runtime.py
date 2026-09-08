@@ -626,14 +626,33 @@ class OpenCodeRoleRuntime:
             )
 
         returncode = int(getattr(completed, "returncode", 1))
+        stdout = _text(getattr(completed, "stdout", ""))
+        stderr = _text(getattr(completed, "stderr", ""))
+        if returncode == 0 and contract is not None:
+            outcome = opencode_cli_text.materialize_fallback_result(
+                repo,
+                contract,
+                stdout,
+            )
+            try:
+                opencode_cli_text.record_fallback_materialization(
+                    repo,
+                    role=context.role,
+                    phase=context.phase,
+                    outcome=outcome,
+                )
+            except opencode_adapter_contract.OpenCodeAdapterError as exc:
+                diagnostic_error = f"fallback materialization diagnostics failed: {exc}"
+                stderr = (stderr.rstrip() + "\n" + diagnostic_error).strip()
+
         return role_runtime.RoleInvocationResult(
             runtime=self.name,
             role=context.role,
             phase=context.phase,
             returncode=returncode,
             elapsed_ms=int((time.monotonic() - started) * 1000),
-            stdout=_text(getattr(completed, "stdout", "")),
-            stderr=_text(getattr(completed, "stderr", "")),
+            stdout=stdout,
+            stderr=stderr,
             termination="completed" if returncode == 0 else "runtime-nonzero",
             model=model,
             **metadata,
