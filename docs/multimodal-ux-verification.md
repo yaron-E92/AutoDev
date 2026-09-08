@@ -88,7 +88,22 @@ If required visual verification is `unverifiable`, the semantic stage blocks wit
 - effective runtime/model and image-capability status;
 - validated comparison statuses and bounded UX findings.
 
-The verifier UX-context fingerprint also includes the repository capture-config hash. Selected UX reference bytes are already part of the effective UX-context fingerprint. Changing either therefore invalidates the verifier role identity on resume. Changed implementation/source state is still governed by the existing deterministic source-proof and semantic resume boundaries, while each fresh visual verification records the resulting capture hash.
+AutoDev also computes a safe multimodal **input identity** and **evidence identity** for operator inspection. The input identity covers the pinned UX/context, capture configuration, selected reference evidence, implementation capture evidence, verifier contract, and effective runtime metadata. The evidence identity additionally binds the final comparison/findings result.
+
+Before a completed semantic checkpoint is reused, AutoDev deterministically revalidates the non-model visual evidence against the current run. It checks:
+
+- the effective UX-context fingerprint and pinned artifact identity;
+- the current verifier-output contract metadata;
+- the selected reference target set, paths, and bytes;
+- `.autodev/ux-capture.json` identity when capture is relevant;
+- configured target output, viewport, and platform metadata;
+- the actual bytes, MIME type, size, and aggregate identity of each persisted implementation capture.
+
+If any of those inputs changed, resume is refused with an explicit `--invalidate-role verifier` requirement. That existing invalidation mechanism clears the completed semantic checkpoint and any downstream `pr-created` checkpoint, forcing verification/capture/CI to be re-established before the run can become ready again. A verifier runtime/model configuration change continues to use the existing role-snapshot invalidation rule, so execution-affecting route changes likewise cannot reuse old semantic work.
+
+A `not-applicable` visual result does not become stale merely because a repository has an otherwise-unused capture configuration; only semantically relevant visual inputs participate in that result's resume check.
+
+`autodev resume ... status` includes concise multimodal status, checkpoint state, compared targets, evidence identity, violation/unverifiable counts, and route capability when evidence exists. `autodev tui` exposes the same AutoDev-owned inspection data, and `autodev tui --once --json` provides it as structured JSON. Screenshot bytes themselves are not copied into generic status/TUI output.
 
 ## Security boundaries
 
