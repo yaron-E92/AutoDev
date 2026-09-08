@@ -11,6 +11,12 @@ class UXMultimodalResumeError(RuntimeError):
     pass
 
 
+def tracked(manifest: dict[str, object], current: Path) -> bool:
+    return bool(manifest.get("ux_multimodal_verification")) or (
+        current.expanduser().resolve() / ux_multimodal.RESULT_FILE
+    ).is_file()
+
+
 def summary(current: Path) -> dict[str, object]:
     """Return bounded, safe operator metadata for the current multimodal result."""
 
@@ -213,10 +219,7 @@ def reconcile_completed_verification(repo: Path, current: Path, manifest_path: P
     manifest = run_manifest.load_manifest(manifest_path)
     if not run_manifest.stage_completed(manifest, "semantic-verified"):
         return []
-    tracked = bool(manifest.get("ux_multimodal_verification")) or (
-        current.expanduser().resolve() / ux_multimodal.RESULT_FILE
-    ).is_file()
-    if not tracked:
+    if not tracked(manifest, current):
         # Legacy semantic checkpoints that predate multimodal verification are not
         # retroactively invalidated merely because this feature now exists.
         return []
