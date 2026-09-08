@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Callable
 from automation import operation_attribution
 from automation.semantic_contract import SemanticVerifierError
-from automation import repair_lineage
+from automation import repair_lineage, ux_multimodal, ux_multimodal_runtime
 from automation.semantic_invocation import prepare_semantic_repair_prompt
 from automation.semantic_prompts import extract_acceptance_criteria
 from automation.semantic_schema import parse_semantic_output
@@ -276,10 +276,69 @@ def _execute_stage_impl(
             state.pop("SemanticSourceIdentity", None)
         write_state(current, state)
         if verdict == "pass":
+            multimodal_path = ux_multimodal_runtime.verify_for_semantic_stage(
+                repo,
+                runner=runner,
+                which=which,
+            )
+            multimodal = ux_multimodal.load_result(current)
+            multimodal_status = str(multimodal.get("status", "") or "")
+            if multimodal_status == "unverifiable":
+                state["LastSemanticVerdict"] = "blocked"
+                state.pop("SemanticSourceIdentity", None)
+                write_state(current, state)
+                return 0, stage_payload(
+                    repo,
+                    "BLOCKED",
+                    name,
+                    reason="required multimodal UX conformance is unverifiable",
+                    artifact=multimodal_path,
+                    failure_classification=FAILURE_DETERMINISTIC,
+                    next_action="provide deterministic UX capture evidence and an authorized image-capable verifier route, then rerun verification",
+                    max_semantic_repair_attempts=max_attempts,
+                )
+            if multimodal_status == "repair":
+                state["LastSemanticVerdict"] = "repair"
+                state.pop("SemanticSourceIdentity", None)
+                write_state(current, state)
+                if attempt >= max_attempts:
+                    return 0, stage_payload(
+                        repo,
+                        "BLOCKED",
+                        name,
+                        reason="multimodal UX repair-attempt limit exhausted",
+                        artifact=multimodal_path,
+                        failure_classification=FAILURE_DETERMINISTIC,
+                        next_action="mark the run blocked",
+                        max_semantic_repair_attempts=max_attempts,
+                    )
+                repair_path = current / "verification-repair.md"
+                repair_text = ux_multimodal.repair_brief(current)
+                if not repair_text:
+                    raise WorkflowStageError(
+                        "multimodal UX verifier requested repair without a validated repair brief"
+                    )
+                repair_path.write_text(repair_text + "\n", encoding="utf-8")
+                return 0, stage_payload(
+                    repo,
+                    "REPAIR",
+                    name,
+                    reason="multimodal UX verifier found pinned-UX conformance violations",
+                    artifact=repair_path,
+                    failure_classification=FAILURE_CODE_REPAIRABLE,
+                    next_action="delegate the validated UX repair to autodev-fixer, increment the semantic attempt, rerun local-check, rerun the verifier, recapture the UI, and reverify multimodal UX conformance",
+                    max_semantic_repair_attempts=max_attempts,
+                )
+            if multimodal_status not in {"pass", "not-applicable"}:
+                raise WorkflowStageError(
+                    f"multimodal UX verifier produced unsupported durable status: {multimodal_status!r}"
+                )
             return 0, stage_payload(
                 repo,
                 "CONTINUE",
                 name,
+                artifact=multimodal_path,
+                multimodal_ux_status=multimodal_status,
                 next_action="run commit/push/PR/CI",
                 max_semantic_repair_attempts=max_attempts,
             )
