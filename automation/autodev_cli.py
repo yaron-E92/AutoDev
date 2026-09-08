@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from automation import claim_cli, cli_help, config_cli, continuation, manage_cli, notification_cli, privacy_grant_cli, product_runtime, revision_cli, scheduler_health_cli, semver_intent, tui_cli, ux_cli, ux_help
+from automation import claim_cli, cli_help, config_cli, continuation, continuation_recovery, manage_cli, notification_cli, privacy_grant_cli, product_runtime, revision_cli, scheduler_health_cli, semver_intent, tui_cli, ux_cli, ux_help
 
 import os
 import sys
@@ -95,7 +95,7 @@ def _help() -> str:
     extra = (
         "Configuration:\n"
         "  autodev --version          Show the installed AutoDev product version.\n"
-        "  autodev models             Show effective OpenCode role/model mappings.\n"
+        "  autodev models             Show effective OpenCode model mappings.\n"
         "  --owner OWNER --repo REPO  Override the GitHub repository target for this command.\n"
         "  --runtime NAME             Override role runtime for issue-to-pr/resume/revise.\n"
         "  Repository precedence      CLI target > GITHUB_OWNER/GITHUB_REPO > .autodev/repo.json > remote/fallback.\n"
@@ -234,11 +234,13 @@ def _dispatch(
             return _friendly_error(str(exc), command="issue-to-pr")
     if command == "resume":
         repo = continuation.repo_from_args(rest)
-        if continue_from:
-            try:
-                continuation.adopt_existing_run(repo, continue_from)
-            except continuation.ContinuationError as exc:
-                return _friendly_error(str(exc), command="resume")
+        try:
+            if continue_from:
+                continuation_recovery.adopt(repo, continue_from)
+            else:
+                continuation_recovery.finish_pending(repo)
+        except continuation.ContinuationError as exc:
+            return _friendly_error(str(exc), command="resume")
         return opencode_entrypoint.run(["coordinate", "--resume", *rest])
     return opencode_entrypoint.run(values)
 
