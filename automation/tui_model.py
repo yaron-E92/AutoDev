@@ -14,8 +14,10 @@ from automation import (
     queue_selection,
     queue_workflow,
     repository_identity,
+    run_manifest,
     scheduler,
     scheduler_health_storage,
+    ux_multimodal_resume,
     workflow_stages,
 )
 
@@ -48,6 +50,15 @@ class TuiRun:
     local_check_passed: bool = False
     semantic_verified: bool = False
     verification_identity: str = ""
+    multimodal_status: str = ""
+    multimodal_checkpoint_valid: bool = False
+    multimodal_evidence_identity: str = ""
+    multimodal_targets: tuple[str, ...] = ()
+    multimodal_violations: int = 0
+    multimodal_unverifiable: int = 0
+    multimodal_runtime: str = ""
+    multimodal_model: str = ""
+    multimodal_capability: str = ""
     non_success_summary: str = ""
 
 
@@ -135,6 +146,27 @@ def collect_local(
         except Exception:
             state = {}
 
+    manifest: dict[str, object] = {}
+    manifest_path = current / run_manifest.MANIFEST_NAME
+    if manifest_path.is_file():
+        try:
+            manifest = run_manifest.load_manifest(manifest_path)
+        except Exception:
+            manifest = {}
+    multimodal = ux_multimodal_resume.summary(current) if current.is_dir() else {}
+    multimodal_targets = multimodal.get("targets", []) if isinstance(multimodal, dict) else []
+    if not isinstance(multimodal_targets, list):
+        multimodal_targets = []
+    semantic_checkpoint = (
+        run_manifest.stage_completed(manifest, "semantic-verified")
+        if manifest
+        else bool(
+            state.get("SemanticVerified")
+            or state.get("SemanticVerificationPassed")
+            or state.get("VerificationProofVersion")
+        )
+    )
+
     run = TuiRun(
         state=existing.state,
         issue_number=int(state.get("IssueNumber", 0) or existing.issue_number or 0),
@@ -147,12 +179,31 @@ def collect_local(
         next_action=existing.next_action,
         resumable=existing.state == "RESUME_EXISTING",
         local_check_passed=bool(state.get("LastLocalCheckPassed")),
-        semantic_verified=bool(
-            state.get("SemanticVerified")
-            or state.get("SemanticVerificationPassed")
-            or state.get("VerificationProofVersion")
-        ),
+        semantic_verified=semantic_checkpoint,
         verification_identity=str(state.get("VerifiedSourceIdentity", "") or ""),
+        multimodal_status=str(multimodal.get("status", "") or "") if isinstance(multimodal, dict) else "",
+        multimodal_checkpoint_valid=bool(multimodal.get("present")) and semantic_checkpoint
+        if isinstance(multimodal, dict)
+        else False,
+        multimodal_evidence_identity=str(multimodal.get("evidence_identity", "") or "")
+        if isinstance(multimodal, dict)
+        else "",
+        multimodal_targets=tuple(str(value) for value in multimodal_targets),
+        multimodal_violations=int(multimodal.get("violations", 0) or 0)
+        if isinstance(multimodal, dict)
+        else 0,
+        multimodal_unverifiable=int(multimodal.get("unverifiable", 0) or 0)
+        if isinstance(multimodal, dict)
+        else 0,
+        multimodal_runtime=str(multimodal.get("runtime", "") or "")
+        if isinstance(multimodal, dict)
+        else "",
+        multimodal_model=str(multimodal.get("model", "") or "")
+        if isinstance(multimodal, dict)
+        else "",
+        multimodal_capability=str(multimodal.get("capability", "") or "")
+        if isinstance(multimodal, dict)
+        else "",
         non_success_summary=_non_success_summary(current),
     )
 
