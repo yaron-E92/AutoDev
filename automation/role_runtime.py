@@ -41,6 +41,11 @@ class RoleInvocationContext:
     timeout_seconds: int = 900
     output_contract: role_output_contract.RoleOutputContract | None = None
     ux_context_fingerprint: str = ""
+    # Once a logical role invocation has crossed from native Structured Output to
+    # compatibility text, its one AutoDev protocol correction must stay on that
+    # text path. This prevents native -> fallback -> native retry loops while still
+    # allowing a native correction when the initial attempt itself stayed native.
+    fallback_text_only: bool = False
 
 
 @dataclass(frozen=True)
@@ -278,50 +283,48 @@ def prepare_scheduler_worker(
     validate_scheduler_routes(runtime, repo, runner=runner, which=which)
 
     environment_method = getattr(runtime, "scheduler_runtime_environment", None)
-    environment_value = (
+    identity_method = getattr(runtime, "scheduler_runtime_identity", None)
+    routes_method = getattr(runtime, "scheduler_runtime_routes", None)
+
+    environment = (
         environment_method(repo, runner=runner, which=which)
         if callable(environment_method)
         else {}
     )
-    if not isinstance(environment_value, Mapping) or not all(
-        isinstance(key, str) and isinstance(value, str)
-        for key, value in environment_value.items()
-    ):
-        raise RoleRuntimeError(
-            f"scheduler runtime {runtime.name} returned an invalid environment contract"
-        )
-
-    identity_method = getattr(runtime, "scheduler_runtime_identity", None)
-    identity_value = (
+    identity = (
         identity_method(repo, runner=runner, which=which)
         if callable(identity_method)
         else {"runtime": runtime.name}
     )
-    if not isinstance(identity_value, Mapping):
-        raise RoleRuntimeError(
-            f"scheduler runtime {runtime.name} returned an invalid identity contract"
-        )
-
-    routes_method = getattr(runtime, "scheduler_runtime_routes", None)
-    routes_value = (
+    routes = (
         routes_method(repo, runner=runner, which=which)
         if callable(routes_method)
         else {}
     )
-    if not isinstance(routes_value, Mapping) or not all(
+    if not isinstance(environment, Mapping) or not all(
         isinstance(key, str) and isinstance(value, str)
-        for key, value in routes_value.items()
+        for key, value in environment.items()
+    ):
+        raise RoleRuntimeError(
+            f"scheduler runtime {runtime.name} returned an invalid environment contract"
+        )
+    if not isinstance(identity, Mapping):
+        raise RoleRuntimeError(
+            f"scheduler runtime {runtime.name} returned an invalid identity contract"
+        )
+    if not isinstance(routes, Mapping) or not all(
+        isinstance(key, str) and isinstance(value, str)
+        for key, value in routes.items()
     ):
         raise RoleRuntimeError(
             f"scheduler runtime {runtime.name} returned an invalid route contract"
         )
-
     return SchedulerRuntimeState(
-        name=_validate_name(str(runtime.name)),
-        source=str(source or "registered"),
-        identity=dict(identity_value),
-        environment=dict(environment_value),
-        routes=dict(routes_value),
+        name=runtime.name,
+        source=source,
+        identity=dict(identity),
+        environment=dict(environment),
+        routes=dict(routes),
     )
 
 
@@ -330,157 +333,91 @@ def scheduler_runtime_state(repo: Path) -> SchedulerRuntimeState | None:
     if not path.is_file():
         return None
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise RoleRuntimeError(f"cannot read scheduler runtime state {path}: {exc}") from exc
-    return SchedulerRuntimeState.from_json(raw)
+    return SchedulerRuntimeState.from_json(value)
 
 
-def write_scheduler_runtime_state(repo: Path, state: SchedulerRuntimeState) -> None:
-    path = repo.expanduser().resolve() / SCHEDULER_RUNTIME_STATE_RELATIVE
+def write_scheduler_runtime_state(repo: Path, state: SchedulerRuntimeState) -> Path:
+    repo = repo.expanduser().resolve()
+    path = repo / SCHEDULER_RUNTIME_STATE_RELATIVE
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + ".tmp")
-    try:
-        temporary.write_text(
-            json.dumps(state.to_json(), indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-        temporary.replace(path)
-    except OSError as exc:
-        temporary.unlink(missing_ok=True)
-        raise RoleRuntimeError(f"cannot persist scheduler runtime state {path}: {exc}") from exc
+    temporary.write_text(
+        json.dumps(state.to_json(), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(path)
+    return path
 
 
 def clear_scheduler_runtime_state(repo: Path) -> None:
-    path = repo.expanduser().resolve() / SCHEDULER_RUNTIME_STATE_RELATIVE
-    try:
-        path.unlink(missing_ok=True)
-    except OSError as exc:
-        raise RoleRuntimeError(f"cannot clear scheduler runtime state {path}: {exc}") from exc
+    (repo.expanduser().resolve() / SCHEDULER_RUNTIME_STATE_RELATIVE).unlink(missing_ok=True)
 
 
-def scheduler_runtime_environment(repo: Path) -> dict[str, str]:
+def apply_scheduler_runtime_environment(repo: Path) -> SchedulerRuntimeState | None:
     state = scheduler_runtime_state(repo)
-    return dict(state.environment) if state is not None else {}
-
-
-def apply_scheduler_runtime_environment(repo: Path) -> dict[str, str]:
-    """Apply the persisted non-secret runtime environment in this scheduler process."""
-
-    environment = scheduler_runtime_environment(repo)
-    for key, value in environment.items():
+    if state is None:
+        return None
+    for key, value in state.environment.items():
         os.environ[key] = value
-    return environment
-
-
-def refresh_scheduler_worker(
-    repo: Path,
-    *,
-    requested: str = "",
-    source: str = "registered",
-    registry: Mapping[str, RuntimeFactory] | None = None,
-    runner: Callable[..., object],
-    which=None,
-) -> SchedulerRuntimeState:
-    repo = repo.expanduser().resolve()
-    existing = scheduler_runtime_state(repo)
-    if existing is not None:
-        apply_scheduler_runtime_environment(repo)
-    runtime_name = requested.strip() or (existing.name if existing is not None else "")
-    runtime, resolved_source = select_scheduler_runtime(
-        repo,
-        requested=runtime_name,
-        registry=registry,
-    )
-    state = prepare_scheduler_worker(
-        runtime,
-        repo,
-        source=source or resolved_source,
-        runner=runner,
-        which=which,
-    )
-    write_scheduler_runtime_state(repo, state)
-    apply_scheduler_runtime_environment(repo)
     return state
+
+
+def resolve_runtime_name(repo: Path, *, requested: str = "") -> tuple[str, str]:
+    """Resolve the role runtime for interactive/manual role execution."""
+
+    if requested:
+        return _validate_name(requested), "explicit"
+    worker_state = scheduler_runtime_state(repo)
+    if worker_state is not None:
+        return worker_state.name, "scheduler-worker"
+    environment = os.environ.get(RUNTIME_ENV, "").strip()
+    if environment:
+        return _validate_name(environment), "environment"
+    repo_value = _load_config(repo.expanduser().resolve() / CONFIG_RELATIVE).get("role_runtime")
+    if repo_value:
+        return _validate_name(str(repo_value)), "repository"
+    user_value = _load_config(user_config.user_config_path()).get("role_runtime")
+    if user_value:
+        return _validate_name(str(user_value)), "user"
+    return DEFAULT_RUNTIME, "builtin"
+
+
+def resolve_scheduler_runtime_name(repo: Path, *, requested: str = "") -> tuple[str, str]:
+    """Resolve unattended scheduler runtime without inheriting transient shell state."""
+
+    if requested:
+        return _validate_name(requested), "explicit"
+    repo_value = _load_config(repo.expanduser().resolve() / CONFIG_RELATIVE).get("role_runtime")
+    if repo_value:
+        return _validate_name(str(repo_value)), "repository"
+    user_value = _load_config(user_config.user_config_path()).get("role_runtime")
+    if user_value:
+        return _validate_name(str(user_value)), "user"
+    return DEFAULT_RUNTIME, "builtin"
 
 
 def default_registry() -> dict[str, RuntimeFactory]:
     from automation.opencode_scheduler_runtime import OpenCodeSchedulerRoleRuntime
 
-    return {DEFAULT_RUNTIME: OpenCodeSchedulerRoleRuntime}
-
-
-def resolve_runtime_name(repo: Path, requested: str = "") -> tuple[str, str]:
-    repo = repo.expanduser().resolve()
-    explicit = str(requested or "").strip()
-    if explicit:
-        return _validate_name(explicit), "explicit"
-
-    scheduler_state = scheduler_runtime_state(repo)
-    if scheduler_state is not None:
-        return scheduler_state.name, "scheduler-registration"
-
-    env_value = os.environ.get(RUNTIME_ENV, "").strip()
-    if env_value:
-        return _validate_name(env_value), f"environment:{RUNTIME_ENV}"
-
-    configured = _runtime_from_config(repo / CONFIG_RELATIVE, required=False)
-    if configured:
-        return _validate_name(configured), CONFIG_RELATIVE.as_posix()
-
-    user_path = user_config_path()
-    if user_path is not None:
-        configured = _runtime_from_config(user_path, required=False)
-        if configured:
-            return _validate_name(configured), str(user_path)
-
-    return DEFAULT_RUNTIME, "default"
-
-
-def resolve_scheduler_runtime_name(repo: Path, requested: str = "") -> tuple[str, str]:
-    """Resolve install-time scheduler runtime without trusting ambient shell overrides."""
-
-    repo = repo.expanduser().resolve()
-    explicit = str(requested or "").strip()
-    if explicit:
-        return _validate_name(explicit), "explicit-scheduler"
-
-    configured = _runtime_from_config(repo / CONFIG_RELATIVE, required=False)
-    if configured:
-        return _validate_name(configured), CONFIG_RELATIVE.as_posix()
-
-    user_path = user_config_path()
-    if user_path is not None:
-        configured = _runtime_from_config(user_path, required=False)
-        if configured:
-            return _validate_name(configured), str(user_path)
-
-    return DEFAULT_RUNTIME, "default"
-
-
-def user_config_path() -> Path | None:
-    return user_config.config_path()
+    return {"opencode": OpenCodeSchedulerRoleRuntime}
 
 
 def _runtime_from_registry(
     name: str,
     *,
-    registry: Mapping[str, RuntimeFactory] | None,
+    registry: Mapping[str, RuntimeFactory] | None = None,
 ) -> RoleRuntime:
-    factories = dict(registry or default_registry())
-    factory = factories.get(name)
+    effective = registry or default_registry()
+    factory = effective.get(name)
     if factory is None:
-        available = ", ".join(sorted(factories)) or "(none)"
         raise RoleRuntimeError(
-            f"unknown AutoDev role runtime {name!r}; registered runtimes: {available}"
+            f"unknown role runtime {name!r}; available runtimes: "
+            + ", ".join(sorted(effective))
         )
-    runtime = factory()
-    actual = _validate_name(str(getattr(runtime, "name", "") or ""))
-    if actual != name:
-        raise RoleRuntimeError(
-            f"role runtime registry entry {name!r} produced runtime {actual!r}"
-        )
-    return runtime
+    return factory()
 
 
 def select_runtime(
@@ -489,10 +426,8 @@ def select_runtime(
     requested: str = "",
     registry: Mapping[str, RuntimeFactory] | None = None,
 ) -> tuple[RoleRuntime, str]:
-    name, source = resolve_runtime_name(repo, requested)
-    runtime = _runtime_from_registry(name, registry=registry)
-    persist_selection(repo, name=name, source=source)
-    return runtime, source
+    name, source = resolve_runtime_name(repo, requested=requested)
+    return _runtime_from_registry(name, registry=registry), source
 
 
 def select_scheduler_runtime(
@@ -501,118 +436,56 @@ def select_scheduler_runtime(
     requested: str = "",
     registry: Mapping[str, RuntimeFactory] | None = None,
 ) -> tuple[RoleRuntime, str]:
-    name, source = resolve_scheduler_runtime_name(repo, requested)
+    name, source = resolve_scheduler_runtime_name(repo, requested=requested)
     return _runtime_from_registry(name, registry=registry), source
 
 
-def build_role_snapshot(
-    *,
-    runtime: str,
-    role: str,
-    configured: dict[str, object] | None = None,
-    safe_metadata: dict[str, object] | None = None,
-) -> dict[str, object]:
-    configured_value = {"runtime": runtime, "role": role, **dict(configured or {})}
-    safe = {"runtime": runtime, "role": role, **dict(safe_metadata or {})}
-    return run_manifest.build_role_snapshot(configured_value, safe)
-
-
-def persist_selection(
+def refresh_scheduler_worker(
     repo: Path,
     *,
-    name: str,
-    source: str,
-    force_manifest: bool = False,
-) -> None:
-    """Persist safe runtime selection without erasing an unvalidated resume identity.
-
-    Diagnostics may show the runtime selected for the current invocation immediately.
-    A pre-existing manifest keeps its previous runtime identity until snapshot
-    reconciliation succeeds, unless the caller explicitly confirms that transition.
-    """
-
+    requested: str = "",
+    runner: Callable[..., object],
+    which=None,
+    registry: Mapping[str, RuntimeFactory] | None = None,
+) -> SchedulerRuntimeState:
     repo = repo.expanduser().resolve()
-    current = repo / workflow_stages.CURRENT_DIR
-    diagnostics_path = current / workflow_stages.DIAGNOSTICS_FILE
-    if current.is_dir():
-        diagnostics = _read_json(diagnostics_path)
-        diagnostics["role_runtime"] = {"name": name, "source": source}
-        _write_json_atomic(diagnostics_path, diagnostics)
-
-    manifest_path = current / run_manifest.MANIFEST_NAME
-    if not manifest_path.is_file():
-        return
-    try:
-        manifest = run_manifest.load_manifest(manifest_path)
-    except (OSError, ValueError, run_manifest.ManifestError):
-        return
-    previous = manifest.get("role_runtime", {})
-    previous_name = str(previous.get("name", "")) if isinstance(previous, dict) else ""
-    if previous_name and previous_name != name and not force_manifest:
-        return
-    manifest["role_runtime"] = {"name": name, "source": source}
-    run_manifest.save_manifest(manifest_path, manifest)
-
-
-def selected_runtime_from_manifest(repo: Path) -> str:
-    path = (
-        repo.expanduser().resolve()
-        / workflow_stages.CURRENT_DIR
-        / run_manifest.MANIFEST_NAME
+    previous = scheduler_runtime_state(repo)
+    effective_requested = requested or (previous.name if previous is not None else "")
+    if previous is not None:
+        for key, value in previous.environment.items():
+            os.environ[key] = value
+    runtime, source = select_scheduler_runtime(
+        repo,
+        requested=effective_requested,
+        registry=registry,
     )
-    if not path.is_file():
-        return ""
-    try:
-        manifest = run_manifest.load_manifest(path)
-    except (OSError, ValueError, run_manifest.ManifestError):
-        return ""
-    value = manifest.get("role_runtime", {})
-    return str(value.get("name", "")) if isinstance(value, dict) else ""
-
-
-def _runtime_from_config(path: Path, *, required: bool) -> str:
-    if not path.is_file():
-        if required:
-            raise RoleRuntimeError(f"runtime configuration does not exist: {path}")
-        return ""
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise RoleRuntimeError(f"cannot read runtime configuration {path}: {exc}") from exc
-    if not isinstance(value, dict):
-        raise RoleRuntimeError(f"runtime configuration {path} must contain a JSON object")
-    raw = value.get("role_runtime", "")
-    if raw in (None, ""):
-        return ""
-    if not isinstance(raw, str):
-        raise RoleRuntimeError(
-            f"runtime configuration {path} field role_runtime must be a string"
-        )
-    return raw.strip()
+    state = prepare_scheduler_worker(
+        runtime,
+        repo,
+        source=source,
+        runner=runner,
+        which=which,
+    )
+    write_scheduler_runtime_state(repo, state)
+    for key, value in state.environment.items():
+        os.environ[key] = value
+    return state
 
 
 def _validate_name(value: str) -> str:
-    name = value.strip().casefold()
-    if not name or not _RUNTIME_NAME.fullmatch(name):
+    name = str(value or "").strip().casefold()
+    if not _RUNTIME_NAME.fullmatch(name):
         raise RoleRuntimeError(
-            "role runtime names must start with a letter and contain only lowercase letters, digits, '-' or '_'"
+            f"invalid role runtime name {value!r}; expected {_RUNTIME_NAME.pattern}"
         )
     return name
 
 
-def _read_json(path: Path) -> dict[str, object]:
+def _load_config(path: Path) -> dict[str, object]:
+    if not path.is_file():
+        return {}
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+    except (OSError, json.JSONDecodeError):
         return {}
     return value if isinstance(value, dict) else {}
-
-
-def _write_json_atomic(path: Path, value: dict[str, object]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(path.name + ".tmp")
-    temporary.write_text(
-        json.dumps(value, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-    temporary.replace(path)
