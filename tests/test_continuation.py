@@ -6,12 +6,11 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 from automation import continuation, run_manifest, workflow_storage, workflow_workspace
 
 
-class ContinuationTests(unittest.TestCase):
+class ContinuationGitFixture:
     def _git(self, repo: Path, *arguments: str) -> str:
         completed = subprocess.run(
             ["git", *arguments],
@@ -39,6 +38,8 @@ class ContinuationTests(unittest.TestCase):
         self._git(root, "checkout", "develop")
         return base, feature
 
+
+class ContinuationTests(ContinuationGitFixture, unittest.TestCase):
     def test_cli_continue_from_is_removed_without_becoming_base_override(self):
         values, requested, error = continuation.consume_public_args(
             [
@@ -58,14 +59,15 @@ class ContinuationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
             _, feature = self._repo(repo)
-            with patch.dict(os.environ, {}, clear=True):
-                with continuation.new_run_scope(repo, "feature/existing-work") as resolved:
-                    self.assertEqual(resolved, feature)
-                    self.assertEqual(os.environ[continuation.CONTINUE_FROM_SHA_ENV], feature)
-                    self._git(repo, "branch", "-f", "feature/existing-work", "develop")
-                    self.assertEqual(os.environ[continuation.CONTINUE_FROM_SHA_ENV], feature)
-                self.assertNotIn(continuation.CONTINUE_FROM_ENV, os.environ)
-                self.assertNotIn(continuation.CONTINUE_FROM_SHA_ENV, os.environ)
+            old_ref = os.environ.get(continuation.CONTINUE_FROM_ENV)
+            old_sha = os.environ.get(continuation.CONTINUE_FROM_SHA_ENV)
+            with continuation.new_run_scope(repo, "feature/existing-work") as resolved:
+                self.assertEqual(resolved, feature)
+                self.assertEqual(os.environ[continuation.CONTINUE_FROM_SHA_ENV], feature)
+                self._git(repo, "branch", "-f", "feature/existing-work", "develop")
+                self.assertEqual(os.environ[continuation.CONTINUE_FROM_SHA_ENV], feature)
+            self.assertEqual(os.environ.get(continuation.CONTINUE_FROM_ENV), old_ref)
+            self.assertEqual(os.environ.get(continuation.CONTINUE_FROM_SHA_ENV), old_sha)
 
     def test_unrelated_continuation_is_rejected_instead_of_retargeting_git_flow(self):
         with tempfile.TemporaryDirectory() as temp_dir:
