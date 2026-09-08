@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from automation import continuation, continuation_recovery, run_manifest, workflow_storage, workflow_workspace
-from tests.test_continuation import ContinuationTests
+from tests.test_continuation import ContinuationGitFixture
 
 
 class ContinuationRecoveryTests(unittest.TestCase):
@@ -60,14 +60,14 @@ class ContinuationRecoveryTests(unittest.TestCase):
         return current
 
     def test_full_commit_sha_is_a_valid_immutable_continuation_ref(self):
-        fixture = ContinuationTests()
+        fixture = ContinuationGitFixture()
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
             _, feature = fixture._repo(repo)
             self.assertEqual(continuation.resolve_ref(repo, feature), feature)
 
     def test_invalid_ref_fails_before_any_pending_transaction_is_written(self):
-        fixture = ContinuationTests()
+        fixture = ContinuationGitFixture()
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
             base, _ = fixture._repo(repo)
@@ -79,7 +79,7 @@ class ContinuationRecoveryTests(unittest.TestCase):
             self.assertFalse((current / continuation_recovery.PENDING_FILE).exists())
 
     def test_interruption_after_pending_write_is_finished_by_plain_resume_boundary(self):
-        fixture = ContinuationTests()
+        fixture = ContinuationGitFixture()
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
             base, feature = fixture._repo(repo)
@@ -131,7 +131,7 @@ class ContinuationRecoveryTests(unittest.TestCase):
             self.assertEqual(state["ContinuationResolvedSha"], feature)
 
     def test_already_completed_pending_transaction_is_idempotently_cleared(self):
-        fixture = ContinuationTests()
+        fixture = ContinuationGitFixture()
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
             base, feature = fixture._repo(repo)
