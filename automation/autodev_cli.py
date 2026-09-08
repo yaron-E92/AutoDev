@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from automation import claim_cli, cli_help, config_cli, manage_cli, notification_cli, privacy_grant_cli, product_runtime, revision_cli, scheduler_health_cli, semver_intent, tui_cli, ux_cli, ux_help
+from automation import claim_cli, cli_help, config_cli, continuation, manage_cli, notification_cli, privacy_grant_cli, product_runtime, revision_cli, scheduler_health_cli, semver_intent, tui_cli, ux_cli, ux_help
 
 import os
 import sys
@@ -8,6 +8,7 @@ import sys
 from automation import opencode_entrypoint, repository_identity, user_install
 
 
+continuation.register_help()
 manage_cli.register_help()
 revision_cli.register_help()
 tui_cli.register_help()
@@ -159,7 +160,12 @@ def _render_requested_help(values: list[str]) -> tuple[bool, int]:
     return True, 0
 
 
-def _dispatch(values: list[str], *, explicit_interactive: bool) -> int:
+def _dispatch(
+    values: list[str],
+    *,
+    explicit_interactive: bool,
+    continue_from: str = "",
+) -> int:
     if values in (["--version"], ["-V"]):
         print(product_runtime.version_text())
         return 0
@@ -205,14 +211,26 @@ def _dispatch(values: list[str], *, explicit_interactive: bool) -> int:
         return tui_cli.run_cli(rest)
 
     _enable_interactive_consent_for_direct_cli(explicit=explicit_interactive)
+    continuation.install_hooks()
     if command == "revise":
         return revision_cli.run_cli(rest)
     if command == "issue-to-pr":
         forwarded, error = _issue_to_pr(rest)
         if forwarded is None:
             return _friendly_error(error, command="issue-to-pr")
-        return opencode_entrypoint.run(forwarded)
+        repo = continuation.repo_from_args(rest)
+        try:
+            with continuation.new_run_scope(repo, continue_from):
+                return opencode_entrypoint.run(forwarded)
+        except continuation.ContinuationError as exc:
+            return _friendly_error(str(exc), command="issue-to-pr")
     if command == "resume":
+        repo = continuation.repo_from_args(rest)
+        if continue_from:
+            try:
+                continuation.adopt_existing_run(repo, continue_from)
+            except continuation.ContinuationError as exc:
+                return _friendly_error(str(exc), command="resume")
         return opencode_entrypoint.run(["coordinate", "--resume", *rest])
     return opencode_entrypoint.run(values)
 
@@ -223,13 +241,21 @@ def run(argv: list[str] | None = None) -> int:
     values, target, error = _consume_repository_target_arguments(values)
     if values is None:
         return _friendly_error(error)
+    values, continue_from, continuation_error = continuation.consume_public_args(values)
+    if continuation_error:
+        command = values[0] if values else ""
+        return _friendly_error(continuation_error, command=command)
 
     old_owner = os.environ.get("GITHUB_OWNER")
     old_repo = os.environ.get("GITHUB_REPO")
     try:
         if target is not None:
             os.environ["GITHUB_OWNER"], os.environ["GITHUB_REPO"] = target
-        return _dispatch(values, explicit_interactive=explicit_interactive)
+        return _dispatch(
+            values,
+            explicit_interactive=explicit_interactive,
+            continue_from=continue_from,
+        )
     finally:
         if target is not None:
             if old_owner is None:
