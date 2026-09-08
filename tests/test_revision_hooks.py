@@ -45,6 +45,12 @@ class RevisionHooksTests(unittest.TestCase):
             patch.object(role_coordinator_flow, "coordinate", return_value={"state": "PR_READY"}),
         ]
         entered = [item.start() for item in stack]
+        # MagicMock fabricates arbitrary attributes on access, so the hook
+        # idempotency marker would otherwise look truthy even though these
+        # freshly patched callables have never been wrapped. Make the test seam
+        # explicit so revision_hooks.install() exercises the real wrappers.
+        for mocked in entered:
+            mocked._autodev_revision = False
         self.addCleanup(lambda: [item.stop() for item in reversed(stack)])
         revision_hooks.install()
         return prompt, entered
