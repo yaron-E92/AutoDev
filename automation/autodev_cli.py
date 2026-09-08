@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from automation import claim_cli, cli_help, config_cli, manage_cli, notification_cli, privacy_grant_cli, product_runtime, scheduler_health_cli, semver_intent, tui_cli, ux_cli, ux_help
+from automation import claim_cli, cli_help, config_cli, manage_cli, notification_cli, privacy_grant_cli, product_runtime, revision_cli, scheduler_health_cli, semver_intent, tui_cli, ux_cli, ux_help
 
 import os
 import sys
@@ -9,6 +9,7 @@ from automation import opencode_entrypoint, repository_identity, user_install
 
 
 manage_cli.register_help()
+revision_cli.register_help()
 tui_cli.register_help()
 ux_help.register_help()
 
@@ -87,7 +88,7 @@ def _help() -> str:
         "  autodev --version          Show the installed AutoDev product version.\n"
         "  autodev models             Show effective OpenCode role/model mappings.\n"
         "  --owner OWNER --repo REPO  Override the GitHub repository target for this command.\n"
-        "  --runtime NAME             Override role runtime for issue-to-pr/resume.\n"
+        "  --runtime NAME             Override role runtime for issue-to-pr/resume/revise.\n"
         "  Repository precedence      CLI target > GITHUB_OWNER/GITHUB_REPO > .autodev/repo.json > remote/fallback.\n"
         "  Runtime precedence         explicit > AUTODEV_ROLE_RUNTIME > repository > user > opencode.\n"
         "  Model routing              AutoDev profiles fill inherited roles; explicit opencode.json / opencode.jsonc agent models win.\n"
@@ -204,6 +205,8 @@ def _dispatch(values: list[str], *, explicit_interactive: bool) -> int:
         return tui_cli.run_cli(rest)
 
     _enable_interactive_consent_for_direct_cli(explicit=explicit_interactive)
+    if command == "revise":
+        return revision_cli.run_cli(rest)
     if command == "issue-to-pr":
         forwarded, error = _issue_to_pr(rest)
         if forwarded is None:
