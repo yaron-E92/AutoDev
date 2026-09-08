@@ -9,6 +9,7 @@ from automation import (
     revision,
     role_coordinator_flow,
     run_manifest,
+    workflow_commands,
     workflow_stages,
 )
 
@@ -74,6 +75,53 @@ def _revision_source_is_unchanged(repo: Path, active: dict[str, object]) -> bool
     return str(source.get("identity", "")).strip() == expected
 
 
+def _remote_issue_source_problem(
+    repo: Path,
+    current: Path,
+    state: dict[str, object],
+    *,
+    runner,
+) -> str:
+    repo_full = str(state.get("RepoFullName", "")).strip()
+    issue_number = int(state.get("IssueNumber", 0) or 0)
+    issue_path = current / "issue.md"
+    if not repo_full or issue_number <= 0 or not issue_path.is_file():
+        return ""
+    try:
+        issue = workflow_commands.gh_json(
+            repo,
+            [
+                "issue",
+                "view",
+                str(issue_number),
+                "--repo",
+                repo_full,
+                "--json",
+                "number,title,body,url",
+            ],
+            runner=runner,
+        )
+    except workflow_stages.WorkflowStageError as exc:
+        return f"current GitHub issue source could not be verified: {exc}"
+    if not isinstance(issue, dict):
+        return "current GitHub issue source could not be verified: gh issue view returned no object"
+    remote_text = (
+        f"# GitHub Issue #{issue_number}: {str(issue.get('title', '')).strip()}\n\n"
+        f"URL: {str(issue.get('url', '')).strip()}\n\n"
+        f"{str(issue.get('body', '') or '')}\n"
+    )
+    try:
+        local_text = issue_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return f"current GitHub issue source could not be verified: {exc}"
+    if run_manifest.hash_text(remote_text) == run_manifest.hash_text(local_text):
+        return ""
+    return (
+        "GitHub issue source drift detected; ordinary resume will not adopt the changed issue. "
+        "Use `autodev revise --refresh-issue` to explicitly adopt it."
+    )
+
+
 def install() -> None:
     current_prepare = opencode_adapter_roles.prepare_role
     if not getattr(current_prepare, "_autodev_revision", False):
@@ -129,7 +177,23 @@ def install() -> None:
                 original_problems(resolved, current, manifest, state, **kwargs)
             )
             active = revision.load_active(resolved)
-            if not active or str(active.get("status", "")) != "active":
+            is_active = bool(active and str(active.get("status", "")) == "active")
+
+            # Remote issue edits are never adopted implicitly. An active explicit
+            # revision is already operating on its checkpointed authority (and may
+            # deliberately be manual-only); otherwise a real resume checks GitHub
+            # before model work and directs the operator to --refresh-issue.
+            if bool(kwargs.get("validate_remote")) and not is_active:
+                source_problem = _remote_issue_source_problem(
+                    resolved,
+                    current,
+                    state,
+                    runner=kwargs.get("runner"),
+                )
+                if source_problem:
+                    problems.append(source_problem)
+
+            if not is_active:
                 return problems
             if run_manifest.stage_completed(manifest, "patch-applied"):
                 return problems
