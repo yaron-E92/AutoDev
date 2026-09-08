@@ -131,7 +131,15 @@ def materialize_candidate(
     target = current / contract.output_artifact
 
     try:
-        if contract.role == "planner":
+        # Fallback text carries only the established textual protocol result. It
+        # must not manufacture native Structured Output sidecars (especially empty
+        # UX evidence) that would later be interpreted as malformed structured
+        # metadata. Reader/Synthesizer/Planner therefore materialize only their
+        # canonical durable text artifact here; ordinary acceptance remains the
+        # authority boundary. Verifier uses the structured materializer because its
+        # parsed semantic JSON is the established durable verifier artifact and it
+        # does not create a UX sidecar.
+        if contract.role in {"reader", "synthesizer", "planner"}:
             target.write_text(candidate.canonical_text, encoding="utf-8")
             return target
         materialized = role_output_contract.materialize_structured_output(
