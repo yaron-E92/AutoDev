@@ -9,12 +9,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 from automation import continuation, run_manifest, workflow_preparation, workflow_storage, workflow_workspace
-from tests.test_continuation import ContinuationTests
+from tests.test_continuation import ContinuationGitFixture
 
 
 class NewRunContinuationTests(unittest.TestCase):
     def test_new_run_uses_continuation_sha_as_source_without_changing_policy_base(self):
-        fixture = ContinuationTests()
+        fixture = ContinuationGitFixture()
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
             base, feature = fixture._repo(repo)
