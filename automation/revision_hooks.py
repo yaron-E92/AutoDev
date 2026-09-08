@@ -13,6 +13,9 @@ from automation import (
 )
 
 
+PRE_PATCH_WORKTREE_BLOCKER = "worktree changed before the patch-applied checkpoint"
+
+
 def _append_revision_prompt(path: Path, context: str) -> None:
     if not context:
         return
@@ -56,6 +59,19 @@ def _revision_status_text(repo: Path) -> str:
         f"next={summary.get('next_action', '')}\n"
         f"Revision superseded stages: {superseded_text}\n"
     )
+
+
+def _revision_source_is_unchanged(repo: Path, active: dict[str, object]) -> bool:
+    expected = str(active.get("implementation_source_identity", "")).strip()
+    if not expected:
+        return False
+    current = repo / workflow_stages.CURRENT_DIR
+    state = workflow_stages.read_state(current)
+    try:
+        source = workflow_stages.source_identity(repo, current, state)
+    except workflow_stages.WorkflowStageError:
+        return False
+    return str(source.get("identity", "")).strip() == expected
 
 
 def install() -> None:
@@ -102,6 +118,37 @@ def install() -> None:
         # opencode_adapter_roles imports this helper by name, so update that
         # module-level alias as well to keep direct `autodev accept` behavior equal.
         opencode_adapter_roles._mark_role_accepted = mark_role_accepted
+
+    current_problems = opencode_resume_status._resume_problems
+    if not getattr(current_problems, "_autodev_revision", False):
+        original_problems = current_problems
+
+        def resume_problems(repo: Path, current: Path, manifest, state, **kwargs):
+            resolved = Path(repo).expanduser().resolve()
+            problems = list(
+                original_problems(resolved, current, manifest, state, **kwargs)
+            )
+            active = revision.load_active(resolved)
+            if not active or str(active.get("status", "")) != "active":
+                return problems
+            if run_manifest.stage_completed(manifest, "patch-applied"):
+                return problems
+
+            had_pre_patch_blocker = PRE_PATCH_WORKTREE_BLOCKER in problems
+            if not had_pre_patch_blocker:
+                return problems
+            problems = [
+                problem for problem in problems if problem != PRE_PATCH_WORKTREE_BLOCKER
+            ]
+            if not _revision_source_is_unchanged(resolved, active):
+                problems.append(
+                    "revision implementation/worktree drift detected after revision start; "
+                    "restore the revision-start source or start a new explicit revision"
+                )
+            return problems
+
+        resume_problems._autodev_revision = True  # type: ignore[attr-defined]
+        opencode_resume_status._resume_problems = resume_problems
 
     current_status = opencode_resume_status.status_text
     if not getattr(current_status, "_autodev_revision", False):
