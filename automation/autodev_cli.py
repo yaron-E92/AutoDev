@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from automation import claim_cli, cli_help, config_cli, continuation, continuation_recovery, manage_cli, notification_cli, privacy_grant_cli, product_runtime, revision_cli, scheduler_health_cli, semver_intent, tui_cli, ux_cli, ux_help
+from automation import claim_cli, cli_help, config_cli, continuation, continuation_recovery, manage_cli, notification_cli, opencode_adapter_contract, privacy_grant_cli, product_runtime, revision_cli, scheduler_health_cli, semver_intent, tui_cli, ux_cli, ux_help
 
 import os
 import sys
@@ -13,9 +13,22 @@ from automation import opencode_entrypoint, repository_identity, user_install
 continuation.register_help()
 _resume_help = cli_help.HELP.get(("resume",))
 if _resume_help is not None:
+    invalidate_option = (
+        "--invalidate-role ROLE",
+        "Invalidate a completed role before resume; repeatable.",
+    )
+    resume_options = _resume_help.options
+    if invalidate_option[0] not in {name for name, _ in resume_options}:
+        resume_options = (*resume_options, invalidate_option)
+    resume_examples = _resume_help.examples
+    invalidate_example = "autodev resume --invalidate-role fixer"
+    if invalidate_example not in resume_examples:
+        resume_examples = (*resume_examples, invalidate_example)
     cli_help.HELP[("resume",)] = replace(
         _resume_help,
-        usage="autodev resume [--repo PATH] [--runtime NAME] [--continue-from REF]",
+        usage="autodev resume [--repo PATH] [--runtime NAME] [--continue-from REF] [--invalidate-role ROLE]",
+        options=resume_options,
+        examples=resume_examples,
     )
 manage_cli.register_help()
 revision_cli.register_help()
@@ -150,6 +163,50 @@ def _issue_to_pr(values: list[str]) -> tuple[list[str] | None, str]:
     return forwarded, ""
 
 
+def _resume_to_coordinator(values: list[str]) -> tuple[list[str] | None, str]:
+    cleaned: list[str] = []
+    invalidated_roles: list[str] = []
+    valid_roles = tuple(opencode_adapter_contract.ROLE_NAMES)
+    index = 0
+    while index < len(values):
+        option = values[index]
+        if option != "--invalidate-role":
+            cleaned.append(option)
+            index += 1
+            continue
+        if index + 1 >= len(values) or not values[index + 1].strip():
+            return None, "--invalidate-role requires a valid AutoDev role"
+        role = values[index + 1].strip()
+        if role not in valid_roles:
+            return (
+                None,
+                f"invalid AutoDev role {role!r} for --invalidate-role; expected one of: {', '.join(valid_roles)}",
+            )
+        invalidated_roles.append(role)
+        index += 2
+
+    if invalidated_roles:
+        fragment = " ".join(
+            token
+            for role in invalidated_roles
+            for token in ("--invalidate-role", role)
+        )
+        arguments_index: int | None = None
+        for current, token in enumerate(cleaned):
+            if token != "--arguments":
+                continue
+            if current + 1 >= len(cleaned):
+                return None, "--arguments requires a value"
+            arguments_index = current + 1
+        if arguments_index is None:
+            cleaned.extend(("--arguments", fragment))
+        else:
+            existing = cleaned[arguments_index].strip()
+            cleaned[arguments_index] = f"{existing} {fragment}".strip()
+
+    return ["coordinate", "--resume", *cleaned], ""
+
+
 def _render_requested_help(values: list[str]) -> tuple[bool, int]:
     try:
         path = cli_help.resolve_path(values)
@@ -233,6 +290,9 @@ def _dispatch(
         except continuation.ContinuationError as exc:
             return _friendly_error(str(exc), command="issue-to-pr")
     if command == "resume":
+        forwarded, error = _resume_to_coordinator(rest)
+        if forwarded is None:
+            return _friendly_error(error, command="resume")
         repo = continuation.repo_from_args(rest)
         try:
             if continue_from:
@@ -241,7 +301,7 @@ def _dispatch(
                 continuation_recovery.finish_pending(repo)
         except continuation.ContinuationError as exc:
             return _friendly_error(str(exc), command="resume")
-        return opencode_entrypoint.run(["coordinate", "--resume", *rest])
+        return opencode_entrypoint.run(forwarded)
     return opencode_entrypoint.run(values)
 
 
