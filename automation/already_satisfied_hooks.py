@@ -11,7 +11,6 @@ from automation import (
     queue_selection,
     role_coordinator_flow,
     role_coordinator_runtime,
-    scheduler,
     scheduler_types,
     workflow_stages,
 )
@@ -97,6 +96,10 @@ def _run_role_with_probe(
 def install() -> None:
     if getattr(install, "_autodev_already_satisfied", False):
         return
+
+    # scheduler imports opencode_entrypoint, which installs this module. Keep the
+    # scheduler dependency lazy so the top-level production import graph remains acyclic.
+    from automation import scheduler
 
     current_prepare = role_coordinator_runtime._prepare_role
     if not getattr(current_prepare, "_autodev_already_satisfied", False):
