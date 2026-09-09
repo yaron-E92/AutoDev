@@ -63,7 +63,13 @@ def ensure_prepared_issue(
     requested_issue = issue_number_from_arguments(arguments)
     existing = read_json(current / "state.json")
     current_issue = int(existing.get("IssueNumber", 0) or 0) if isinstance(existing, dict) else 0
-    if current.is_dir() and requested_issue and current_issue == requested_issue:
+    existing_status = str(existing.get("Status", "")) if isinstance(existing, dict) else ""
+    if (
+        current.is_dir()
+        and requested_issue
+        and current_issue == requested_issue
+        and existing_status.casefold() != "alreadysatisfied"
+    ):
         try:
             development_policy.assert_resume_compatible(repo, existing, default_branch="main")
         except development_policy.DevelopmentPolicyError as exc:
