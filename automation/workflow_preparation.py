@@ -161,21 +161,17 @@ def ensure_prepared_issue(
             classification="setup/configuration",
         ) from exc
 
-    gh(
-        repo,
-        [
-            "issue",
-            "edit",
-            str(requested_issue),
-            "--repo",
-            repo_full,
-            "--remove-label",
-            "autodev:done",
-            "--add-label",
-            "autodev:running",
-        ],
-        runner=runner,
-    )
+    issue_edit = [
+        "issue",
+        "edit",
+        str(requested_issue),
+        "--repo",
+        repo_full,
+    ]
+    if "autodev:done" in labels:
+        issue_edit.extend(["--remove-label", "autodev:done"])
+    issue_edit.extend(["--add-label", "autodev:running"])
+    gh(repo, issue_edit, runner=runner)
 
     current.parent.mkdir(parents=True, exist_ok=True)
     if current.exists():
