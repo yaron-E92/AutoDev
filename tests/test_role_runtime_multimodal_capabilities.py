@@ -66,12 +66,13 @@ class _MutableSupportedRuntime(_RouteRuntime):
 class RuntimeMultimodalCapabilityTests(unittest.TestCase):
     @staticmethod
     def _verbose(route: str, image: object = True) -> str:
-        metadata: dict[str, object] = {
-            "id": route.split("/", 1)[1],
-            "capabilities": {"input": {}},
-        }
+        inputs: dict[str, object] = {}
         if image is not None:
-            metadata["capabilities"]["input"]["image"] = image  # type: ignore[index]
+            inputs["image"] = image
+        metadata = {
+            "id": route.split("/", 1)[1],
+            "capabilities": {"input": inputs},
+        }
         return route + "\n" + json.dumps(metadata, indent=2) + "\n"
 
     @staticmethod
@@ -144,6 +145,7 @@ class RuntimeMultimodalCapabilityTests(unittest.TestCase):
         config = {
             "provider": {
                 "openai": {
+                    "npm": "@ai-sdk/openai-compatible",
                     "models": {
                         "custom-vision": {
                             "modalities": {
@@ -151,7 +153,7 @@ class RuntimeMultimodalCapabilityTests(unittest.TestCase):
                                 "output": ["text"],
                             }
                         }
-                    }
+                    },
                 }
             }
         }
@@ -175,16 +177,17 @@ class RuntimeMultimodalCapabilityTests(unittest.TestCase):
         self.assertEqual(evidence.state, role_runtime_capabilities.STATE_SUPPORTED)
         self.assertEqual(evidence.source, opencode_model_capabilities.SOURCE_EXPLICIT)
 
-    def test_explicit_custom_model_without_modalities_is_unknown_even_if_fallback_looks_visual(self) -> None:
+    def test_custom_provider_model_without_modalities_is_unknown_even_if_fallback_looks_visual(self) -> None:
         runtime = _RouteRuntime("openai/custom")
         config = {
             "provider": {
                 "openai": {
+                    "npm": "@ai-sdk/openai-compatible",
                     "models": {
                         "custom": {
                             "name": "Custom model without declared modalities",
                         }
-                    }
+                    },
                 }
             }
         }
@@ -207,6 +210,35 @@ class RuntimeMultimodalCapabilityTests(unittest.TestCase):
 
         self.assertEqual(evidence.state, role_runtime_capabilities.STATE_UNKNOWN)
         self.assertIn("fallback assumptions", evidence.detail)
+
+    def test_catalog_model_option_override_still_uses_resolved_catalog_metadata(self) -> None:
+        runtime = _RouteRuntime("openai/vision")
+        config = {
+            "provider": {
+                "openai": {
+                    "models": {
+                        "vision": {
+                            "options": {"reasoningEffort": "high"},
+                        }
+                    }
+                }
+            }
+        }
+        with patch.object(
+            opencode_model_capabilities.opencode_adapter_models,
+            "resolve_opencode_config",
+            return_value=config,
+        ):
+            evidence = opencode_model_capabilities.resolve_image_input_capability(
+                runtime,
+                Path("."),
+                role="verifier",
+                runner=self._runner(self._verbose("openai/vision", True)),
+                which=lambda _name: "opencode",
+            )
+
+        self.assertEqual(evidence.state, role_runtime_capabilities.STATE_SUPPORTED)
+        self.assertEqual(evidence.source, opencode_model_capabilities.SOURCE_CATALOG)
 
     def test_provider_neutral_runtime_hook_uses_same_capability_contract(self) -> None:
         runtime = _HookRuntime()
