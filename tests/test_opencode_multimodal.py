@@ -10,6 +10,7 @@ from unittest.mock import patch
 from automation import (
     opencode_multimodal,
     opencode_structured_output,
+    role_runtime_capabilities,
     ux_multimodal,
     ux_multimodal_runtime,
 )
@@ -41,6 +42,18 @@ class _OpenCodeRuntime:
                 "inherits_from": "",
             }
         }
+
+    def image_input_capability(self, _repo, *, role, **_kwargs):
+        self_route = self._resolve_mappings(_repo)[role]["model"]
+        provider, model = self_route.split("/", 1)
+        return role_runtime_capabilities.ImageInputCapability(
+            state=role_runtime_capabilities.STATE_SUPPORTED,
+            runtime=self.name,
+            provider=provider,
+            model=model,
+            source="test runtime metadata",
+            detail="fixture declares authoritative image input",
+        )
 
 
 class OpenCodeMultimodalTests(unittest.TestCase):
