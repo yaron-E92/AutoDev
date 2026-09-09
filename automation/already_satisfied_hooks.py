@@ -5,6 +5,7 @@ from pathlib import Path
 
 from automation import (
     already_satisfied,
+    already_satisfied_labels,
     non_success_report,
     opencode_github_entrypoint,
     opencode_resume_status,
@@ -66,16 +67,28 @@ def _run_role_with_probe(
 ):
     resolved = Path(repo).expanduser().resolve()
     if role == "implementer" and already_satisfied.candidate_in_plan(resolved):
-        result = already_satisfied.probe_candidate(
-            resolved,
-            semantic_verifier=lambda: original_run_role(
+        def verify_candidate():
+            result = original_run_role(
                 resolved,
                 "verifier",
                 runtime,
                 snapshots,
                 runner=runner,
                 which=which,
-            ),
+            )
+            state = workflow_stages.read_state(
+                resolved / workflow_stages.CURRENT_DIR
+            )
+            already_satisfied_labels.ensure_done_label(
+                resolved,
+                str(state.get("RepoFullName", "")),
+                runner=runner,
+            )
+            return result
+
+        result = already_satisfied.probe_candidate(
+            resolved,
+            semantic_verifier=verify_candidate,
             runner=runner,
             which=which,
         )
