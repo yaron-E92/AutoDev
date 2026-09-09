@@ -39,6 +39,7 @@ class ReferenceImage:
     target_id: str
     source_kind: str
     source_id: str
+    reference_target_id: str
     relative_path: str
     path: Path
     sha256: str
@@ -93,25 +94,69 @@ def selected_reference_images(repo: Path, current: Path) -> tuple[ReferenceImage
             "multimodal UX verification resolved a different UX artifact than the prepared run"
         )
 
-    selections: list[tuple[str, str, str]] = []
+    selections: list[tuple[str, str, str, str]] = []
     manifest = artifact.manifest
-    for kind, key, mapping in (
-        ("screen", "screens", manifest.screens or {}),
-        ("state", "states", manifest.states or {}),
-        ("journey", "journeys", manifest.journey_files or {}),
+    capture_config: ux_capture.CaptureConfig | None = None
+    capture_config_loaded = False
+    manifest_maps = {
+        "screen": manifest.screens or {},
+        "state": manifest.states or {},
+        "journey": manifest.journey_files or {},
+    }
+    for kind, key in (
+        ("screen", "screens"),
+        ("state", "states"),
+        ("journey", "journeys"),
     ):
+        mapping = manifest_maps[kind]
         values = ux_context.get(key, [])
         if not isinstance(values, list):
             continue
         for raw_id in values:
             source_id = str(raw_id or "").strip()
+            target_id = f"{kind}:{source_id}"
             relative = str(mapping.get(source_id, "") or "").strip()
-            if relative and Path(relative).suffix.casefold() in _IMAGE_SUFFIXES:
-                selections.append((kind, source_id, relative))
+            reference_target_id = target_id
+            if not relative or Path(relative).suffix.casefold() not in _IMAGE_SUFFIXES:
+                if not capture_config_loaded:
+                    try:
+                        capture_config = ux_capture.load_config(repo)
+                    except ux_capture.UXCaptureError as exc:
+                        raise UXMultimodalError(
+                            "cannot resolve indirect UX reference from invalid capture configuration: "
+                            f"{exc}"
+                        ) from exc
+                    capture_config_loaded = True
+                mapped = (
+                    ux_capture.capture_reference_target(capture_config, target_id)
+                    if capture_config is not None
+                    else ""
+                )
+                if not mapped:
+                    continue
+                reference_kind, separator, reference_id = mapped.partition(":")
+                reference_kind = reference_kind.strip().casefold()
+                reference_id = reference_id.strip()
+                reference_mapping = manifest_maps.get(reference_kind)
+                if not separator or reference_mapping is None:
+                    raise UXMultimodalError(
+                        f"UX capture reference {mapped!r} is not a supported screen/state/journey target"
+                    )
+                relative = str(reference_mapping.get(reference_id, "") or "").strip()
+                if not relative:
+                    raise UXMultimodalError(
+                        f"UX capture reference {mapped!r} is not present in the pinned UX artifact"
+                    )
+                if Path(relative).suffix.casefold() not in _IMAGE_SUFFIXES:
+                    raise UXMultimodalError(
+                        f"UX capture reference {mapped!r} does not resolve to a supported reference image"
+                    )
+                reference_target_id = mapped
+            selections.append((kind, source_id, reference_target_id, relative))
 
     root = artifact.local_root.resolve()
     references: list[ReferenceImage] = []
-    for kind, source_id, relative in sorted(set(selections)):
+    for kind, source_id, reference_target_id, relative in sorted(set(selections)):
         path = (root / relative).resolve()
         try:
             path.relative_to(root)
@@ -134,6 +179,7 @@ def selected_reference_images(repo: Path, current: Path) -> tuple[ReferenceImage
                 target_id=f"{kind}:{source_id}",
                 source_kind=kind,
                 source_id=source_id,
+                reference_target_id=reference_target_id,
                 relative_path=relative,
                 path=path,
                 sha256=hashlib.sha256(data).hexdigest(),
@@ -522,6 +568,7 @@ def _base_result(
             "kind": "ux-reference-image",
             "source_kind": item.source_kind,
             "source_id": item.source_id,
+            "reference_target_id": item.reference_target_id,
             "path": item.relative_path,
             "sha256": item.sha256,
             "mime": item.mime,
@@ -592,6 +639,7 @@ def _verification_prompt(
                 "target_id": reference.target_id,
                 "source_kind": reference.source_kind,
                 "source_id": reference.source_id,
+                "reference_target_id": reference.reference_target_id,
                 "reference_sha256": reference.sha256,
                 "implementation_sha256": capture.sha256,
                 "reference_attachment": 2 * index - 1,
