@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -67,7 +68,7 @@ def resolve_image_input_capability(
             metadata=payload,
         )
 
-    if _has_explicit_model_without_modalities(config, provider, model):
+    if _custom_model_requires_modalities(config, provider, model):
         return role_runtime_capabilities.ImageInputCapability(
             state=role_runtime_capabilities.STATE_UNKNOWN,
             runtime=runtime_name,
@@ -75,7 +76,7 @@ def resolve_image_input_capability(
             model=model,
             source=SOURCE_EXPLICIT,
             detail=(
-                "effective OpenCode model is explicitly configured without modalities; "
+                "effective custom OpenCode provider model is explicitly registered without modalities; "
                 "AutoDev will not treat runtime fallback assumptions as authoritative image support"
             ),
         )
@@ -90,13 +91,17 @@ def resolve_image_input_capability(
             detail=f"cannot resolve OpenCode CLI for model capability discovery: {exc}",
         )
 
+    environment = dict(os.environ)
+    environment["NO_COLOR"] = "1"
     try:
         completed = runner(
             [executable, "models", provider, "--verbose"],
             cwd=repo,
+            env=environment,
             text=True,
             encoding="utf-8",
             errors="replace",
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             check=False,
         )
@@ -184,21 +189,34 @@ def _explicit_modalities(
     return "image" in normalized, modalities
 
 
-def _has_explicit_model_without_modalities(
+def _custom_model_requires_modalities(
     config: dict[str, object], provider: str, model: str
 ) -> bool:
+    raw_provider = _configured_provider(config, provider)
+    if raw_provider is None:
+        return False
     entry = _configured_model_entry(config, provider, model)
-    return entry is not None and "modalities" not in entry
+    if entry is None or "modalities" in entry:
+        return False
+    npm = raw_provider.get("npm")
+    return isinstance(npm, str) and bool(npm.strip())
 
 
-def _configured_model_entry(
-    config: dict[str, object], provider: str, model: str
+def _configured_provider(
+    config: dict[str, object], provider: str
 ) -> dict[str, object] | None:
     raw_providers = config.get("provider", {})
     if not isinstance(raw_providers, dict):
         return None
     raw_provider = raw_providers.get(provider)
-    if not isinstance(raw_provider, dict):
+    return raw_provider if isinstance(raw_provider, dict) else None
+
+
+def _configured_model_entry(
+    config: dict[str, object], provider: str, model: str
+) -> dict[str, object] | None:
+    raw_provider = _configured_provider(config, provider)
+    if raw_provider is None:
         return None
     raw_models = raw_provider.get("models", {})
     if not isinstance(raw_models, dict):
