@@ -12,12 +12,12 @@ from automation import (
     workflow_preparation,
 )
 from automation.workflow_storage import write_json
-from tests.test_already_satisfied import AlreadySatisfiedTests
+from tests import test_already_satisfied
 
 
 class AlreadySatisfiedBoundaryTests(unittest.TestCase):
     def test_confirmed_candidate_stops_before_implementer_runtime(self) -> None:
-        fixture = AlreadySatisfiedTests()
+        fixture = test_already_satisfied.AlreadySatisfiedTests()
         with tempfile.TemporaryDirectory() as temp_dir:
             repo, _current = fixture._repo(Path(temp_dir))
             already_satisfied_hooks.install()
