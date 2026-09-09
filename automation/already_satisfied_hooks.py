@@ -53,6 +53,47 @@ def _normalized(value: str) -> str:
     return str(value or "").casefold().replace("_", "").replace("-", "")
 
 
+def _run_role_with_probe(
+    original_run_role,
+    repo: Path,
+    role: str,
+    runtime,
+    snapshots: dict[str, object],
+    *,
+    repair_kind: str = "",
+    already_prepared: bool = False,
+    runner=subprocess.run,
+    which=None,
+):
+    resolved = Path(repo).expanduser().resolve()
+    if role == "implementer" and already_satisfied.candidate_in_plan(resolved):
+        result = already_satisfied.probe_candidate(
+            resolved,
+            semantic_verifier=lambda: original_run_role(
+                resolved,
+                "verifier",
+                runtime,
+                snapshots,
+                runner=runner,
+                which=which,
+            ),
+            runner=runner,
+            which=which,
+        )
+        if result == "confirmed":
+            raise AlreadySatisfiedComplete()
+    return original_run_role(
+        resolved,
+        role,
+        runtime,
+        snapshots,
+        repair_kind=repair_kind,
+        already_prepared=already_prepared,
+        runner=runner,
+        which=which,
+    )
+
+
 def install() -> None:
     if getattr(install, "_autodev_already_satisfied", False):
         return
@@ -90,25 +131,9 @@ def install() -> None:
             runner=subprocess.run,
             which=None,
         ):
-            resolved = Path(repo).expanduser().resolve()
-            if role == "implementer" and already_satisfied.candidate_in_plan(resolved):
-                result = already_satisfied.probe_candidate(
-                    resolved,
-                    semantic_verifier=lambda: original_run_role(
-                        resolved,
-                        "verifier",
-                        runtime,
-                        snapshots,
-                        runner=runner,
-                        which=which,
-                    ),
-                    runner=runner,
-                    which=which,
-                )
-                if result == "confirmed":
-                    raise AlreadySatisfiedComplete()
-            return original_run_role(
-                resolved,
+            return _run_role_with_probe(
+                original_run_role,
+                repo,
                 role,
                 runtime,
                 snapshots,
