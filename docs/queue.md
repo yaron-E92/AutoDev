@@ -5,12 +5,13 @@ AutoDev separates **authorization** from **derived queue state**.
 ## Labels
 
 - `autodev:managed` — a human/operator authorizes AutoDev to work on the issue autonomously.
-- `autodev:ready` — derived: the issue is managed, open, dependency-free, not attention-required, not already claimed/running, and permitted by repository queue policy.
+- `autodev:ready` — derived: the issue is managed, open, dependency-free, not attention-required, not already claimed/running, not already completed by AutoDev, and permitted by repository queue policy.
 - `autodev:blocked` — derived: the issue is managed and has at least one open GitHub `blocked by` dependency.
 - `autodev:attention` — a human must intervene before autonomous execution can continue.
 - `autodev:running` — an existing AutoDev claim/run owns the issue; reconciliation will not make it ready again while that label is present.
+- `autodev:done` — AutoDev has reached a successful completed outcome for the issue. The issue may remain open under repository/human issue-closing policy, but the scheduler will not immediately select it again.
 
-`autodev:managed` is never added automatically by reconciliation. `ready` and `blocked` are maintained by AutoDev and should not be treated as authorization by themselves.
+`autodev:managed` is never added automatically by reconciliation. `ready` and `blocked` are maintained by AutoDev and should not be treated as authorization by themselves. `done` suppresses autonomous reselection after successful completion; starting the issue explicitly again removes `done`, reacquires `running`, and reevaluates the current issue text and prepared base.
 
 ## Commands
 
@@ -46,7 +47,7 @@ The outcomes are intentionally explicit:
 - `SELECTED` — there is no active run and one eligible issue won deterministic ranking;
 - `NO_READY_WORK` — no issue is eligible; this is a successful idle outcome, not an error.
 
-A completed durable run with no associated PR does not prevent selection of the next issue. When a completed run has a PR, AutoDev keeps it as an awaiting-merge gate: an open PR blocks unrelated selection, a merged PR releases the gate and selection continues in the same reconciliation pass, and a closed-unmerged PR requires attention.
+A completed durable run with no associated PR does not prevent selection of the next issue. When a completed run has a PR, AutoDev keeps it as an awaiting-merge gate: an open PR blocks unrelated selection, a merged PR releases the gate and selection continues in the same reconciliation pass, and a closed-unmerged PR requires attention. An `ALREADY_SATISFIED` run is a successful completed run with no PR: its `autodev:done` label prevents the still-open issue itself from being selected again on the next scheduler tick.
 
 ## Optional roadmap ranking
 
@@ -69,7 +70,7 @@ Rules:
 3. `milestone` and `label` entries rank eligible matches in their listed order.
 4. An issue matching no roadmap entry falls through to `oldest`.
 5. Ties are deterministic: oldest `createdAt`, then issue number.
-6. A roadmap match can never override blockers, `autodev:attention`, `autodev:running`, repository autonomous-execution policy, closed state, or an existing AutoDev run/PR.
+6. A roadmap match can never override blockers, `autodev:attention`, `autodev:running`, `autodev:done`, repository autonomous-execution policy, closed state, or an existing AutoDev run/PR.
 7. Malformed/unsupported roadmap data fails safely with an actionable error; AutoDev never guesses a ranking from invalid configuration.
 
 The v1 parser accepts only the documented mapping/list shape and plain or quoted scalar values. This is deliberate: the roadmap is a tiny ranking contract, not a general-purpose workflow language.
@@ -95,7 +96,7 @@ A repository can exclude all issues from autonomous execution without removing `
 
 Save this as `.autodev/queue.json`.
 
-When autonomous execution is disabled, reconciliation removes `autodev:ready` from managed issues but preserves `autodev:managed`, dependency state, attention state, and unrelated labels. Re-enabling the policy and reconciling restores the derived ready state where appropriate.
+When autonomous execution is disabled, reconciliation removes `autodev:ready` from managed issues but preserves `autodev:managed`, dependency state, attention state, completion state, and unrelated labels. Re-enabling the policy and reconciling restores the derived ready state where appropriate.
 
 ## Precedence
 
@@ -103,11 +104,12 @@ For an issue participating in the queue, reconciliation uses this order:
 
 1. closed → not active;
 2. unmanaged → not authorized;
-3. one or more open blockers → `autodev:blocked`;
-4. `autodev:attention` → not ready;
-5. `autodev:running` → not ready;
-6. repository autonomous execution disabled → not ready;
-7. otherwise → `autodev:ready`.
+3. `autodev:done` → completed, not ready;
+4. one or more open blockers → `autodev:blocked`;
+5. `autodev:attention` → not ready;
+6. `autodev:running` → not ready;
+7. repository autonomous execution disabled → not ready;
+8. otherwise → `autodev:ready`.
 
 Selection then adds these repository-level gates without changing issue eligibility truth:
 

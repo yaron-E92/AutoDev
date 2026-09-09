@@ -13,6 +13,7 @@ from automation.queue_contract import (
     BLOCKED_LABEL,
     Blocker,
     DEFAULT_LIMIT,
+    DONE_LABEL,
     MANAGED_LABEL,
     QueueState,
     READY_LABEL,
@@ -47,6 +48,7 @@ def inspect_queue(
                 BLOCKED_LABEL,
                 ATTENTION_LABEL,
                 RUNNING_LABEL,
+                DONE_LABEL,
             }
         ):
             continue
@@ -76,6 +78,7 @@ def reconcile_queue(
                 BLOCKED_LABEL,
                 ATTENTION_LABEL,
                 RUNNING_LABEL,
+                DONE_LABEL,
             }
         ):
             continue

@@ -116,6 +116,7 @@ def run_cli(
                     f"managed={summary['managed']} ready={summary['ready']} "
                     f"blocked={summary['dependency_blocked']} "
                     f"attention={summary['attention_required']} "
+                    f"done={summary['done']} "
                     f"changed={changed} closed-dependencies-removed={removed}",
                     file=out,
                 )
@@ -143,6 +144,7 @@ def run_cli(
                     f"blocked={summary['dependency_blocked']} "
                     f"attention={summary['attention_required']} "
                     f"running={summary['running']} "
+                    f"done={summary['done']} "
                     f"policy-excluded={summary['policy_excluded']}",
                     file=out,
                 )
