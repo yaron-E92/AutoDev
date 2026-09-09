@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from automation import queue_github
+from automation import already_satisfied_hooks, queue_github
 
 import argparse
 import shutil
@@ -60,6 +60,7 @@ def current_health(
     which: Callable[[str], str | None] = shutil.which,
     force_error: bool = False,
 ) -> HealthSnapshot:
+    already_satisfied_hooks.install()
     worker = Path(registration.worker_repository).expanduser().resolve()
     if not worker.is_dir() or not (worker / ".git").exists():
         now = _now()
@@ -106,6 +107,9 @@ def run_tick(
     stdout: TextIO = sys.stdout,
     stderr: TextIO = sys.stderr,
 ) -> int:
+    # Scheduler selection happens before the coordinator is invoked, so install
+    # the no-op terminal-state overlay before inspecting any durable run.
+    already_satisfied_hooks.install()
     args, _unknown = _location_parser("autodev scheduler run-once").parse_known_args(argv[1:] if argv and argv[0] == "run-once" else argv)
     registration_file: Path | None = None
     registration: scheduler.SchedulerRegistration | None = None
