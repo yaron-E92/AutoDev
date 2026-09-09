@@ -163,7 +163,17 @@ def ensure_prepared_issue(
 
     gh(
         repo,
-        ["issue", "edit", str(requested_issue), "--repo", repo_full, "--add-label", "autodev:running"],
+        [
+            "issue",
+            "edit",
+            str(requested_issue),
+            "--repo",
+            repo_full,
+            "--remove-label",
+            "autodev:done",
+            "--add-label",
+            "autodev:running",
+        ],
         runner=runner,
     )
 
