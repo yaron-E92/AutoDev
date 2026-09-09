@@ -5,11 +5,7 @@ import subprocess
 from pathlib import Path
 from typing import Callable
 
-from automation import (
-    opencode_model_capabilities,
-    role_runtime_capabilities,
-    ux_multimodal,
-)
+from automation import role_runtime_capabilities, ux_multimodal
 
 
 class UXMultimodalRuntimeError(RuntimeError):
@@ -21,9 +17,13 @@ class RuntimeAdapter:
         self.runtime = runtime
         self.name = str(getattr(runtime, "name", "") or "")
         self._capability_evidence: role_runtime_capabilities.ImageInputCapability | None = None
-        # Registration is idempotent and keeps OpenCode-specific discovery behind
-        # the runtime capability seam instead of teaching UX verification model names.
-        opencode_model_capabilities.install()
+        if self.name == "opencode":
+            # Keep OpenCode/provider imports lazy. Importing the optional multimodal
+            # layer must not acquire the provider/workflow-stages graph for runtimes
+            # that will never use it.
+            from automation import opencode_model_capabilities
+
+            opencode_model_capabilities.install()
 
     def multimodal_verifier_capability(
         self,
