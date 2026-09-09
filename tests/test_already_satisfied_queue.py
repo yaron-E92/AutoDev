@@ -5,7 +5,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from automation import queue_classification, queue_contract, queue_workflow
+from automation import (
+    queue_classification,
+    queue_contract,
+    queue_presentation,
+    queue_workflow,
+)
 
 
 class AlreadySatisfiedQueueTests(unittest.TestCase):
@@ -50,6 +55,14 @@ class AlreadySatisfiedQueueTests(unittest.TestCase):
 
         self.assertEqual(len(states), 1)
         self.assertEqual(states[0].reason, "done")
+        summary = queue_presentation.queue_summary(states)
+        self.assertEqual(summary["managed"], 1)
+        self.assertEqual(summary["done"], 1)
+        self.assertEqual(summary["ready"], 0)
+        self.assertIn(
+            "not eligible for autonomous reselection",
+            queue_presentation.explain_state(states[0]),
+        )
 
     def test_done_state_removes_stale_ready_and_blocked_derivations(self) -> None:
         state = queue_classification.classify_issue(
@@ -61,10 +74,12 @@ class AlreadySatisfiedQueueTests(unittest.TestCase):
 
         def runner(argv, **_kwargs):
             runner_calls.append(list(argv))
+
             class Result:
                 returncode = 0
                 stdout = ""
                 stderr = ""
+
             return Result()
 
         changed = queue_classification._update_derived_labels(
