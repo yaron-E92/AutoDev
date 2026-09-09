@@ -9,6 +9,7 @@ from typing import Callable
 
 SCHEMA = "autodev.role-runtime.image-input-capability/v1"
 EVIDENCE_FILE = "ux-multimodal-capability.json"
+MANIFEST_KEY = "ux_multimodal_capability"
 STATE_SUPPORTED = "supported"
 STATE_UNSUPPORTED = "unsupported"
 STATE_UNKNOWN = "unknown"
@@ -170,12 +171,18 @@ def persist(repo: Path, capability: ImageInputCapability) -> Path:
     if not run_root.is_dir():
         return path
     current.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(path.name + ".tmp")
-    temporary.write_text(
-        json.dumps(capability.to_json(), indent=2, sort_keys=True, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
-    temporary.replace(path)
+    payload = capability.to_json()
+    _write_json_atomic(path, payload)
+
+    manifest_path = current / "run-manifest.json"
+    if manifest_path.is_file():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            manifest = None
+        if isinstance(manifest, dict):
+            manifest[MANIFEST_KEY] = dict(payload)
+            _write_json_atomic(manifest_path, manifest)
     return path
 
 
@@ -189,3 +196,12 @@ def _validated(value: object, expected_runtime: str) -> ImageInputCapability:
             "runtime image-input capability evidence changed the effective runtime identity"
         )
     return value
+
+
+def _write_json_atomic(path: Path, value: dict[str, object]) -> None:
+    temporary = path.with_name(path.name + ".tmp")
+    temporary.write_text(
+        json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(path)
