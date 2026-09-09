@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import json
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Callable
@@ -121,6 +121,18 @@ def record_is_confirmed(
         and str(record.get("verifier_fingerprint", ""))
         == str(verifier.get("fingerprint", ""))
     )
+
+
+def current_is_confirmed(repo: Path) -> bool:
+    path = _manifest_path(repo)
+    if not path.is_file():
+        return False
+    try:
+        manifest = run_manifest.load_manifest(path)
+        state = read_state(_current(repo))
+    except (OSError, ValueError, run_manifest.ManifestError, workflow_stages.WorkflowStageError):
+        return False
+    return record_is_confirmed(manifest, state)
 
 
 def role_prompt_context(repo: Path, role: str) -> str:
@@ -264,6 +276,56 @@ def _requirements_summary(result: dict[str, object]) -> list[dict[str, object]]:
     ]
 
 
+def _mark_issue_already_satisfied(
+    current: Path,
+    state: dict[str, object],
+    *,
+    runner: Callable[..., object],
+) -> None:
+    issue_number = int(state.get("IssueNumber", 0) or 0)
+    repo_full = str(state.get("RepoFullName", ""))
+    repo = current.parents[1]
+    if issue_number and repo_full:
+        workflow_github.gh(
+            repo,
+            [
+                "issue",
+                "edit",
+                str(issue_number),
+                "--repo",
+                repo_full,
+                "--remove-label",
+                "autodev:running",
+                "--remove-label",
+                "autodev:blocked",
+                "--add-label",
+                "autodev:done",
+            ],
+            runner=runner,
+        )
+        workflow_github.gh(
+            repo,
+            [
+                "issue",
+                "comment",
+                str(issue_number),
+                "--repo",
+                repo_full,
+                "--body",
+                (
+                    "AutoDev verified that the prepared base already satisfies this issue.\n\n"
+                    f"Prepared base: `{state.get('BaseSha', '')}`\n\n"
+                    "Deterministic verification: passed.\n"
+                    "Semantic verification: passed.\n"
+                    "No implementation commit or pull request was created."
+                ),
+            ],
+            runner=runner,
+        )
+    state["Status"] = "AlreadySatisfied"
+    write_state(current, state)
+
+
 def finalize_semantic_probe(
     repo: Path,
     *,
@@ -290,6 +352,8 @@ def finalize_semantic_probe(
     result = semantic_schema.parse_semantic_output(
         read_text(result_path),
         expected_criteria=semantic_prompts.extract_acceptance_criteria(issue_text) or None,
+        current=current,
+        role="verifier",
     )
     record["semantic"] = {
         "verdict": str(result.get("verdict", "")),
@@ -308,12 +372,14 @@ def finalize_semantic_probe(
         multimodal_path = ux_multimodal_runtime.verify_for_semantic_stage(
             repo,
             runner=runner,
-            which=which or workflow_stages.shutil.which,
+            which=which or shutil.which,
         )
         multimodal = ux_multimodal.load_result(current)
     except Exception as exc:
-        record["semantic"]["multimodal_status"] = "unverifiable"  # type: ignore[index]
-        record["semantic"]["multimodal_reason"] = str(exc)  # type: ignore[index]
+        semantic = record.get("semantic", {})
+        if isinstance(semantic, dict):
+            semantic["multimodal_status"] = "unverifiable"
+            semantic["multimodal_reason"] = str(exc)
         _save_record(repo, record)
         return _reject(
             repo,
@@ -321,8 +387,10 @@ def finalize_semantic_probe(
             f"semantic verification could not confirm required UX evidence on the prepared base: {exc}",
         )
     multimodal_status = str(multimodal.get("status", "") or "")
-    record["semantic"]["multimodal_status"] = multimodal_status  # type: ignore[index]
-    record["semantic"]["multimodal_artifact"] = str(multimodal_path)  # type: ignore[index]
+    semantic = record.get("semantic", {})
+    if isinstance(semantic, dict):
+        semantic["multimodal_status"] = multimodal_status
+        semantic["multimodal_artifact"] = str(multimodal_path)
     if multimodal_status not in {"pass", "not-applicable"}:
         _save_record(repo, record)
         return _reject(
@@ -340,12 +408,7 @@ def finalize_semantic_probe(
     report = _render_report(record, state, proof)
     report_path = current / REPORT_NAME
     write_text(report_path, report)
-    workflow_github.mark_already_satisfied(
-        current,
-        state,
-        report_path=report_path,
-        runner=runner,
-    )
+    _mark_issue_already_satisfied(current, state, runner=runner)
 
     state = read_state(current)
     state["AlreadySatisfiedBaseSha"] = str(record.get("prepared_base_sha", ""))
@@ -434,8 +497,7 @@ def terminal_payload(repo: Path) -> dict[str, object]:
     repo = repo.expanduser().resolve()
     current = _current(repo)
     state = read_state(current)
-    path = _manifest_path(repo)
-    manifest = run_manifest.load_manifest(path)
+    manifest = run_manifest.load_manifest(_manifest_path(repo))
     record = manifest.get(RECORD_KEY, {})
     record = record if isinstance(record, dict) else {}
     result = stage_payload(
