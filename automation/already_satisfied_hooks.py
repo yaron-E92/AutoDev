@@ -65,11 +65,12 @@ def _run_role_with_probe(
     runner=subprocess.run,
     which=None,
 ):
-    resolved = Path(repo).expanduser().resolve()
+    original_repo = Path(repo)
+    resolved = original_repo.expanduser().resolve()
     if role == "implementer" and already_satisfied.candidate_in_plan(resolved):
         def verify_candidate():
             result = original_run_role(
-                resolved,
+                original_repo,
                 "verifier",
                 runtime,
                 snapshots,
@@ -95,7 +96,7 @@ def _run_role_with_probe(
         if result == "confirmed":
             raise AlreadySatisfiedComplete()
     return original_run_role(
-        resolved,
+        original_repo,
         role,
         runtime,
         snapshots,
