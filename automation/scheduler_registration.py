@@ -143,6 +143,7 @@ def _ensure_worker(
             "clone",
             "--origin",
             "origin",
+            origin,
             str(worker),
         ]
         completed = _run_command(argv, runner=runner)
