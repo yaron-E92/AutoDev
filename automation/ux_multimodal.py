@@ -6,7 +6,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Protocol
 
-from automation import role_output_contract, ux_capture, ux_workflow
+from automation import (
+    role_output_contract,
+    ux_capture,
+    ux_reference_selection,
+    ux_workflow,
+)
 
 
 RESULT_SCHEMA = "autodev.ux.multimodal-verification/v1"
@@ -14,7 +19,6 @@ RESULT_FILE = "ux-multimodal-verification.json"
 CAPABILITY_UNSUPPORTED = "unsupported"
 CAPABILITY_IMAGE_ATTACHMENTS = "image-attachments"
 CAPABILITIES = {CAPABILITY_UNSUPPORTED, CAPABILITY_IMAGE_ATTACHMENTS}
-_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
 MAX_FINDINGS = 64
 MAX_REPAIR_BRIEF_CHARS = 12_000
 
@@ -44,6 +48,11 @@ class ReferenceImage:
     sha256: str
     mime: str
     size_bytes: int
+    reference_target_id: str = ""
+
+    @property
+    def effective_reference_target_id(self) -> str:
+        return self.reference_target_id or self.target_id
 
 
 @dataclass(frozen=True)
@@ -93,52 +102,48 @@ def selected_reference_images(repo: Path, current: Path) -> tuple[ReferenceImage
             "multimodal UX verification resolved a different UX artifact than the prepared run"
         )
 
-    selections: list[tuple[str, str, str]] = []
-    manifest = artifact.manifest
-    for kind, key, mapping in (
-        ("screen", "screens", manifest.screens or {}),
-        ("state", "states", manifest.states or {}),
-        ("journey", "journeys", manifest.journey_files or {}),
-    ):
-        values = ux_context.get(key, [])
-        if not isinstance(values, list):
-            continue
-        for raw_id in values:
-            source_id = str(raw_id or "").strip()
-            relative = str(mapping.get(source_id, "") or "").strip()
-            if relative and Path(relative).suffix.casefold() in _IMAGE_SUFFIXES:
-                selections.append((kind, source_id, relative))
+    try:
+        specs = ux_reference_selection.selected_specs(repo, ux_context, artifact.manifest)
+    except ux_reference_selection.UXReferenceSelectionError as exc:
+        raise UXMultimodalError(str(exc)) from exc
 
     root = artifact.local_root.resolve()
     references: list[ReferenceImage] = []
-    for kind, source_id, relative in sorted(set(selections)):
-        path = (root / relative).resolve()
+    for spec in specs:
+        path = (root / spec.relative_path).resolve()
         try:
             path.relative_to(root)
         except ValueError as exc:
-            raise UXMultimodalError(f"selected UX reference escapes artifact root: {relative}") from exc
+            raise UXMultimodalError(
+                f"selected UX reference escapes artifact root: {spec.relative_path}"
+            ) from exc
         if not path.is_file():
-            raise UXMultimodalError(f"selected UX reference image is missing: {relative}")
+            raise UXMultimodalError(
+                f"selected UX reference image is missing: {spec.relative_path}"
+            )
         data = path.read_bytes()
         if not data or len(data) > ux_capture.MAX_IMAGE_BYTES:
             raise UXMultimodalError(
-                f"selected UX reference image has invalid size for multimodal verification: {relative}"
+                "selected UX reference image has invalid size for multimodal verification: "
+                f"{spec.relative_path}"
             )
         mime = ux_capture.image_mime(data)
         if not mime:
             raise UXMultimodalError(
-                f"selected UX reference is not a supported PNG/JPEG/GIF/WebP image: {relative}"
+                "selected UX reference is not a supported PNG/JPEG/GIF/WebP image: "
+                f"{spec.relative_path}"
             )
         references.append(
             ReferenceImage(
-                target_id=f"{kind}:{source_id}",
-                source_kind=kind,
-                source_id=source_id,
-                relative_path=relative,
+                target_id=spec.target_id,
+                source_kind=spec.source_kind,
+                source_id=spec.source_id,
+                relative_path=spec.relative_path,
                 path=path,
                 sha256=hashlib.sha256(data).hexdigest(),
                 mime=mime,
                 size_bytes=len(data),
+                reference_target_id=spec.reference_target_id,
             )
         )
     return tuple(references)
@@ -157,7 +162,11 @@ def run_verification(
     references = selected_reference_images(repo, current)
     context = _read_json(current / "ux-context-verifier.json")
     artifact_context = context.get("ux_artifact", {}) if isinstance(context, dict) else {}
-    ux_fingerprint = str(context.get("ux_context_fingerprint", "") or "") if isinstance(context, dict) else ""
+    ux_fingerprint = (
+        str(context.get("ux_context_fingerprint", "") or "")
+        if isinstance(context, dict)
+        else ""
+    )
 
     if not references:
         result = _base_result(
@@ -236,7 +245,8 @@ def run_verification(
     else:
         try:
             capability = str(
-                capability_method(repo, runner=runner, which=which) or CAPABILITY_UNSUPPORTED
+                capability_method(repo, runner=runner, which=which)
+                or CAPABILITY_UNSUPPORTED
             )
         except Exception as exc:
             return _write_unverifiable(
@@ -381,11 +391,14 @@ def validate_model_payload(
     findings = payload.get("ux_findings", [])
     repair_brief = str(payload.get("repair_brief", "") or "")
     if not isinstance(comparisons, list) or len(comparisons) != len(references):
-        raise UXMultimodalError("multimodal verifier must return exactly one comparison per target")
+        raise UXMultimodalError(
+            "multimodal verifier must return exactly one comparison per target"
+        )
     if not isinstance(findings, list) or len(findings) > MAX_FINDINGS:
         raise UXMultimodalError("multimodal UX findings must be a bounded array")
     if len(repair_brief) > MAX_REPAIR_BRIEF_CHARS:
         raise UXMultimodalError("multimodal repair brief exceeds the bounded limit")
+
     expected = {
         reference.target_id: (reference, capture)
         for reference, capture in zip(references, captures, strict=True)
@@ -397,7 +410,9 @@ def validate_model_payload(
             raise UXMultimodalError(f"multimodal comparison {index} must be an object")
         target_id = str(comparison.get("target_id", "") or "")
         if target_id in seen or target_id not in expected:
-            raise UXMultimodalError(f"multimodal comparison {index} references an unknown/duplicate target")
+            raise UXMultimodalError(
+                f"multimodal comparison {index} references an unknown/duplicate target"
+            )
         seen.add(target_id)
         reference, capture = expected[target_id]
         exact = {
@@ -413,18 +428,28 @@ def validate_model_payload(
                 )
         status = str(comparison.get("status", "") or "")
         if status not in {"satisfied", "violated", "unverifiable"}:
-            raise UXMultimodalError(f"multimodal comparison {target_id} has invalid status")
+            raise UXMultimodalError(
+                f"multimodal comparison {target_id} has invalid status"
+            )
         statuses.append(status)
 
-    role_output_contract.validate_ux_references(current, "verifier", {"ux_findings": findings})
+    role_output_contract.validate_ux_references(
+        current,
+        "verifier",
+        {"ux_findings": findings},
+    )
     if any(status == "unverifiable" for status in statuses) and verdict != "unverifiable":
-        raise UXMultimodalError("unverifiable comparison requires an unverifiable overall verdict")
+        raise UXMultimodalError(
+            "unverifiable comparison requires an unverifiable overall verdict"
+        )
     if any(status == "violated" for status in statuses) and verdict == "pass":
         raise UXMultimodalError("violated comparison cannot produce a pass verdict")
     if verdict == "pass" and any(status != "satisfied" for status in statuses):
         raise UXMultimodalError("pass requires every visual comparison to be satisfied")
     if verdict == "repair" and not any(status == "violated" for status in statuses):
-        raise UXMultimodalError("repair verdict requires at least one violated comparison")
+        raise UXMultimodalError(
+            "repair verdict requires at least one violated comparison"
+        )
     if verdict == "repair" and not repair_brief.strip():
         raise UXMultimodalError("repair verdict requires a bounded repair brief")
     return dict(payload)
@@ -474,7 +499,10 @@ def _write_unverifiable(
             "source_id": reference.source_id,
             "status": "unverifiable",
             "evidence": str(reason)[:4000],
-            "required_change": "Provide deterministic implementation capture and an authorized image-capable verifier route.",
+            "required_change": (
+                "Provide deterministic implementation capture and an authorized "
+                "image-capable verifier route."
+            ),
             "category": "visual",
         }
         for reference in references
@@ -522,6 +550,7 @@ def _base_result(
             "kind": "ux-reference-image",
             "source_kind": item.source_kind,
             "source_id": item.source_id,
+            "reference_target_id": item.effective_reference_target_id,
             "path": item.relative_path,
             "sha256": item.sha256,
             "mime": item.mime,
@@ -585,13 +614,17 @@ def _verification_prompt(
     context: dict[str, object],
 ) -> str:
     targets = []
-    for index, (reference, capture) in enumerate(zip(references, captures, strict=True), start=1):
+    for index, (reference, capture) in enumerate(
+        zip(references, captures, strict=True),
+        start=1,
+    ):
         targets.append(
             {
                 "pair_index": index,
                 "target_id": reference.target_id,
                 "source_kind": reference.source_kind,
                 "source_id": reference.source_id,
+                "reference_target_id": reference.effective_reference_target_id,
                 "reference_sha256": reference.sha256,
                 "implementation_sha256": capture.sha256,
                 "reference_attachment": 2 * index - 1,
