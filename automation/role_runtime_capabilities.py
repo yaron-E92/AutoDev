@@ -163,9 +163,13 @@ def image_input_capability(
 
 
 def persist(repo: Path, capability: ImageInputCapability) -> Path:
-    current = repo.expanduser().resolve() / ".autodev-run" / "current"
+    repo = repo.expanduser().resolve()
+    run_root = repo / ".autodev-run"
+    current = run_root / "current"
     path = current / EVIDENCE_FILE
-    path.parent.mkdir(parents=True, exist_ok=True)
+    if not run_root.is_dir():
+        return path
+    current.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + ".tmp")
     temporary.write_text(
         json.dumps(capability.to_json(), indent=2, sort_keys=True, ensure_ascii=False) + "\n",
