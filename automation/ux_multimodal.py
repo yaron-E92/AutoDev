@@ -9,6 +9,7 @@ from typing import Callable, Protocol
 from automation import (
     role_output_contract,
     ux_capture,
+    ux_multimodal_evidence,
     ux_reference_selection,
     ux_workflow,
 )
@@ -544,68 +545,26 @@ def _base_result(
     schema_retry_count: int = 0,
     diagnostic: str = "",
 ) -> dict[str, object]:
-    reference_evidence = [
-        {
-            "target_id": item.target_id,
-            "kind": "ux-reference-image",
-            "source_kind": item.source_kind,
-            "source_id": item.source_id,
-            "reference_target_id": item.effective_reference_target_id,
-            "path": item.relative_path,
-            "sha256": item.sha256,
-            "mime": item.mime,
-            "size_bytes": item.size_bytes,
-        }
-        for item in references
-    ]
-    implementation_evidence = [
-        {
-            "target_id": item.target.target_id,
-            "kind": "rendered-screenshot",
-            "source_kind": item.target.source_kind,
-            "source_id": item.target.source_id,
-            "logical_id": item.target.output_name,
-            "sha256": item.sha256,
-            "mime": item.mime,
-            "size_bytes": item.size_bytes,
-            "viewport": item.target.viewport,
-            "platform": item.target.platform,
-        }
-        for item in captures
-    ]
-    capture_identity = hashlib.sha256(
-        json.dumps(
-            {
-                "capture_config_sha256": capture_config_sha256,
-                "implementation": implementation_evidence,
-            },
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
-    ).hexdigest()
-    artifact = dict(artifact_context) if isinstance(artifact_context, dict) else {}
-    return {
-        "schema": RESULT_SCHEMA,
-        "status": status,
-        "ux_artifact": artifact,
-        "ux_context_fingerprint": ux_fingerprint,
-        "capture_config_sha256": capture_config_sha256,
-        "capture_identity": capture_identity,
-        "verification_contract": MULTIMODAL_CONTRACT.safe_metadata(),
-        "runtime": {
-            "name": runtime,
-            "model": model,
-            "capability": capability,
-            "structured_output_mode": structured_output_mode,
-            "schema_retry_count": max(0, int(schema_retry_count)),
-        },
-        "reference_evidence": reference_evidence,
-        "implementation_evidence": implementation_evidence,
-        "comparisons": list(comparisons or []),
-        "findings": findings,
-        "repair_brief": repair_brief[:MAX_REPAIR_BRIEF_CHARS],
-        "diagnostic": diagnostic,
-    }
+    return ux_multimodal_evidence.build_result(
+        result_schema=RESULT_SCHEMA,
+        verification_contract=MULTIMODAL_CONTRACT.safe_metadata(),
+        max_repair_brief_chars=MAX_REPAIR_BRIEF_CHARS,
+        status=status,
+        artifact_context=artifact_context,
+        ux_fingerprint=ux_fingerprint,
+        capture_config_sha256=capture_config_sha256,
+        capability=capability,
+        runtime=runtime,
+        model=model,
+        references=references,
+        captures=captures,
+        findings=findings,
+        repair_brief=repair_brief,
+        comparisons=comparisons,
+        structured_output_mode=structured_output_mode,
+        schema_retry_count=schema_retry_count,
+        diagnostic=diagnostic,
+    )
 
 
 def _verification_prompt(
