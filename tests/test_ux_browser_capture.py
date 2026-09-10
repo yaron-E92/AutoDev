@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import json
 import tempfile
 import unittest
@@ -167,6 +168,121 @@ class BrowserCaptureConfigTests(unittest.TestCase):
             self.assertEqual(result.target.viewport, "1024x768@1")
             self.assertEqual(result.target.platform, "browser:Chrome/fixture")
             self.assertEqual(result.target.reference_target_id, "screen:confirmation")
+
+
+class BrowserCaptureLifecycleTests(unittest.TestCase):
+    def test_profile_cleanup_happens_after_browser_stops(self) -> None:
+        events: list[str] = []
+
+        class FakeBrowser:
+            alive = True
+
+            def poll(self):
+                return None if self.alive else 0
+
+            def terminate(self) -> None:
+                events.append("browser-stop")
+                self.alive = False
+
+            def wait(self, *, timeout: int) -> int:
+                return 0
+
+        browser = FakeBrowser()
+
+        class FakeProfile:
+            def __init__(self, name: Path) -> None:
+                self.name = str(name)
+
+            def cleanup(self) -> None:
+                self.assert_browser_stopped()
+                events.append("profile-cleanup")
+
+            @staticmethod
+            def assert_browser_stopped() -> None:
+                if browser.alive:
+                    raise AssertionError("temporary profile cleanup ran before browser shutdown")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir) / "repo"
+            current = repo / ".autodev-run" / "current"
+            current.mkdir(parents=True)
+            target_id = "screen:fixture"
+            provider = ux_browser_capture.BrowserProviderConfig(
+                origin="http://127.0.0.1:4173",
+                allowed_origins=("http://127.0.0.1:4173",),
+                application_command=(),
+                ready_path="/health",
+                executable="google-chrome",
+                targets={
+                    target_id: ux_browser_capture.BrowserTargetConfig(
+                        route="/fixture",
+                        viewport="1024x768@1",
+                        ready_selector="",
+                        actions=(),
+                    )
+                },
+            )
+            profile = FakeProfile(current / "fake-profile")
+
+            with (
+                patch.object(ux_browser_capture, "_wait_for_application"),
+                patch.object(ux_browser_capture, "_launch_browser", return_value=browser),
+                patch.object(
+                    ux_browser_capture,
+                    "_wait_for_devtools",
+                    side_effect=RuntimeError("stop after browser launch"),
+                ),
+                patch.object(ux_browser_capture.tempfile, "TemporaryDirectory", return_value=profile),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "stop after browser launch"):
+                    ux_browser_capture.capture(
+                        repo,
+                        current,
+                        provider,
+                        target_id,
+                        current / "fixture.png",
+                        timeout_seconds=5,
+                        which=lambda _name: "/usr/bin/google-chrome",
+                    )
+
+        self.assertEqual(events, ["browser-stop", "profile-cleanup"])
+
+    def test_profile_cleanup_retries_only_transient_not_empty_race(self) -> None:
+        class FlakyProfile:
+            attempts = 0
+
+            def cleanup(self) -> None:
+                self.attempts += 1
+                if self.attempts < 3:
+                    raise OSError(errno.ENOTEMPTY, "Directory not empty", "Default")
+
+        profile = FlakyProfile()
+        with patch.object(ux_browser_capture.time, "sleep") as sleep:
+            ux_browser_capture._cleanup_profile(profile)
+
+        self.assertEqual(profile.attempts, 3)
+        self.assertEqual(sleep.call_count, 2)
+        sleep.assert_called_with(ux_browser_capture.PROFILE_CLEANUP_RETRY_SECONDS)
+
+    def test_profile_cleanup_remains_fail_closed_after_bounded_retry(self) -> None:
+        class StuckProfile:
+            attempts = 0
+
+            def cleanup(self) -> None:
+                self.attempts += 1
+                raise OSError(errno.ENOTEMPTY, "Directory not empty", "Default")
+
+        profile = StuckProfile()
+        with (
+            patch.object(ux_browser_capture, "PROFILE_CLEANUP_ATTEMPTS", 3),
+            patch.object(ux_browser_capture.time, "sleep") as sleep,
+        ):
+            with self.assertRaises(OSError) as raised:
+                ux_browser_capture._cleanup_profile(profile)
+
+        self.assertEqual(raised.exception.errno, errno.ENOTEMPTY)
+        self.assertEqual(profile.attempts, 3)
+        self.assertEqual(sleep.call_count, 2)
 
 
 if __name__ == "__main__":
