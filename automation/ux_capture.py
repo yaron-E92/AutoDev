@@ -46,6 +46,7 @@ class CaptureConfig:
     timeout_seconds: int
     sha256: str
     browser_config: object | None = None
+    desktop_config: object | None = None
 
 
 @dataclass(frozen=True)
@@ -55,6 +56,8 @@ class CapturedImage:
     sha256: str
     mime: str
     size_bytes: int
+    configured_identity: str = ""
+    runtime_identity: str = ""
 
 
 def load_config(repo: Path) -> CaptureConfig | None:
@@ -74,7 +77,7 @@ def load_config(repo: Path) -> CaptureConfig | None:
             f"unsupported UX capture schema {value.get('schema')!r}; expected {CAPTURE_SCHEMA!r}"
         )
     provider = str(value.get("provider", "command") or "command").strip().casefold()
-    if provider not in {"command", "browser"}:
+    if provider not in {"command", "browser", "desktop"}:
         raise UXCaptureError(f"unsupported UX capture provider: {provider!r}")
 
     command: tuple[str, ...] = ()
@@ -129,6 +132,7 @@ def load_config(repo: Path) -> CaptureConfig | None:
         targets[target.target_id] = target
 
     browser_config = None
+    desktop_config = None
     if provider == "browser":
         try:
             from automation import ux_browser_capture
@@ -140,6 +144,17 @@ def load_config(repo: Path) -> CaptureConfig | None:
             if isinstance(exc, ux_browser_capture.BrowserCaptureError):
                 raise UXCaptureError(str(exc)) from exc
             raise
+    elif provider == "desktop":
+        try:
+            from automation import ux_desktop_capture
+
+            desktop_config = ux_desktop_capture.parse_config(value, set(targets))
+        except Exception as exc:
+            from automation import ux_desktop_capture
+
+            if isinstance(exc, ux_desktop_capture.DesktopCaptureError):
+                raise UXCaptureError(str(exc)) from exc
+            raise
 
     return CaptureConfig(
         provider=provider,
@@ -148,6 +163,7 @@ def load_config(repo: Path) -> CaptureConfig | None:
         timeout_seconds=timeout,
         sha256=hashlib.sha256(raw_bytes).hexdigest(),
         browser_config=browser_config,
+        desktop_config=desktop_config,
     )
 
 
@@ -217,6 +233,8 @@ def capture_target(
     output.unlink(missing_ok=True)
 
     captured_target = target
+    configured_identity = ""
+    runtime_identity = ""
     if config.provider == "browser":
         if config.browser_config is None:
             raise UXCaptureError("browser capture configuration is unavailable")
@@ -240,6 +258,30 @@ def capture_target(
                 raise UXCaptureError(str(exc)) from exc
             raise
         captured_target = replace(target, platform=platform, viewport=viewport)
+    elif config.provider == "desktop":
+        if config.desktop_config is None:
+            raise UXCaptureError("desktop capture configuration is unavailable")
+        try:
+            from automation import ux_desktop_capture
+
+            result = ux_desktop_capture.capture(
+                repo,
+                current,
+                config.desktop_config,
+                target.target_id,
+                output,
+                timeout_seconds=config.timeout_seconds,
+                popen=popen,
+            )
+        except Exception as exc:
+            from automation import ux_desktop_capture
+
+            if isinstance(exc, ux_desktop_capture.DesktopCaptureError):
+                raise UXCaptureError(str(exc)) from exc
+            raise
+        captured_target = replace(target, platform=result.platform, viewport=result.viewport)
+        configured_identity = result.configured_identity
+        runtime_identity = result.runtime_identity
     else:
         _capture_with_command(repo, config, target, output, runner=runner)
 
@@ -265,7 +307,17 @@ def capture_target(
         sha256=hashlib.sha256(data).hexdigest(),
         mime=mime,
         size_bytes=len(data),
+        configured_identity=configured_identity,
+        runtime_identity=runtime_identity,
     )
+
+
+def configured_capture_identity(config: CaptureConfig, target_id: str) -> str:
+    if config.provider != "desktop" or config.desktop_config is None:
+        return ""
+    from automation import ux_desktop_capture
+
+    return ux_desktop_capture.configured_target_identity(config.desktop_config, target_id)
 
 
 def _capture_with_command(
