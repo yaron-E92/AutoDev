@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import errno
 import json
 import os
 import re
@@ -23,6 +24,8 @@ DEFAULT_VIEWPORT = "1280x720"
 DEFAULT_ACTION_TIMEOUT_MS = 10_000
 MAX_ACTIONS = 32
 MAX_ALLOWED_ORIGINS = 16
+PROFILE_CLEANUP_ATTEMPTS = 10
+PROFILE_CLEANUP_RETRY_SECONDS = 0.1
 _SAFE_BROWSER_NAME = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
 _VIEWPORT = re.compile(r"^(?P<width>[0-9]{2,4})x(?P<height>[0-9]{2,4})(?:@(?P<scale>[0-9](?:\.[0-9]+)?))?$")
 
@@ -153,6 +156,7 @@ def capture(
     application = None
     browser = None
     session = None
+    profile = None
     deadline = time.monotonic() + timeout_seconds
     try:
         if provider.application_command:
@@ -162,43 +166,45 @@ def capture(
         port = _free_local_port()
         profile_root = current / "ux-browser-profiles"
         profile_root.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory(prefix="capture-", dir=profile_root) as profile:
-            browser = _launch_browser(
-                executable,
-                port=port,
-                profile=Path(profile),
-                popen=popen,
+        profile = tempfile.TemporaryDirectory(prefix="capture-", dir=profile_root)
+        browser = _launch_browser(
+            executable,
+            port=port,
+            profile=Path(profile.name),
+            popen=popen,
+        )
+        version = _wait_for_devtools(port, browser, deadline=deadline)
+        page = _new_page(port, deadline=deadline)
+        websocket_url = str(page.get("webSocketDebuggerUrl", "") or "")
+        if not websocket_url:
+            raise BrowserCaptureError("Chrome DevTools did not return a page websocket endpoint")
+        remaining = max(1.0, deadline - time.monotonic())
+        session = ux_browser_cdp.CDPSession(
+            ux_browser_cdp.WebSocketClient(
+                websocket_url,
+                timeout_seconds=min(10.0, remaining),
             )
-            version = _wait_for_devtools(port, browser, deadline=deadline)
-            page = _new_page(port, deadline=deadline)
-            websocket_url = str(page.get("webSocketDebuggerUrl", "") or "")
-            if not websocket_url:
-                raise BrowserCaptureError("Chrome DevTools did not return a page websocket endpoint")
-            remaining = max(1.0, deadline - time.monotonic())
-            session = ux_browser_cdp.CDPSession(
-                ux_browser_cdp.WebSocketClient(
-                    websocket_url,
-                    timeout_seconds=min(10.0, remaining),
-                )
-            )
-            _capture_page(
-                session,
-                provider,
-                target,
-                output,
-                deadline=deadline,
-            )
-            product = str(version.get("Browser", "browser") or "browser")
-            platform = ("browser:" + product)[:64]
-            width, height, scale = _parse_viewport(target.viewport)
-            viewport_identity = f"{width}x{height}@{scale:g}"
-            return platform, viewport_identity[:64]
+        )
+        _capture_page(
+            session,
+            provider,
+            target,
+            output,
+            deadline=deadline,
+        )
+        product = str(version.get("Browser", "browser") or "browser")
+        platform = ("browser:" + product)[:64]
+        width, height, scale = _parse_viewport(target.viewport)
+        viewport_identity = f"{width}x{height}@{scale:g}"
+        return platform, viewport_identity[:64]
     except ux_browser_cdp.BrowserCDPError as exc:
         raise BrowserCaptureError(str(exc)) from exc
     finally:
         if session is not None:
             session.close()
         _stop_process(browser)
+        if profile is not None:
+            _cleanup_profile(profile)
         _stop_process(application)
 
 
@@ -676,3 +682,14 @@ def _stop_process(process: object | None) -> None:
             getattr(process, "wait")(timeout=3)
     except (OSError, AttributeError):
         pass
+
+
+def _cleanup_profile(profile: object) -> None:
+    for attempt in range(PROFILE_CLEANUP_ATTEMPTS):
+        try:
+            getattr(profile, "cleanup")()
+            return
+        except OSError as exc:
+            if exc.errno != errno.ENOTEMPTY or attempt + 1 >= PROFILE_CLEANUP_ATTEMPTS:
+                raise
+            time.sleep(PROFILE_CLEANUP_RETRY_SECONDS)
