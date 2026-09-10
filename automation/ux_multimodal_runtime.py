@@ -5,7 +5,7 @@ import subprocess
 from pathlib import Path
 from typing import Callable
 
-from automation import ux_multimodal
+from automation import role_runtime_capabilities, ux_multimodal
 
 
 class UXMultimodalRuntimeError(RuntimeError):
@@ -16,6 +16,14 @@ class RuntimeAdapter:
     def __init__(self, runtime: object) -> None:
         self.runtime = runtime
         self.name = str(getattr(runtime, "name", "") or "")
+        self._capability_evidence: role_runtime_capabilities.ImageInputCapability | None = None
+        if self.name == "opencode":
+            # Keep OpenCode/provider imports lazy. Importing the optional multimodal
+            # layer must not acquire the provider/workflow-stages graph for runtimes
+            # that will never use it.
+            from automation import opencode_model_capabilities
+
+            opencode_model_capabilities.install()
 
     def multimodal_verifier_capability(
         self,
@@ -24,20 +32,18 @@ class RuntimeAdapter:
         runner: Callable[..., object] = subprocess.run,
         which=None,
     ) -> str:
-        if self.name != "opencode":
-            return ux_multimodal.CAPABILITY_UNSUPPORTED
-        try:
-            mappings = self._opencode_mappings(repo, runner=runner, which=which)
-        except UXMultimodalRuntimeError:
-            return ux_multimodal.CAPABILITY_UNSUPPORTED
-        model = str(mappings.get("verifier", {}).get("model", "") or "").strip()
-        if not model or "/" not in model:
-            return ux_multimodal.CAPABILITY_UNSUPPORTED
-        # OpenCode's session transport accepts image file parts. AutoDev currently
-        # lacks authoritative per-model modality metadata, so a route that rejects
-        # images is handled fail-closed as `unverifiable`. A follow-up issue tracks
-        # model-specific modality discovery rather than encoding provider heuristics.
-        return ux_multimodal.CAPABILITY_IMAGE_ATTACHMENTS
+        evidence = role_runtime_capabilities.image_input_capability(
+            self.runtime,
+            repo,
+            role="verifier",
+            runner=runner,
+            which=which,
+        )
+        self._capability_evidence = evidence
+        role_runtime_capabilities.persist(repo, evidence)
+        if evidence.state == role_runtime_capabilities.STATE_SUPPORTED:
+            return ux_multimodal.CAPABILITY_IMAGE_ATTACHMENTS
+        return ux_multimodal.CAPABILITY_UNSUPPORTED
 
     def invoke_multimodal_verifier(
         self,
@@ -66,16 +72,35 @@ class RuntimeAdapter:
         )
 
         repo = repo.expanduser().resolve()
+        if self._capability_evidence is None:
+            capability = self.multimodal_verifier_capability(
+                repo,
+                runner=runner,
+                which=which,
+            )
+            if capability != ux_multimodal.CAPABILITY_IMAGE_ATTACHMENTS:
+                evidence = self._capability_evidence
+                detail = evidence.detail if evidence is not None else "capability unavailable"
+                raise UXMultimodalRuntimeError(
+                    "effective verifier route has no authoritative image-input capability: "
+                    + detail
+                )
+
         try:
-            executable = opencode_cli.resolve_opencode_cli(which=which)
             mappings = self._opencode_mappings(repo, runner=runner, which=which)
-        except (opencode_cli.OpenCodeCliError, UXMultimodalRuntimeError) as exc:
+        except UXMultimodalRuntimeError as exc:
             raise UXMultimodalRuntimeError(str(exc)) from exc
         model = str(mappings.get("verifier", {}).get("model", "") or "").strip()
         if not model:
             raise UXMultimodalRuntimeError(
                 "cannot resolve the effective OpenCode verifier model for multimodal UX verification"
             )
+        self._assert_capability_route(model)
+
+        try:
+            executable = opencode_cli.resolve_opencode_cli(which=which)
+        except opencode_cli.OpenCodeCliError as exc:
+            raise UXMultimodalRuntimeError(str(exc)) from exc
 
         # Screenshot/reference bytes are customer/repository content. Reuse the
         # same verifier route authorization as ordinary semantic verification and
@@ -127,6 +152,27 @@ class RuntimeAdapter:
             structured_output_mode="native-validated",
             schema_retry_count=native.retries,
         )
+
+    def _assert_capability_route(self, model: str) -> None:
+        evidence = self._capability_evidence
+        if evidence is None:
+            raise UXMultimodalRuntimeError(
+                "multimodal verifier invocation has no bound image-input capability evidence"
+            )
+        if evidence.state != role_runtime_capabilities.STATE_SUPPORTED:
+            raise UXMultimodalRuntimeError(
+                "multimodal verifier invocation is blocked because image-input capability is "
+                f"{evidence.state}: {evidence.detail}"
+            )
+        if not evidence.route:
+            raise UXMultimodalRuntimeError(
+                "supported image-input capability evidence is not bound to a provider/model route"
+            )
+        if evidence.route != model:
+            raise UXMultimodalRuntimeError(
+                "effective verifier route changed after image-input capability discovery; "
+                f"capability was bound to {evidence.route!r} but invocation resolved {model!r}"
+            )
 
     def _opencode_mappings(
         self,

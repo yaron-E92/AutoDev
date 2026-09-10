@@ -225,8 +225,14 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install --disable-pip-version-check 'pyinstaller==6.16.0'
-          sudo apt-get update
-          sudo apt-get install -y rpm cpio
+          ubuntu_sources=/etc/apt/sources.list.d/ubuntu.sources
+          test -f "$ubuntu_sources"
+          apt_args=(
+            -o "Dir::Etc::sourcelist=$ubuntu_sources"
+            -o "Dir::Etc::sourceparts=-"
+          )
+          sudo apt-get "${apt_args[@]}" update
+          sudo apt-get "${apt_args[@]}" install -y rpm cpio
 
       - name: Build self-contained payload twice
         shell: bash
@@ -459,8 +465,14 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install --disable-pip-version-check 'pyinstaller==6.16.0'
-          sudo apt-get update
-          sudo apt-get install -y rpm
+          ubuntu_sources=/etc/apt/sources.list.d/ubuntu.sources
+          test -f "$ubuntu_sources"
+          apt_args=(
+            -o "Dir::Etc::sourcelist=$ubuntu_sources"
+            -o "Dir::Etc::sourceparts=-"
+          )
+          sudo apt-get "${apt_args[@]}" update
+          sudo apt-get "${apt_args[@]}" install -y rpm
 
       - name: Build canonical Linux packages once
         shell: bash

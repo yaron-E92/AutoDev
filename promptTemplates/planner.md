@@ -26,6 +26,8 @@ Constraints:
 - Do not change domain logic, persistence, models, migrations, public APIs, schemas, scoring, task state logic, or unrelated behavior unless the issue explicitly requires it.
 - If something is unclear, make a reasonable assumption and call it out briefly.
 - If the issue is too broad for a localized change, say so clearly and propose the smallest safe slice.
+- If repository evidence shows that the prepared base already satisfies every issue requirement and no acceptance-required edit remains, nominate it for independent no-op verification by putting the exact line `AUTODEV_ALREADY_SATISFIED_CANDIDATE: yes` inside section 6.
+- Never emit that marker if any required code, configuration, documentation, or test change remains, even if the remaining change is only one character or one line.
 
 Output format:
 
@@ -49,6 +51,7 @@ Output format:
 6) Recommended implementation approach
    - Option A: fastest / lowest-risk
    - Option B: slightly cleaner, only if Option A is blocked or too messy
+   - If and only if the prepared base appears fully sufficient, include `AUTODEV_ALREADY_SATISFIED_CANDIDATE: yes`; this is a candidate signal only and never authorizes completion by itself.
 
 Rules:
 
@@ -56,6 +59,7 @@ Rules:
 - No pseudo-code.
 - No refactoring wishlist.
 - Keep the plan implementer-ready.
+- A no-op candidate is still independently checked by deterministic and semantic verification; Planner prose alone never closes or completes an issue.
 
 Issue:
 {~{IssueText}~}

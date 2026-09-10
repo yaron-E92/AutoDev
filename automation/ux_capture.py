@@ -4,8 +4,9 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 from typing import Callable
 
@@ -30,6 +31,7 @@ class CaptureTarget:
     output_name: str
     viewport: str = ""
     platform: str = ""
+    reference_target_id: str = ""
 
     @property
     def target_id(self) -> str:
@@ -38,10 +40,13 @@ class CaptureTarget:
 
 @dataclass(frozen=True)
 class CaptureConfig:
+    provider: str
     command: tuple[str, ...]
     targets: dict[str, CaptureTarget]
     timeout_seconds: int
     sha256: str
+    browser_config: object | None = None
+    desktop_config: object | None = None
 
 
 @dataclass(frozen=True)
@@ -51,6 +56,8 @@ class CapturedImage:
     sha256: str
     mime: str
     size_bytes: int
+    configured_identity: str = ""
+    runtime_identity: str = ""
 
 
 def load_config(repo: Path) -> CaptureConfig | None:
@@ -70,15 +77,24 @@ def load_config(repo: Path) -> CaptureConfig | None:
             f"unsupported UX capture schema {value.get('schema')!r}; expected {CAPTURE_SCHEMA!r}"
         )
     provider = str(value.get("provider", "command") or "command").strip().casefold()
-    if provider != "command":
+    if provider not in {"command", "browser", "desktop"}:
         raise UXCaptureError(f"unsupported UX capture provider: {provider!r}")
-    command_value = value.get("command")
-    if not isinstance(command_value, list) or not command_value:
-        raise UXCaptureError("UX capture command must be a non-empty JSON string array")
-    if len(command_value) > 32 or not all(isinstance(item, str) and item.strip() for item in command_value):
-        raise UXCaptureError("UX capture command contains invalid arguments")
-    command = tuple(item.strip() for item in command_value)
-    timeout = int(value.get("timeout_seconds", DEFAULT_TIMEOUT_SECONDS) or DEFAULT_TIMEOUT_SECONDS)
+
+    command: tuple[str, ...] = ()
+    if provider == "command":
+        command_value = value.get("command")
+        if not isinstance(command_value, list) or not command_value:
+            raise UXCaptureError("UX capture command must be a non-empty JSON string array")
+        if len(command_value) > 32 or not all(
+            isinstance(item, str) and item.strip() for item in command_value
+        ):
+            raise UXCaptureError("UX capture command contains invalid arguments")
+        command = tuple(item.strip() for item in command_value)
+
+    try:
+        timeout = int(value.get("timeout_seconds", DEFAULT_TIMEOUT_SECONDS) or DEFAULT_TIMEOUT_SECONDS)
+    except (TypeError, ValueError) as exc:
+        raise UXCaptureError("UX capture timeout_seconds must be an integer") from exc
     if not 1 <= timeout <= MAX_TIMEOUT_SECONDS:
         raise UXCaptureError(
             f"UX capture timeout_seconds must be between 1 and {MAX_TIMEOUT_SECONDS}"
@@ -98,7 +114,15 @@ def load_config(repo: Path) -> CaptureConfig | None:
         output_name = str(raw_target.get("output", "") or "").strip().replace("\\", "/")
         viewport = str(raw_target.get("viewport", "") or "").strip()
         platform = str(raw_target.get("platform", "") or "").strip()
-        target = _validate_target(kind, source_id, output_name, viewport, platform)
+        reference_target_id = str(raw_target.get("reference", "") or "").strip()
+        target = _validate_target(
+            kind,
+            source_id,
+            output_name,
+            viewport,
+            platform,
+            reference_target_id,
+        )
         if key not in {target.target_id, target.source_id}:
             raise UXCaptureError(
                 f"UX capture target key {key!r} must equal {target.target_id!r} or {target.source_id!r}"
@@ -106,11 +130,40 @@ def load_config(repo: Path) -> CaptureConfig | None:
         if target.target_id in targets:
             raise UXCaptureError(f"duplicate UX capture target: {target.target_id}")
         targets[target.target_id] = target
+
+    browser_config = None
+    desktop_config = None
+    if provider == "browser":
+        try:
+            from automation import ux_browser_capture
+
+            browser_config = ux_browser_capture.parse_config(value, set(targets))
+        except Exception as exc:
+            from automation import ux_browser_capture
+
+            if isinstance(exc, ux_browser_capture.BrowserCaptureError):
+                raise UXCaptureError(str(exc)) from exc
+            raise
+    elif provider == "desktop":
+        try:
+            from automation import ux_desktop_capture
+
+            desktop_config = ux_desktop_capture.parse_config(value, set(targets))
+        except Exception as exc:
+            from automation import ux_desktop_capture
+
+            if isinstance(exc, ux_desktop_capture.DesktopCaptureError):
+                raise UXCaptureError(str(exc)) from exc
+            raise
+
     return CaptureConfig(
+        provider=provider,
         command=command,
         targets=targets,
         timeout_seconds=timeout,
         sha256=hashlib.sha256(raw_bytes).hexdigest(),
+        browser_config=browser_config,
+        desktop_config=desktop_config,
     )
 
 
@@ -120,6 +173,7 @@ def _validate_target(
     output_name: str,
     viewport: str,
     platform: str,
+    reference_target_id: str = "",
 ) -> CaptureTarget:
     if source_kind not in _SUPPORTED_KINDS:
         raise UXCaptureError(
@@ -140,12 +194,15 @@ def _validate_target(
         )
     if len(viewport) > 64 or len(platform) > 64:
         raise UXCaptureError("UX capture viewport/platform metadata is too long")
+    if reference_target_id:
+        _split_target_id(reference_target_id, field="UX capture reference")
     return CaptureTarget(
         source_kind=source_kind,
         source_id=source_id,
         output_name=path.name,
         viewport=viewport,
         platform=platform,
+        reference_target_id=reference_target_id,
     )
 
 
@@ -156,6 +213,8 @@ def capture_target(
     target_id: str,
     *,
     runner: Callable[..., object] = subprocess.run,
+    popen: Callable[..., object] = subprocess.Popen,
+    which: Callable[[str], str | None] = shutil.which,
 ) -> CapturedImage:
     repo = repo.expanduser().resolve()
     current = current.expanduser().resolve()
@@ -173,6 +232,102 @@ def capture_target(
         raise UXCaptureError("UX capture output escapes the run capture directory") from exc
     output.unlink(missing_ok=True)
 
+    captured_target = target
+    configured_identity = ""
+    runtime_identity = ""
+    if config.provider == "browser":
+        if config.browser_config is None:
+            raise UXCaptureError("browser capture configuration is unavailable")
+        try:
+            from automation import ux_browser_capture
+
+            platform, viewport = ux_browser_capture.capture(
+                repo,
+                current,
+                config.browser_config,
+                target.target_id,
+                output,
+                timeout_seconds=config.timeout_seconds,
+                popen=popen,
+                which=which,
+            )
+        except Exception as exc:
+            from automation import ux_browser_capture
+
+            if isinstance(exc, ux_browser_capture.BrowserCaptureError):
+                raise UXCaptureError(str(exc)) from exc
+            raise
+        captured_target = replace(target, platform=platform, viewport=viewport)
+    elif config.provider == "desktop":
+        if config.desktop_config is None:
+            raise UXCaptureError("desktop capture configuration is unavailable")
+        try:
+            from automation import ux_desktop_capture
+
+            result = ux_desktop_capture.capture(
+                repo,
+                current,
+                config.desktop_config,
+                target.target_id,
+                output,
+                timeout_seconds=config.timeout_seconds,
+                popen=popen,
+            )
+        except Exception as exc:
+            from automation import ux_desktop_capture
+
+            if isinstance(exc, ux_desktop_capture.DesktopCaptureError):
+                raise UXCaptureError(str(exc)) from exc
+            raise
+        captured_target = replace(target, platform=result.platform, viewport=result.viewport)
+        configured_identity = result.configured_identity
+        runtime_identity = result.runtime_identity
+    else:
+        _capture_with_command(repo, config, target, output, runner=runner)
+
+    if not output.is_file():
+        raise UXCaptureError(
+            f"UX capture provider did not produce the declared image for {target.target_id}: {output}"
+        )
+    data = output.read_bytes()
+    if not data:
+        raise UXCaptureError(f"UX capture image is empty for {target.target_id}")
+    if len(data) > MAX_IMAGE_BYTES:
+        raise UXCaptureError(
+            f"UX capture image exceeds {MAX_IMAGE_BYTES} bytes for {target.target_id}"
+        )
+    mime = image_mime(data)
+    if not mime:
+        raise UXCaptureError(
+            f"UX capture output is not a supported PNG/JPEG/GIF/WebP image for {target.target_id}"
+        )
+    return CapturedImage(
+        target=captured_target,
+        path=output,
+        sha256=hashlib.sha256(data).hexdigest(),
+        mime=mime,
+        size_bytes=len(data),
+        configured_identity=configured_identity,
+        runtime_identity=runtime_identity,
+    )
+
+
+def configured_capture_identity(config: CaptureConfig, target_id: str) -> str:
+    if config.provider != "desktop" or config.desktop_config is None:
+        return ""
+    from automation import ux_desktop_capture
+
+    return ux_desktop_capture.configured_target_identity(config.desktop_config, target_id)
+
+
+def _capture_with_command(
+    repo: Path,
+    config: CaptureConfig,
+    target: CaptureTarget,
+    output: Path,
+    *,
+    runner: Callable[..., object],
+) -> None:
     environment = dict(os.environ)
     environment.update(
         {
@@ -212,29 +367,24 @@ def capture_target(
             f"UX capture command failed for {target.target_id} with exit code {returncode}"
             + (f": {detail}" if detail else "")
         )
-    if not output.is_file():
+
+
+def capture_reference_target(config: CaptureConfig, target_id: str) -> str:
+    target = config.targets.get(target_id)
+    if target is None:
+        return ""
+    return target.reference_target_id
+
+
+def _split_target_id(value: str, *, field: str) -> tuple[str, str]:
+    kind, separator, source_id = value.partition(":")
+    kind = kind.strip().casefold()
+    source_id = source_id.strip()
+    if not separator or kind not in _SUPPORTED_KINDS or not _SAFE_ID.fullmatch(source_id):
         raise UXCaptureError(
-            f"UX capture command did not produce the declared image for {target.target_id}: {output}"
+            f"{field} must be a screen/state/journey target id such as 'screen:home'"
         )
-    data = output.read_bytes()
-    if not data:
-        raise UXCaptureError(f"UX capture image is empty for {target.target_id}")
-    if len(data) > MAX_IMAGE_BYTES:
-        raise UXCaptureError(
-            f"UX capture image exceeds {MAX_IMAGE_BYTES} bytes for {target.target_id}"
-        )
-    mime = image_mime(data)
-    if not mime:
-        raise UXCaptureError(
-            f"UX capture output is not a supported PNG/JPEG/GIF/WebP image for {target.target_id}"
-        )
-    return CapturedImage(
-        target=target,
-        path=output,
-        sha256=hashlib.sha256(data).hexdigest(),
-        mime=mime,
-        size_bytes=len(data),
-    )
+    return kind, source_id
 
 
 def image_mime(data: bytes) -> str:

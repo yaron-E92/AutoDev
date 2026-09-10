@@ -108,7 +108,7 @@ class AutoDevCliTests(unittest.TestCase):
         self.assertIn("ISSUE must be a positive integer", error.getvalue())
         self.assertIn("autodev issue-to-pr --help", error.getvalue())
 
-    def test_resume_maps_to_shared_python_coordinator(self):
+    def test_resume_maps_public_invalidation_to_coordinator_arguments(self):
         with patch.object(autodev_cli, "_enable_interactive_consent_for_direct_cli"), patch.object(
             autodev_cli.opencode_entrypoint,
             "run",
@@ -118,8 +118,66 @@ class AutoDevCliTests(unittest.TestCase):
 
         self.assertEqual(code, 0)
         run_entrypoint.assert_called_once_with(
-            ["coordinate", "--resume", "--invalidate-role", "planner"]
+            ["coordinate", "--resume", "--arguments", "--invalidate-role planner"]
         )
+
+    def test_resume_repeatable_invalidations_preserve_runtime_and_arguments(self):
+        with patch.object(autodev_cli, "_enable_interactive_consent_for_direct_cli"), patch.object(
+            autodev_cli.continuation_recovery,
+            "finish_pending",
+        ), patch.object(
+            autodev_cli.opencode_entrypoint,
+            "run",
+            return_value=0,
+        ) as run_entrypoint:
+            code = autodev_cli.run(
+                [
+                    "resume",
+                    "--runtime",
+                    "opencode",
+                    "--arguments",
+                    "existing-token",
+                    "--invalidate-role",
+                    "planner",
+                    "--invalidate-role",
+                    "fixer",
+                ]
+            )
+
+        self.assertEqual(code, 0)
+        run_entrypoint.assert_called_once_with(
+            [
+                "coordinate",
+                "--resume",
+                "--runtime",
+                "opencode",
+                "--arguments",
+                "existing-token --invalidate-role planner --invalidate-role fixer",
+            ]
+        )
+
+    def test_resume_rejects_invalid_public_invalidation_role(self):
+        error = io.StringIO()
+        with redirect_stderr(error), patch.object(
+            autodev_cli.opencode_entrypoint,
+            "run",
+        ) as run_entrypoint:
+            code = autodev_cli.run(["resume", "--invalidate-role", "definitely-not-a-role"])
+
+        self.assertEqual(code, 2)
+        self.assertIn("invalid AutoDev role", error.getvalue())
+        self.assertIn("autodev resume --help", error.getvalue())
+        run_entrypoint.assert_not_called()
+
+    def test_resume_help_exposes_repeatable_invalidation(self):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            code = autodev_cli.run(["resume", "--help"])
+
+        self.assertEqual(code, 0)
+        text = output.getvalue()
+        self.assertIn("--invalidate-role ROLE", text)
+        self.assertIn("repeatable", text)
 
     def test_existing_commands_share_opencode_entrypoint_core(self):
         with patch.object(autodev_cli, "_enable_interactive_consent_for_direct_cli"), patch.object(

@@ -24,6 +24,7 @@ def queue_summary(states: list[QueueState]) -> dict[str, int]:
             ATTENTION_LABEL in state.issue.labels for state in open_managed
         ),
         "running": sum(state.reason == "running" for state in open_managed),
+        "done": sum(state.reason == "done" for state in open_managed),
         "policy_excluded": sum(
             state.reason == "policy-excluded" for state in open_managed
         ),
@@ -40,6 +41,7 @@ def explain_state(state: QueueState) -> str:
         "ready": "managed, open, dependency-free, and eligible for autonomous execution",
         "attention": "requires human attention",
         "running": "already has an active AutoDev claim/run",
+        "done": "completed by AutoDev and not eligible for autonomous reselection",
         "policy-excluded": "repository policy disables autonomous execution",
         "unmanaged": "not authorized for autonomous AutoDev work",
         "closed": "issue is closed",

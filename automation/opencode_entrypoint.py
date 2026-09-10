@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from automation import privacy_grant_cli, privacy_grant_hooks, queue_cli, repair_budget_resume
+from automation import already_satisfied_hooks, privacy_grant_cli, privacy_grant_hooks, queue_cli, repair_budget_resume
 
 from automation import windows_verification_hooks
 
@@ -36,8 +36,11 @@ def run(argv: list[str] | None = None) -> int:
     execution_classification_evidence.install()
     # Revision is an operator-authority overlay on the existing coordinator,
     # role protocol, and status surfaces rather than a second workflow engine.
-    # Install it last so it composes with the final effective wrappers above.
     revision_hooks.install()
+    # Already-satisfied completion is a terminal outcome overlay. Install it
+    # after revision so it composes with the final effective coordinator and
+    # role wrappers instead of creating a parallel workflow engine.
+    already_satisfied_hooks.install()
     values = list(sys.argv[1:] if argv is None else argv)
     if values and values[0] == PRIVACY_COMMAND:
         return privacy_grant_cli.run_cli(values[1:])

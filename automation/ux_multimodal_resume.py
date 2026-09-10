@@ -164,15 +164,21 @@ def stale_reasons(repo: Path, current: Path) -> list[str]:
             reasons.append(f"implementation evidence path is invalid for {target_id}")
             continue
         target = config.targets.get(target_id) if config is not None else None
+        configured_identity = ""
+        stored_viewport = str(stored.get("viewport", "") or "")
+        stored_platform = str(stored.get("platform", "") or "")
         if target is None:
             reasons.append(f"capture target is no longer configured for {target_id}")
         else:
             if target.output_name != logical_id:
                 reasons.append(f"capture output identity changed for {target_id}")
-            if target.viewport != str(stored.get("viewport", "") or ""):
+            if target.viewport and target.viewport != stored_viewport:
                 reasons.append(f"capture viewport changed for {target_id}")
-            if target.platform != str(stored.get("platform", "") or ""):
+            if target.platform and target.platform != stored_platform:
                 reasons.append(f"capture platform changed for {target_id}")
+            configured_identity = ux_capture.configured_capture_identity(config, target_id)
+            if str(stored.get("configured_identity", "") or "") != configured_identity:
+                reasons.append(f"capture configured target identity changed for {target_id}")
 
         image = current / "ux-captures" / logical_id
         if not image.is_file():
@@ -187,20 +193,34 @@ def stale_reasons(repo: Path, current: Path) -> list[str]:
             stored.get("size_bytes", 0) or 0
         ):
             reasons.append(f"implementation capture metadata changed for {target_id}")
-        current_implementation.append(
-            {
-                "target_id": target_id,
-                "kind": "rendered-screenshot",
-                "source_kind": str(stored.get("source_kind", "") or ""),
-                "source_id": str(stored.get("source_id", "") or ""),
-                "logical_id": logical_id,
-                "sha256": digest,
-                "mime": mime,
-                "size_bytes": len(data),
-                "viewport": target.viewport if target is not None else str(stored.get("viewport", "") or ""),
-                "platform": target.platform if target is not None else str(stored.get("platform", "") or ""),
-            }
-        )
+
+        item: dict[str, object] = {
+            "target_id": target_id,
+            "kind": "rendered-screenshot",
+            "source_kind": str(stored.get("source_kind", "") or ""),
+            "source_id": str(stored.get("source_id", "") or ""),
+            "logical_id": logical_id,
+            "sha256": digest,
+            "mime": mime,
+            "size_bytes": len(data),
+            "viewport": (
+                target.viewport
+                if target is not None and target.viewport
+                else stored_viewport
+            ),
+            "platform": (
+                target.platform
+                if target is not None and target.platform
+                else stored_platform
+            ),
+        }
+        if "configured_identity" in stored or configured_identity:
+            item["configured_identity"] = configured_identity or str(
+                stored.get("configured_identity", "") or ""
+            )
+        if "runtime_identity" in stored:
+            item["runtime_identity"] = str(stored.get("runtime_identity", "") or "")
+        current_implementation.append(item)
 
     current_capture_identity = run_manifest.hash_json(
         {

@@ -14,6 +14,8 @@ ATTENTION_LABEL = "autodev:attention"
 
 RUNNING_LABEL = "autodev:running"
 
+DONE_LABEL = "autodev:done"
+
 QUEUE_CONFIG = Path(".autodev") / "queue.json"
 
 API_VERSION = "2026-03-10"
@@ -26,6 +28,7 @@ LABEL_SPECS = {
     BLOCKED_LABEL: ("d93f0b", "Derived: managed but blocked by open issue dependencies"),
     ATTENTION_LABEL: ("fbca04", "Human attention is required before autonomous AutoDev work"),
     RUNNING_LABEL: ("5319e7", "Active AutoDev claim/run for this issue"),
+    DONE_LABEL: ("6f42c1", "AutoDev completed this issue outcome; not autonomously runnable"),
 }
 
 class QueueError(RuntimeError):

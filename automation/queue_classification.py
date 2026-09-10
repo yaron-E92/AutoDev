@@ -8,6 +8,7 @@ from automation.queue_contract import (
     ATTENTION_LABEL,
     BLOCKED_LABEL,
     Blocker,
+    DONE_LABEL,
     MANAGED_LABEL,
     QueueIssue,
     QueuePolicy,
@@ -37,6 +38,8 @@ def classify_issue(
         reason = "closed"
     elif MANAGED_LABEL not in labels:
         reason = "unmanaged"
+    elif DONE_LABEL in labels:
+        reason = "done"
     elif open_blockers:
         reason = "blocked"
     elif ATTENTION_LABEL in labels:
