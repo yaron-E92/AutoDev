@@ -19,12 +19,15 @@ from automation import (
     privacy,
     privacy_authorization,
     role_output_contract,
+    role_output_fallback,
     role_runtime,
     run_manifest,
 )
 
 
-READER_SCHEMA_FALLBACK_STATE = "native-schema-exhausted->fallback-text"
+SCHEMA_FALLBACK_STATE = "native-schema-exhausted->fallback-text"
+# Backward-compatible public/test alias retained for the original #288 Reader hotfix.
+READER_SCHEMA_FALLBACK_STATE = SCHEMA_FALLBACK_STATE
 FALLBACK_CORRECTION_STATE = "protocol-correction-after-fallback"
 
 
@@ -361,8 +364,8 @@ class OpenCodeRoleRuntime:
                     # runtime.
                     fallback_state = "native-unavailable"
                 except opencode_structured_output.StructuredOutputExhausted as exc:
-                    if context.role == "reader":
-                        return self._reader_schema_fallback(
+                    if role_output_fallback.supported(contract):
+                        return self._schema_exhaustion_fallback(
                             context,
                             executable=executable,
                             repo=repo,
@@ -414,7 +417,7 @@ class OpenCodeRoleRuntime:
             fallback_state=fallback_state,
         )
 
-    def _reader_schema_fallback(
+    def _schema_exhaustion_fallback(
         self,
         context: role_runtime.RoleInvocationContext,
         *,
@@ -426,12 +429,25 @@ class OpenCodeRoleRuntime:
         native_started: float,
         native_error: opencode_structured_output.StructuredOutputExhausted,
     ) -> role_runtime.RoleInvocationResult:
-        # The native retry budget has already been consumed. Reader alone gets one
-        # compatibility attempt through the existing CLI/text protocol. Calling
-        # _invoke_cli directly is deliberate: a second native schema sequence must
-        # never start for this logical role invocation.
-        reader_path = repo / ".autodev-run" / "current" / "reader-brief.md"
-        reader_path.unlink(missing_ok=True)
+        contract = context.output_contract
+        if contract is None or not role_output_fallback.supported(contract):
+            return self._structured_result(
+                context,
+                model=model,
+                elapsed_ms=int((time.monotonic() - native_started) * 1000),
+                termination="structured-output-exhausted",
+                state="schema-exhausted",
+                retry_count=native_error.retries,
+                stderr=str(native_error),
+            )
+
+        # The native retry budget has already been consumed. Call the CLI/text seam
+        # directly so this logical invocation can never start a second native schema
+        # sequence. Remove only the contract's prior durable artifact so stale output
+        # cannot masquerade as this fallback attempt; a compatibility self-written
+        # artifact created by the fallback invocation itself remains eligible for #307.
+        target = repo / ".autodev-run" / "current" / contract.output_artifact
+        target.unlink(missing_ok=True)
         fallback = self._invoke_cli(
             context,
             executable=executable,
@@ -439,17 +455,20 @@ class OpenCodeRoleRuntime:
             model=model,
             environment=environment,
             runner=runner,
-            fallback_state=READER_SCHEMA_FALLBACK_STATE,
+            fallback_state=SCHEMA_FALLBACK_STATE,
             schema_retry_count=native_error.retries,
-            prompt_override=_reader_fallback_prompt(context.prompt),
+            prompt_override=_schema_fallback_prompt(context.prompt, contract),
         )
         total_elapsed = int((time.monotonic() - native_started) * 1000)
 
-        if fallback.termination == "completed" and fallback.returncode == 0:
+        # Preserve the #288 Reader compatibility diagnostics and deterministic
+        # terminal behavior while the generic #307 materialization evidence remains
+        # authoritative for all supported roles.
+        if contract.role == "reader" and fallback.termination == "completed" and fallback.returncode == 0:
             try:
                 opencode_cli_text.materialize_reader_fallback(
                     repo,
-                    context.output_contract,
+                    contract,
                     fallback.stdout,
                 )
                 opencode_cli_text.record_reader_fallback_materialization(
@@ -465,45 +484,52 @@ class OpenCodeRoleRuntime:
                     )
                 except opencode_adapter_contract.OpenCodeAdapterError as diagnostics_exc:
                     detail += f"; diagnostic persistence failed: {diagnostics_exc}"
-                return self._reader_schema_fallback_failure(
+                return self._schema_fallback_failure(
                     fallback,
                     elapsed_ms=total_elapsed,
                     retries=native_error.retries,
                     detail=f"fallback-text Reader output rejected: {detail}",
                 )
-            return role_runtime.RoleInvocationResult(
-                runtime=fallback.runtime,
-                role=fallback.role,
-                phase=fallback.phase,
-                returncode=fallback.returncode,
+
+        if fallback.termination != "completed" or fallback.returncode != 0:
+            if contract.role == "reader":
+                try:
+                    opencode_cli_text.record_reader_fallback_materialization(
+                        repo,
+                        opencode_cli_text.FALLBACK_MATERIALIZATION_INVOCATION_FAILED,
+                    )
+                except opencode_adapter_contract.OpenCodeAdapterError:
+                    pass
+            detail = (
+                fallback.stderr
+                or fallback.stdout
+                or f"fallback-text {contract.role} invocation failed"
+            )
+            return self._schema_fallback_failure(
+                fallback,
                 elapsed_ms=total_elapsed,
-                stdout=fallback.stdout,
-                stderr=fallback.stderr,
-                termination="completed",
-                model=fallback.model,
-                structured_output_mode="fallback-text",
-                structured_output_state=READER_SCHEMA_FALLBACK_STATE,
-                contract_name=fallback.contract_name,
-                contract_version=fallback.contract_version,
-                schema_retry_count=max(0, int(native_error.retries)),
+                retries=native_error.retries,
+                detail=detail,
             )
 
-        try:
-            opencode_cli_text.record_reader_fallback_materialization(
-                repo,
-                opencode_cli_text.FALLBACK_MATERIALIZATION_INVOCATION_FAILED,
-            )
-        except opencode_adapter_contract.OpenCodeAdapterError:
-            pass
-        detail = fallback.stderr or fallback.stdout or "fallback-text Reader invocation failed"
-        return self._reader_schema_fallback_failure(
-            fallback,
+        return role_runtime.RoleInvocationResult(
+            runtime=fallback.runtime,
+            role=fallback.role,
+            phase=fallback.phase,
+            returncode=fallback.returncode,
             elapsed_ms=total_elapsed,
-            retries=native_error.retries,
-            detail=detail,
+            stdout=fallback.stdout,
+            stderr=fallback.stderr,
+            termination="completed",
+            model=fallback.model,
+            structured_output_mode="fallback-text",
+            structured_output_state=SCHEMA_FALLBACK_STATE,
+            contract_name=fallback.contract_name,
+            contract_version=fallback.contract_version,
+            schema_retry_count=max(0, int(native_error.retries)),
         )
 
-    def _reader_schema_fallback_failure(
+    def _schema_fallback_failure(
         self,
         fallback: role_runtime.RoleInvocationResult,
         *,
@@ -511,6 +537,7 @@ class OpenCodeRoleRuntime:
         retries: int,
         detail: str,
     ) -> role_runtime.RoleInvocationResult:
+        role_name = fallback.role.capitalize() if fallback.role else "structured role"
         return role_runtime.RoleInvocationResult(
             runtime=fallback.runtime,
             role=fallback.role,
@@ -519,13 +546,13 @@ class OpenCodeRoleRuntime:
             elapsed_ms=elapsed_ms,
             stdout=fallback.stdout,
             stderr=(
-                "native Reader schema retries exhausted; one bounded fallback-text "
+                f"native {role_name} schema retries exhausted; one bounded fallback-text "
                 f"attempt also failed: {detail}"
             ),
             termination="structured-output-exhausted",
             model=fallback.model,
             structured_output_mode="fallback-text",
-            structured_output_state=READER_SCHEMA_FALLBACK_STATE,
+            structured_output_state=SCHEMA_FALLBACK_STATE,
             contract_name=fallback.contract_name,
             contract_version=fallback.contract_version,
             schema_retry_count=max(0, int(retries)),
@@ -671,6 +698,27 @@ class OpenCodeRoleRuntime:
             model=model,
             **metadata,
         )
+
+
+def _schema_fallback_prompt(
+    prompt: str,
+    contract: role_output_contract.RoleOutputContract,
+) -> str:
+    if contract.role == "reader":
+        return _reader_fallback_prompt(prompt)
+    return (
+        prompt.rstrip()
+        + f"\n\n# AutoDev {contract.role} schema-exhaustion fallback\n\n"
+        f"Native {contract.role} Structured Output has exhausted its bounded schema retries. "
+        f"This is the single compatibility fallback-text attempt for the same {contract.role} "
+        "role, model/provider route, phase, privacy authorization, UX authority, and prepared "
+        "repository evidence. Do not write or edit the durable AutoDev role artifact. Return "
+        "the complete bounded role result as your final textual response in the established "
+        f"{contract.role} text protocol; AutoDev Python will capture the completed OpenCode "
+        "text event, parse it through the existing fallback contract, and materialize the "
+        "durable artifact. Do not invent workflow-stage authority, execution classification, "
+        "queue state, privacy decisions, or UX fingerprints.\n"
+    )
 
 
 def _reader_fallback_prompt(prompt: str) -> str:
