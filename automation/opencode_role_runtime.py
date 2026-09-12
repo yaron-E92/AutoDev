@@ -15,6 +15,7 @@ from automation import (
     opencode_cli,
     opencode_cli_text,
     opencode_privacy_adapter,
+    opencode_schema_fallback,
     opencode_structured_output,
     privacy,
     privacy_authorization,
@@ -25,7 +26,7 @@ from automation import (
 )
 
 
-SCHEMA_FALLBACK_STATE = "native-schema-exhausted->fallback-text"
+SCHEMA_FALLBACK_STATE = opencode_schema_fallback.SCHEMA_FALLBACK_STATE
 # Backward-compatible public/test alias retained for the original #288 Reader hotfix.
 READER_SCHEMA_FALLBACK_STATE = SCHEMA_FALLBACK_STATE
 FALLBACK_CORRECTION_STATE = "protocol-correction-after-fallback"
@@ -457,7 +458,7 @@ class OpenCodeRoleRuntime:
             runner=runner,
             fallback_state=SCHEMA_FALLBACK_STATE,
             schema_retry_count=native_error.retries,
-            prompt_override=_schema_fallback_prompt(context.prompt, contract),
+            prompt_override=opencode_schema_fallback.prompt(context.prompt, contract),
         )
         total_elapsed = int((time.monotonic() - native_started) * 1000)
 
@@ -484,7 +485,7 @@ class OpenCodeRoleRuntime:
                     )
                 except opencode_adapter_contract.OpenCodeAdapterError as diagnostics_exc:
                     detail += f"; diagnostic persistence failed: {diagnostics_exc}"
-                return self._schema_fallback_failure(
+                return opencode_schema_fallback.failure_result(
                     fallback,
                     elapsed_ms=total_elapsed,
                     retries=native_error.retries,
@@ -505,7 +506,7 @@ class OpenCodeRoleRuntime:
                 or fallback.stdout
                 or f"fallback-text {contract.role} invocation failed"
             )
-            return self._schema_fallback_failure(
+            return opencode_schema_fallback.failure_result(
                 fallback,
                 elapsed_ms=total_elapsed,
                 retries=native_error.retries,
@@ -527,35 +528,6 @@ class OpenCodeRoleRuntime:
             contract_name=fallback.contract_name,
             contract_version=fallback.contract_version,
             schema_retry_count=max(0, int(native_error.retries)),
-        )
-
-    def _schema_fallback_failure(
-        self,
-        fallback: role_runtime.RoleInvocationResult,
-        *,
-        elapsed_ms: int,
-        retries: int,
-        detail: str,
-    ) -> role_runtime.RoleInvocationResult:
-        role_name = fallback.role.capitalize() if fallback.role else "structured role"
-        return role_runtime.RoleInvocationResult(
-            runtime=fallback.runtime,
-            role=fallback.role,
-            phase=fallback.phase,
-            returncode=fallback.returncode,
-            elapsed_ms=elapsed_ms,
-            stdout=fallback.stdout,
-            stderr=(
-                f"native {role_name} schema retries exhausted; one bounded fallback-text "
-                f"attempt also failed: {detail}"
-            ),
-            termination="structured-output-exhausted",
-            model=fallback.model,
-            structured_output_mode="fallback-text",
-            structured_output_state=SCHEMA_FALLBACK_STATE,
-            contract_name=fallback.contract_name,
-            contract_version=fallback.contract_version,
-            schema_retry_count=max(0, int(retries)),
         )
 
     def _structured_result(
@@ -698,42 +670,6 @@ class OpenCodeRoleRuntime:
             model=model,
             **metadata,
         )
-
-
-def _schema_fallback_prompt(
-    prompt: str,
-    contract: role_output_contract.RoleOutputContract,
-) -> str:
-    if contract.role == "reader":
-        return _reader_fallback_prompt(prompt)
-    return (
-        prompt.rstrip()
-        + f"\n\n# AutoDev {contract.role} schema-exhaustion fallback\n\n"
-        f"Native {contract.role} Structured Output has exhausted its bounded schema retries. "
-        f"This is the single compatibility fallback-text attempt for the same {contract.role} "
-        "role, model/provider route, phase, privacy authorization, UX authority, and prepared "
-        "repository evidence. Do not write or edit the durable AutoDev role artifact. Return "
-        "the complete bounded role result as your final textual response in the established "
-        f"{contract.role} text protocol; AutoDev Python will capture the completed OpenCode "
-        "text event, parse it through the existing fallback contract, and materialize the "
-        "durable artifact. Do not invent workflow-stage authority, execution classification, "
-        "queue state, privacy decisions, or UX fingerprints.\n"
-    )
-
-
-def _reader_fallback_prompt(prompt: str) -> str:
-    return (
-        prompt.rstrip()
-        + "\n\n# AutoDev Reader schema-exhaustion fallback\n\n"
-        "Native Reader Structured Output has exhausted its bounded schema retries. "
-        "This is the single compatibility fallback-text attempt for the same Reader "
-        "role, model, privacy route, and prepared repository evidence. Do not write or "
-        "edit `.autodev-run/current/reader-brief.md`. Return the complete bounded factual "
-        "Reader handoff as your final textual response; AutoDev Python will capture the "
-        "completed OpenCode text event and materialize the durable Reader artifact. "
-        "Do not return or invent workflow stage, execution classification, queue state, "
-        "manual-attention decisions, external-boundary decisions, or UX fingerprints.\n"
-    )
 
 
 def _text(value: object) -> str:
