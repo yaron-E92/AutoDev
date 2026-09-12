@@ -494,7 +494,7 @@ class ReaderStructuredOutputHotfixTests(unittest.TestCase):
                 opencode_cli_text.FALLBACK_MATERIALIZATION_INVOCATION_FAILED,
             )
 
-    def test_non_reader_schema_exhaustion_does_not_gain_reader_fallback(self):
+    def test_supported_non_reader_schema_exhaustion_uses_generic_fallback(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
             runtime = self._runtime()
@@ -513,10 +513,14 @@ class ReaderStructuredOutputHotfixTests(unittest.TestCase):
             )
 
             self.assertEqual(native.call_count, 1)
-            self.assertEqual(commands, [])
-            self.assertEqual(result.termination, "structured-output-exhausted")
-            self.assertEqual(result.structured_output_mode, "native-validated")
-            self.assertEqual(result.structured_output_state, "schema-exhausted")
+            self.assertEqual(len(commands), 1)
+            self.assertEqual(result.termination, "completed")
+            self.assertEqual(result.structured_output_mode, "fallback-text")
+            self.assertEqual(
+                result.structured_output_state,
+                opencode_role_runtime.SCHEMA_FALLBACK_STATE,
+            )
+            self.assertEqual(result.schema_retry_count, 2)
 
 
 if __name__ == "__main__":
