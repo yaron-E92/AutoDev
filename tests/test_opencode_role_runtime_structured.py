@@ -31,7 +31,7 @@ class OpenCodeRoleRuntimeStructuredTests(unittest.TestCase):
                 "source": "autodev-profile:user:mixed",
                 "inherits_from": "",
             }
-            for role in ("verifier", "planner", "synthesizer")
+            for role in ("verifier", "planner", "synthesizer", "implementer")
         }
         return runtime
 
@@ -157,7 +157,7 @@ class OpenCodeRoleRuntimeStructuredTests(unittest.TestCase):
                 self.assertIn("--format", commands[0])
                 self.assertNotIn("--schema", commands[0])
 
-    def test_native_schema_exhaustion_does_not_consume_cli_correction_attempt(self):
+    def test_native_schema_exhaustion_uses_one_fallback_for_supported_contract(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
             cli_calls = 0
@@ -181,9 +181,49 @@ class OpenCodeRoleRuntimeStructuredTests(unittest.TestCase):
                 side_effect=opencode_structured_output.StructuredOutputExhausted(
                     "schema failed", retries=2
                 ),
-            ):
+            ) as native:
                 result = self._runtime().invoke(self._context(repo), runner=runner)
 
+            self.assertEqual(native.call_count, 1)
+            self.assertEqual(result.termination, "completed")
+            self.assertEqual(result.schema_retry_count, 2)
+            self.assertEqual(
+                result.structured_output_state,
+                opencode_role_runtime.SCHEMA_FALLBACK_STATE,
+            )
+            self.assertEqual(result.structured_output_mode, "fallback-text")
+            self.assertEqual(cli_calls, 1)
+
+    def test_native_schema_exhaustion_stays_terminal_without_safe_fallback_contract(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            cli_calls = 0
+
+            def runner(command, **kwargs):
+                nonlocal cli_calls
+                cli_calls += 1
+                return _Completed()
+
+            with patch.object(
+                opencode_role_runtime.opencode_cli,
+                "resolve_opencode_cli",
+                return_value="opencode",
+            ), patch.object(
+                opencode_role_runtime.privacy,
+                "load_policy",
+                return_value=SimpleNamespace(enabled=False),
+            ), patch.object(
+                opencode_role_runtime.opencode_structured_output,
+                "invoke",
+                side_effect=opencode_structured_output.StructuredOutputExhausted(
+                    "schema failed", retries=2
+                ),
+            ) as native:
+                result = self._runtime().invoke(
+                    self._context(repo, "implementer"), runner=runner
+                )
+
+            self.assertEqual(native.call_count, 1)
             self.assertEqual(result.termination, "structured-output-exhausted")
             self.assertEqual(result.schema_retry_count, 2)
             self.assertEqual(result.structured_output_state, "schema-exhausted")
